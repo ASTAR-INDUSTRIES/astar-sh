@@ -39,16 +39,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const signIn = async () => {
-    await supabase.auth.signInWithOAuth({
-      provider: "azure",
-      options: {
-        scopes: "email profile openid",
-        queryParams: {
-          domain_hint: "astarconsulting.no",
-        },
-        redirectTo: `${window.location.origin}/admin`,
-      },
-    });
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const initiateUrl = `${supabaseUrl}/functions/v1/microsoft-auth/initiate?redirect=${encodeURIComponent(window.location.origin + "/admin")}`;
+    window.location.href = initiateUrl;
   };
 
   const signOut = async () => {
