@@ -14,7 +14,90 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      posts: {
+        Row: {
+          author_avatar: string | null
+          author_name: string | null
+          category: string
+          content: string
+          created_at: string
+          excerpt: string | null
+          id: string
+          published: boolean
+          published_at: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          author_avatar?: string | null
+          author_name?: string | null
+          category?: string
+          content: string
+          created_at?: string
+          excerpt?: string | null
+          id?: string
+          published?: boolean
+          published_at?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          author_avatar?: string | null
+          author_name?: string | null
+          category?: string
+          content?: string
+          created_at?: string
+          excerpt?: string | null
+          id?: string
+          published?: boolean
+          published_at?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      research_articles: {
+        Row: {
+          abstract: string | null
+          authors: string[]
+          content: string | null
+          created_at: string
+          id: string
+          pdf_url: string | null
+          published: boolean
+          published_at: string | null
+          tags: string[]
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          abstract?: string | null
+          authors?: string[]
+          content?: string | null
+          created_at?: string
+          id?: string
+          pdf_url?: string | null
+          published?: boolean
+          published_at?: string | null
+          tags?: string[]
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          abstract?: string | null
+          authors?: string[]
+          content?: string | null
+          created_at?: string
+          id?: string
+          pdf_url?: string | null
+          published?: boolean
+          published_at?: string | null
+          tags?: string[]
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
