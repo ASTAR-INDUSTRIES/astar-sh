@@ -1,68 +1,41 @@
 
 
-# Microsoft Entra ID SSO for ASTAR Platform
+# Fix: Microsoft Entra ID Authentication
 
-## Overview
-Set up Microsoft Entra ID authentication restricted to `astarconsulting.no` domains, with a login page and protected admin area for content management.
+## Problem
+Lovable Cloud's authentication system only natively supports **Google** and **Apple** as OAuth providers. The `config.toml` Azure configuration isn't being picked up because Azure/Microsoft isn't a managed provider — hence the "Unsupported provider" error.
 
-## Azure App Registration Setup
-The redirect URI you need to add in your Azure App Registration:
+## Solution: Custom OAuth via Edge Function
+
+Since we need Microsoft Entra ID specifically, we'll implement the OAuth flow ourselves using an edge function that handles the Microsoft token exchange, then creates/signs in users via Supabase Auth's admin API.
+
+### Architecture
+
+```text
+Browser → Edge Function (initiate) → Microsoft Login
+Microsoft → Edge Function (callback) → Validate domain
+                                      → Create/sign-in user via Supabase Admin API
+                                      → Redirect browser with session
 ```
-https://owerciqeeelwrqseajqq.supabase.co/auth/v1/callback
-```
 
-**Please add this as a Redirect URI (Web) in your Azure App Registration before we proceed.**
+### Steps
 
-## Implementation Steps
+1. **Create edge function `microsoft-auth`**
+   - `/initiate` endpoint: Builds Microsoft OAuth URL with correct client_id, tenant, redirect_uri, scopes, and state parameter; redirects user to Microsoft
+   - `/callback` endpoint: Receives auth code from Microsoft, exchanges it for tokens, validates the email is `@astarconsulting.no`, then uses Supabase Admin API to sign in or create the user, and redirects back to the app with a session
 
-### 1. Store Azure Secrets
-- Store the **Client Secret** (`~h88Q~3Neb6Us3a8fCGhVYSAeezMQa1rr50QabBI`) as a backend secret named `AZURE_CLIENT_SECRET`
-- The Client ID and Tenant ID will be configured in the auth settings
+2. **Update Login page**
+   - Instead of calling `supabase.auth.signInWithOAuth({ provider: 'azure' })`, redirect to the edge function's `/initiate` endpoint
 
-### 2. Configure Azure Auth Provider
-- Update `supabase/config.toml` to enable the Azure external provider with:
-  - Client ID: `384f7660-f5e6-4f72-aa24-3be21cad67ed`
-  - Tenant ID (URL): `https://login.microsoftonline.com/d6af3688-b659-4f90-b701-35246b209b9d/v2.0`
-  - Redirect URI pointing to the Supabase auth callback
+3. **Update AuthContext**
+   - Remove the Azure OAuth call
+   - Keep session management via `onAuthStateChange` (the edge function will establish the session server-side)
 
-### 3. Create Login Page (`/login`)
-- Simple login page matching the dark terminal aesthetic
-- "Sign in with Microsoft" button
-- Uses `supabase.auth.signInWithOAuth({ provider: 'azure' })` with `astarconsulting.no` domain hint
-- Redirects to `/admin` on success
+4. **Remove unused config**
+   - Clean up the `[auth.external.azure]` block from `config.toml` since it's not functional
 
-### 4. Create Auth Context
-- `AuthProvider` component wrapping the app
-- Tracks session state via `onAuthStateChange`
-- Validates email domain is `@astarconsulting.no` post-login (rejects others)
-- Provides `user`, `signIn`, `signOut` to child components
-
-### 5. Create Admin Dashboard (`/admin`)
-- Protected route (redirects to `/login` if unauthenticated)
-- Create/edit/delete posts and research articles
-- Forms for title, content, category, tags, publish status
-- CRUD operations against the `posts` and `research_articles` tables
-
-### 6. Update Database RLS
-- Add RLS policies for INSERT/UPDATE/DELETE on `posts` and `research_articles` requiring authenticated users with `@astarconsulting.no` email domain
-
-### 7. Update Navigation
-- Add "Sign In" link in the nav bar (when logged out)
-- Show user avatar/name + "Admin" link (when logged in)
-
-## Technical Details
-
-### Files to create:
-- `src/contexts/AuthContext.tsx` — auth state management
-- `src/pages/Login.tsx` — login page
-- `src/pages/Admin.tsx` — admin dashboard
-- `src/components/ProtectedRoute.tsx` — route guard
-
-### Files to modify:
-- `supabase/config.toml` — Azure provider config
-- `src/App.tsx` — add routes
-- `src/components/Layout.tsx` — add auth-aware nav items
-
-### New migration:
-- RLS policies for authenticated write access restricted to `astarconsulting.no` domain emails
+### Security
+- Domain validation (`@astarconsulting.no`) enforced server-side in the edge function
+- PKCE or state parameter to prevent CSRF
+- Client secret stays in edge function secrets (already stored)
 
