@@ -1,4 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 
 const NAV_ITEMS = [
   { label: "Home", path: "/" },
@@ -10,6 +11,7 @@ const NAV_ITEMS = [
 
 const Layout = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation();
+  const { user, isStaff, signOut } = useAuth();
 
   return (
     <div className="min-h-screen bg-background">
@@ -33,6 +35,37 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
               {item.label}
             </Link>
           ))}
+          {user && isStaff ? (
+            <>
+              <Link
+                to="/admin"
+                className={`transition-colors ${
+                  location.pathname === "/admin"
+                    ? "text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Admin
+              </Link>
+              <button
+                onClick={signOut}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Sign Out
+              </button>
+            </>
+          ) : (
+            <Link
+              to="/login"
+              className={`transition-colors ${
+                location.pathname === "/login"
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Sign In
+            </Link>
+          )}
         </div>
       </nav>
       <main className="max-w-4xl mx-auto px-6 md:px-10 py-12 md:py-20">
