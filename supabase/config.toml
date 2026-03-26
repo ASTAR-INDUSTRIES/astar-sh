@@ -1,1 +1,8 @@
 project_id = "owerciqeeelwrqseajqq"
+
+[auth.external.azure]
+enabled = true
+client_id = "env(AZURE_CLIENT_ID)"
+secret = "env(AZURE_CLIENT_SECRET)"
+url = "https://login.microsoftonline.com/d6af3688-b659-4f90-b701-35246b209b9d/v2.0"
+redirect_uri = "https://owerciqeeelwrqseajqq.supabase.co/auth/v1/callback"
