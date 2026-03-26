@@ -152,7 +152,7 @@ Deno.serve(async (req) => {
         userId = newUser.user.id;
       }
 
-      // Generate a magic link / session for the user
+      // Generate a magic link then verify it server-side to get session tokens
       const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
         type: "magiclink",
         email,
@@ -165,16 +165,25 @@ Deno.serve(async (req) => {
         return new Response(null, { status: 302, headers: { Location: errorUrl.toString() } });
       }
 
-      // Extract the token from the magic link
-      const linkUrl = new URL(linkData.properties.action_link);
-      const token_hash = linkUrl.searchParams.get("token") || linkUrl.hash?.replace("#", "");
-      
-      // Redirect to Supabase's verify endpoint which will set the session cookie
-      const verifyUrl = `${SUPABASE_URL}/auth/v1/verify?token=${linkData.properties.hashed_token}&type=magiclink&redirect_to=${encodeURIComponent(appRedirect)}`;
+      // Verify the OTP server-side to get access & refresh tokens
+      const { data: sessionData, error: verifyError } = await supabaseAdmin.auth.verifyOtp({
+        token_hash: linkData.properties.hashed_token,
+        type: "magiclink",
+      });
+
+      if (verifyError || !sessionData.session) {
+        console.error("Failed to verify OTP:", verifyError);
+        const errorUrl = new URL(appRedirect);
+        errorUrl.searchParams.set("auth_error", "Failed to create session");
+        return new Response(null, { status: 302, headers: { Location: errorUrl.toString() } });
+      }
+
+      // Redirect to app with session tokens in the URL hash (Supabase client picks these up)
+      const redirectUrl = `${appRedirect}#access_token=${sessionData.session.access_token}&refresh_token=${sessionData.session.refresh_token}&token_type=bearer&expires_in=${sessionData.session.expires_in}`;
 
       return new Response(null, {
         status: 302,
-        headers: { Location: verifyUrl },
+        headers: { Location: redirectUrl },
       });
     }
 
