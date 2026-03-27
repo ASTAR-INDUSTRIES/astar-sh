@@ -1,17 +1,9 @@
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 
-const NAV_ITEMS = [
-  { label: "Home", path: "/" },
-  { label: "Updates", path: "/updates" },
-  { label: "Research", path: "/research" },
-  { label: "Docs", path: "/docs" },
-  { label: "About", path: "/about" },
-];
-
 const Layout = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation();
-  const { user, isStaff, signOut } = useAuth();
+  const { user, isStaff, signIn, signOut } = useAuth();
 
   return (
     <div className="min-h-screen bg-background">
@@ -21,50 +13,21 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
           <span className="text-muted-foreground">/</span>
           <span className="text-foreground font-medium">astar.sh</span>
         </Link>
-        <div className="flex items-center gap-6 text-sm font-mono">
-          {NAV_ITEMS.map((item) => (
-            <Link
-              key={item.path}
-              to={item.path}
-              className={`transition-colors ${
-                location.pathname === item.path
-                  ? "text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {item.label}
-            </Link>
-          ))}
+        <div className="flex items-center gap-4 text-sm font-mono">
           {user && isStaff ? (
-            <>
-              <Link
-                to="/admin"
-                className={`transition-colors ${
-                  location.pathname === "/admin"
-                    ? "text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Admin
-              </Link>
-              <button
-                onClick={signOut}
-                className="text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Sign Out
-              </button>
-            </>
-          ) : (
-            <Link
-              to="/login"
-              className={`transition-colors ${
-                location.pathname === "/login"
-                  ? "text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
+            <button
+              onClick={signOut}
+              className="text-muted-foreground hover:text-foreground transition-colors"
             >
-              Sign In
-            </Link>
+              Sign Out
+            </button>
+          ) : (
+            <button
+              onClick={signIn}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Staff Sign In
+            </button>
           )}
         </div>
       </nav>

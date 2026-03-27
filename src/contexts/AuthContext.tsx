@@ -40,7 +40,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const signIn = async () => {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const initiateUrl = `${supabaseUrl}/functions/v1/microsoft-auth/initiate?redirect=${encodeURIComponent(window.location.origin + "/admin")}`;
+    const initiateUrl = `${supabaseUrl}/functions/v1/microsoft-auth/initiate?redirect=${encodeURIComponent(window.location.origin + "/")}`;
     window.location.href = initiateUrl;
   };
 

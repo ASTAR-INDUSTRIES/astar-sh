@@ -6,7 +6,7 @@ const Login = () => {
   const { user, isStaff, signIn, loading } = useAuth();
 
   if (!loading && user && isStaff) {
-    return <Navigate to="/admin" replace />;
+    return <Navigate to="/" replace />;
   }
 
   return (

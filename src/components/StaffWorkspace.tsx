@@ -1,5 +1,4 @@
 import { useState } from "react";
-import Layout from "@/components/Layout";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -8,7 +7,11 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Trash2, Plus, Edit, Eye, EyeOff } from "lucide-react";
+import {
+  Trash2, Plus, Edit, Eye, EyeOff,
+  FileText, FlaskConical, LayoutDashboard,
+} from "lucide-react";
+import { format } from "date-fns";
 
 type PostForm = {
   title: string;
@@ -31,8 +34,8 @@ type ResearchForm = {
 const emptyPost: PostForm = { title: "", content: "", excerpt: "", category: "update", published: false };
 const emptyResearch: ResearchForm = { title: "", abstract: "", content: "", authors: "", tags: "", pdf_url: "", published: false };
 
-const Admin = () => {
-  const { user, signOut } = useAuth();
+const StaffWorkspace = () => {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [editingPost, setEditingPost] = useState<string | null>(null);
   const [postForm, setPostForm] = useState<PostForm>(emptyPost);
@@ -58,6 +61,12 @@ const Admin = () => {
       return data;
     },
   });
+
+  // Stats
+  const publishedPosts = posts.filter((p) => p.published).length;
+  const draftPosts = posts.filter((p) => !p.published).length;
+  const publishedArticles = articles.filter((a) => a.published).length;
+  const draftArticles = articles.filter((a) => !a.published).length;
 
   const savePost = useMutation({
     mutationFn: async () => {
@@ -169,21 +178,45 @@ const Admin = () => {
   };
 
   return (
-    <Layout>
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-mono font-bold text-foreground">Admin Dashboard</h1>
-          <p className="text-muted-foreground font-mono text-xs mt-1">{user?.email}</p>
-        </div>
-        <Button variant="ghost" onClick={signOut} className="font-mono text-xs">
-          Sign Out
-        </Button>
+    <div className="space-y-8">
+      {/* Welcome + Stats */}
+      <div>
+        <h1 className="text-xl font-mono font-bold text-foreground mb-1">
+          Welcome back{user?.user_metadata?.full_name ? `, ${user.user_metadata.full_name.split(" ")[0]}` : ""}
+        </h1>
+        <p className="text-muted-foreground font-mono text-xs">
+          {user?.email}
+        </p>
       </div>
 
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: "Published Posts", value: publishedPosts, icon: Eye },
+          { label: "Draft Posts", value: draftPosts, icon: EyeOff },
+          { label: "Published Research", value: publishedArticles, icon: FlaskConical },
+          { label: "Draft Research", value: draftArticles, icon: Edit },
+        ].map((stat) => (
+          <div key={stat.label} className="bg-card border border-border rounded-md p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <stat.icon className="h-3 w-3 text-muted-foreground" />
+              <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                {stat.label}
+              </span>
+            </div>
+            <span className="text-2xl font-mono font-bold text-foreground">{stat.value}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Content Management */}
       <Tabs defaultValue="posts" className="w-full">
         <TabsList className="bg-secondary border border-border mb-6">
-          <TabsTrigger value="posts" className="font-mono text-xs">Posts</TabsTrigger>
-          <TabsTrigger value="research" className="font-mono text-xs">Research</TabsTrigger>
+          <TabsTrigger value="posts" className="font-mono text-xs gap-1.5">
+            <FileText className="h-3 w-3" /> Posts
+          </TabsTrigger>
+          <TabsTrigger value="research" className="font-mono text-xs gap-1.5">
+            <FlaskConical className="h-3 w-3" /> Research
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="posts">
@@ -201,43 +234,17 @@ const Admin = () => {
 
           {showPostForm && (
             <div className="bg-card border border-border rounded-md p-4 mb-6 space-y-3">
-              <Input
-                placeholder="Title"
-                value={postForm.title}
-                onChange={(e) => setPostForm({ ...postForm, title: e.target.value })}
-                className="font-mono text-sm bg-secondary border-border"
-              />
-              <Input
-                placeholder="Category (e.g. update, announcement)"
-                value={postForm.category}
-                onChange={(e) => setPostForm({ ...postForm, category: e.target.value })}
-                className="font-mono text-sm bg-secondary border-border"
-              />
-              <Textarea
-                placeholder="Excerpt (optional short summary)"
-                value={postForm.excerpt}
-                onChange={(e) => setPostForm({ ...postForm, excerpt: e.target.value })}
-                className="font-mono text-sm bg-secondary border-border min-h-[60px]"
-              />
-              <Textarea
-                placeholder="Content (markdown supported)"
-                value={postForm.content}
-                onChange={(e) => setPostForm({ ...postForm, content: e.target.value })}
-                className="font-mono text-sm bg-secondary border-border min-h-[200px]"
-              />
+              <Input placeholder="Title" value={postForm.title} onChange={(e) => setPostForm({ ...postForm, title: e.target.value })} className="font-mono text-sm bg-secondary border-border" />
+              <Input placeholder="Category (e.g. update, announcement)" value={postForm.category} onChange={(e) => setPostForm({ ...postForm, category: e.target.value })} className="font-mono text-sm bg-secondary border-border" />
+              <Textarea placeholder="Excerpt (optional short summary)" value={postForm.excerpt} onChange={(e) => setPostForm({ ...postForm, excerpt: e.target.value })} className="font-mono text-sm bg-secondary border-border min-h-[60px]" />
+              <Textarea placeholder="Content (markdown supported)" value={postForm.content} onChange={(e) => setPostForm({ ...postForm, content: e.target.value })} className="font-mono text-sm bg-secondary border-border min-h-[200px]" />
               <div className="flex items-center gap-4">
                 <label className="flex items-center gap-2 font-mono text-xs text-muted-foreground cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={postForm.published}
-                    onChange={(e) => setPostForm({ ...postForm, published: e.target.checked })}
-                  />
+                  <input type="checkbox" checked={postForm.published} onChange={(e) => setPostForm({ ...postForm, published: e.target.checked })} />
                   Published
                 </label>
                 <div className="flex-1" />
-                <Button variant="ghost" size="sm" className="font-mono text-xs" onClick={() => { setShowPostForm(false); setEditingPost(null); }}>
-                  Cancel
-                </Button>
+                <Button variant="ghost" size="sm" className="font-mono text-xs" onClick={() => { setShowPostForm(false); setEditingPost(null); }}>Cancel</Button>
                 <Button size="sm" className="font-mono text-xs" onClick={() => savePost.mutate()} disabled={!postForm.title || !postForm.content}>
                   {editingPost ? "Update" : "Create"}
                 </Button>
@@ -248,12 +255,12 @@ const Admin = () => {
           <div className="space-y-2">
             {posts.map((post) => (
               <div key={post.id} className="flex items-center justify-between bg-card border border-border rounded-md px-4 py-3">
-                <div className="flex items-center gap-3">
-                  {post.published ? <Eye className="h-3 w-3 text-accent" /> : <EyeOff className="h-3 w-3 text-muted-foreground" />}
-                  <span className="font-mono text-sm text-foreground">{post.title}</span>
-                  <span className="font-mono text-xs text-muted-foreground">{post.category}</span>
+                <div className="flex items-center gap-3 min-w-0">
+                  {post.published ? <Eye className="h-3 w-3 text-accent shrink-0" /> : <EyeOff className="h-3 w-3 text-muted-foreground shrink-0" />}
+                  <span className="font-mono text-sm text-foreground truncate">{post.title}</span>
+                  <span className="font-mono text-xs text-muted-foreground shrink-0">{post.category}</span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 shrink-0">
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEditPost(post)}>
                     <Edit className="h-3 w-3" />
                   </Button>
@@ -282,55 +289,19 @@ const Admin = () => {
 
           {showResearchForm && (
             <div className="bg-card border border-border rounded-md p-4 mb-6 space-y-3">
-              <Input
-                placeholder="Title"
-                value={researchForm.title}
-                onChange={(e) => setResearchForm({ ...researchForm, title: e.target.value })}
-                className="font-mono text-sm bg-secondary border-border"
-              />
-              <Input
-                placeholder="Authors (comma-separated)"
-                value={researchForm.authors}
-                onChange={(e) => setResearchForm({ ...researchForm, authors: e.target.value })}
-                className="font-mono text-sm bg-secondary border-border"
-              />
-              <Input
-                placeholder="Tags (comma-separated)"
-                value={researchForm.tags}
-                onChange={(e) => setResearchForm({ ...researchForm, tags: e.target.value })}
-                className="font-mono text-sm bg-secondary border-border"
-              />
-              <Input
-                placeholder="PDF URL (optional)"
-                value={researchForm.pdf_url}
-                onChange={(e) => setResearchForm({ ...researchForm, pdf_url: e.target.value })}
-                className="font-mono text-sm bg-secondary border-border"
-              />
-              <Textarea
-                placeholder="Abstract"
-                value={researchForm.abstract}
-                onChange={(e) => setResearchForm({ ...researchForm, abstract: e.target.value })}
-                className="font-mono text-sm bg-secondary border-border min-h-[80px]"
-              />
-              <Textarea
-                placeholder="Content (markdown supported)"
-                value={researchForm.content}
-                onChange={(e) => setResearchForm({ ...researchForm, content: e.target.value })}
-                className="font-mono text-sm bg-secondary border-border min-h-[200px]"
-              />
+              <Input placeholder="Title" value={researchForm.title} onChange={(e) => setResearchForm({ ...researchForm, title: e.target.value })} className="font-mono text-sm bg-secondary border-border" />
+              <Input placeholder="Authors (comma-separated)" value={researchForm.authors} onChange={(e) => setResearchForm({ ...researchForm, authors: e.target.value })} className="font-mono text-sm bg-secondary border-border" />
+              <Input placeholder="Tags (comma-separated)" value={researchForm.tags} onChange={(e) => setResearchForm({ ...researchForm, tags: e.target.value })} className="font-mono text-sm bg-secondary border-border" />
+              <Input placeholder="PDF URL (optional)" value={researchForm.pdf_url} onChange={(e) => setResearchForm({ ...researchForm, pdf_url: e.target.value })} className="font-mono text-sm bg-secondary border-border" />
+              <Textarea placeholder="Abstract" value={researchForm.abstract} onChange={(e) => setResearchForm({ ...researchForm, abstract: e.target.value })} className="font-mono text-sm bg-secondary border-border min-h-[80px]" />
+              <Textarea placeholder="Content (markdown supported)" value={researchForm.content} onChange={(e) => setResearchForm({ ...researchForm, content: e.target.value })} className="font-mono text-sm bg-secondary border-border min-h-[200px]" />
               <div className="flex items-center gap-4">
                 <label className="flex items-center gap-2 font-mono text-xs text-muted-foreground cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={researchForm.published}
-                    onChange={(e) => setResearchForm({ ...researchForm, published: e.target.checked })}
-                  />
+                  <input type="checkbox" checked={researchForm.published} onChange={(e) => setResearchForm({ ...researchForm, published: e.target.checked })} />
                   Published
                 </label>
                 <div className="flex-1" />
-                <Button variant="ghost" size="sm" className="font-mono text-xs" onClick={() => { setShowResearchForm(false); setEditingResearch(null); }}>
-                  Cancel
-                </Button>
+                <Button variant="ghost" size="sm" className="font-mono text-xs" onClick={() => { setShowResearchForm(false); setEditingResearch(null); }}>Cancel</Button>
                 <Button size="sm" className="font-mono text-xs" onClick={() => saveResearch.mutate()} disabled={!researchForm.title}>
                   {editingResearch ? "Update" : "Create"}
                 </Button>
@@ -341,12 +312,12 @@ const Admin = () => {
           <div className="space-y-2">
             {articles.map((article) => (
               <div key={article.id} className="flex items-center justify-between bg-card border border-border rounded-md px-4 py-3">
-                <div className="flex items-center gap-3">
-                  {article.published ? <Eye className="h-3 w-3 text-accent" /> : <EyeOff className="h-3 w-3 text-muted-foreground" />}
-                  <span className="font-mono text-sm text-foreground">{article.title}</span>
-                  <span className="font-mono text-xs text-muted-foreground">{article.authors.join(", ")}</span>
+                <div className="flex items-center gap-3 min-w-0">
+                  {article.published ? <Eye className="h-3 w-3 text-accent shrink-0" /> : <EyeOff className="h-3 w-3 text-muted-foreground shrink-0" />}
+                  <span className="font-mono text-sm text-foreground truncate">{article.title}</span>
+                  <span className="font-mono text-xs text-muted-foreground shrink-0">{article.authors.join(", ")}</span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 shrink-0">
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEditResearch(article)}>
                     <Edit className="h-3 w-3" />
                   </Button>
@@ -360,8 +331,8 @@ const Admin = () => {
           </div>
         </TabsContent>
       </Tabs>
-    </Layout>
+    </div>
   );
 };
 
-export default Admin;
+export default StaffWorkspace;
