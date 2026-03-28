@@ -102,12 +102,9 @@ const PublicDashboard = () => {
         </div>
 
         {skillsLoading ? (
-          <div className="grid gap-3 md:grid-cols-2">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="bg-card border border-border rounded-md p-5 animate-pulse">
-                <div className="h-4 bg-muted rounded w-1/3 mb-3" />
-                <div className="h-3 bg-muted rounded w-2/3" />
-              </div>
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-12 bg-card border border-border rounded-md animate-pulse" />
             ))}
           </div>
         ) : filteredSkills.length === 0 ? (
@@ -115,27 +112,40 @@ const PublicDashboard = () => {
             {skillSearch ? "No skills match your search." : "No skills published yet."}
           </p>
         ) : (
-          <div className="grid gap-3 md:grid-cols-2">
-            {filteredSkills.map((skill: any) => (
-              <div key={skill._id} className="bg-card border border-border rounded-md overflow-hidden">
-                <button
-                  onClick={() => setExpandedSkill(expandedSkill === skill._id ? null : skill._id)}
-                  className="w-full text-left p-5 hover:bg-accent/5 transition-colors"
+          <Table>
+            <TableHeader>
+              <TableRow className="border-accent/30 hover:bg-transparent">
+                <TableHead className="w-12 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">#</TableHead>
+                <TableHead className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Skill</TableHead>
+                <TableHead className="text-right font-mono text-[10px] uppercase tracking-wider text-muted-foreground w-28">Updated</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredSkills.map((skill: any, index: number) => (
+                <TableRow
+                  key={skill._id}
+                  className="cursor-pointer hover:bg-accent/5 transition-colors"
+                  onClick={() => setSelectedSkill(skill)}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-mono text-sm font-medium text-foreground mb-1">
+                  <TableCell className="font-mono text-xs text-muted-foreground align-top pt-4">
+                    {index + 1}
+                  </TableCell>
+                  <TableCell className="py-3">
+                    <div>
+                      <span className="font-mono text-sm font-medium text-foreground">
                         {skill.title}
-                      </h3>
+                      </span>
                       {skill.description && (
-                        <p className="text-sm text-muted-foreground line-clamp-2">{skill.description}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
+                          {skill.description}
+                        </p>
                       )}
                       {skill.tags?.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 mt-2">
+                        <div className="flex flex-wrap gap-1 mt-1.5">
                           {skill.tags.map((tag: string) => (
                             <span
                               key={tag}
-                              className="text-[10px] font-mono uppercase tracking-wider text-accent bg-accent/10 px-2 py-0.5 rounded"
+                              className="text-[10px] font-mono uppercase tracking-wider text-accent bg-accent/10 px-1.5 py-0.5 rounded"
                             >
                               {tag}
                             </span>
@@ -143,51 +153,100 @@ const PublicDashboard = () => {
                         </div>
                       )}
                     </div>
-                    {expandedSkill === skill._id ? (
-                      <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-                    ) : (
-                      <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-                    )}
-                  </div>
-                </button>
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-xs text-muted-foreground align-top pt-4">
+                    {skill._updatedAt ? format(new Date(skill._updatedAt), "MMM d") : "—"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
 
-                {expandedSkill === skill._id && (
-                  <div className="border-t border-border p-5">
-                    {skill.markdownContent && (
-                      <div className="prose prose-sm dark:prose-invert max-w-none font-sans">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {skill.markdownContent}
-                        </ReactMarkdown>
-                      </div>
-                    )}
-                    {skill.references?.length > 0 && (
-                      <div className="mt-4 pt-4 border-t border-border">
-                        <h4 className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-2">
-                          Reference Files
-                        </h4>
-                        <div className="space-y-2">
-                          {skill.references.map((ref: any, i: number) => (
-                            <details key={ref._key || i} className="group">
-                              <summary className="cursor-pointer text-xs font-mono text-accent hover:underline flex items-center gap-1.5">
-                                <FileText className="h-3 w-3" />
-                                {ref.folder ? `${ref.folder}/` : ""}{ref.filename}
-                              </summary>
-                              <div className="mt-2 ml-4 prose prose-xs dark:prose-invert max-w-none">
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                  {ref.content || ""}
-                                </ReactMarkdown>
-                              </div>
-                            </details>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+        {/* Skill Detail Modal */}
+        <Dialog open={!!selectedSkill} onOpenChange={(open) => !open && setSelectedSkill(null)}>
+          <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto bg-card border-border">
+            {selectedSkill && (
+              <>
+                <DialogHeader>
+                  <p className="text-xs font-mono text-muted-foreground mb-1">
+                    skills / <span className="text-accent">{selectedSkill.slug || selectedSkill.title?.toLowerCase().replace(/\s+/g, "-")}</span>
+                  </p>
+                  <DialogTitle className="font-mono text-lg font-medium text-foreground">
+                    {selectedSkill.title}
+                  </DialogTitle>
+                </DialogHeader>
+
+                {selectedSkill.description && (
+                  <div className="bg-secondary/50 border border-border rounded-md p-4 mt-2">
+                    <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-2">Summary</p>
+                    <p className="text-sm text-foreground/80 leading-relaxed">{selectedSkill.description}</p>
                   </div>
                 )}
-              </div>
-            ))}
-          </div>
-        )}
+
+                <div className="flex items-center justify-between mt-2">
+                  {selectedSkill.tags?.length > 0 && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mr-1">Tags:</span>
+                      {selectedSkill.tags.map((tag: string) => (
+                        <Badge key={tag} variant="secondary" className="text-[10px] font-mono uppercase tracking-wider text-accent bg-accent/10 border-0">
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                  {selectedSkill._updatedAt && (
+                    <span className="text-xs font-mono text-muted-foreground">
+                      {format(new Date(selectedSkill._updatedAt), "MMM d, yyyy")}
+                    </span>
+                  )}
+                </div>
+
+                {selectedSkill.markdownContent && (
+                  <>
+                    <Separator className="my-2" />
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <FileText className="h-3.5 w-3.5 text-accent" />
+                      <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">skill.md</span>
+                    </div>
+                    <div className="prose prose-sm dark:prose-invert max-w-none font-sans">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {selectedSkill.markdownContent}
+                      </ReactMarkdown>
+                    </div>
+                  </>
+                )}
+
+                {selectedSkill.references?.length > 0 && (
+                  <>
+                    <Separator className="my-2" />
+                    <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-2">Reference Files</p>
+                    <div className="space-y-1">
+                      {selectedSkill.references.map((ref: any, i: number) => (
+                        <Collapsible key={ref._key || i}>
+                          <CollapsibleTrigger className="flex items-center gap-1.5 w-full text-left py-1.5 px-2 rounded hover:bg-accent/5 transition-colors group">
+                            <FileText className="h-3 w-3 text-accent" />
+                            <span className="text-xs font-mono text-foreground group-hover:text-accent transition-colors">
+                              {ref.folder ? `${ref.folder}/` : ""}{ref.filename}
+                            </span>
+                            <ChevronDown className="h-3 w-3 text-muted-foreground ml-auto group-data-[state=open]:rotate-180 transition-transform" />
+                          </CollapsibleTrigger>
+                          <CollapsibleContent>
+                            <div className="ml-5 mt-1 mb-2 prose prose-xs dark:prose-invert max-w-none">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {ref.content || ""}
+                              </ReactMarkdown>
+                            </div>
+                          </CollapsibleContent>
+                        </Collapsible>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
       </section>
 
       {/* Tweets / Thinking Section */}
