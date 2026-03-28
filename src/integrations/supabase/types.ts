@@ -98,6 +98,33 @@ export type Database = {
         }
         Relationships: []
       }
+      tweets: {
+        Row: {
+          author_email: string | null
+          author_name: string | null
+          content: string
+          created_at: string
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          author_email?: string | null
+          author_name?: string | null
+          content: string
+          created_at?: string
+          id?: string
+          updated_at?: string
+        }
+        Update: {
+          author_email?: string | null
+          author_name?: string | null
+          content?: string
+          created_at?: string
+          id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
