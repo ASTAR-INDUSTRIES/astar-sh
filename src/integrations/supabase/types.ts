@@ -14,6 +14,48 @@ export type Database = {
   }
   public: {
     Tables: {
+      mcp_sessions: {
+        Row: {
+          access_token: string | null
+          auth_code: string | null
+          client_redirect_uri: string | null
+          code_challenge: string | null
+          code_challenge_method: string | null
+          created_at: string
+          expires_at: string
+          id: string
+          state: string | null
+          user_email: string | null
+          user_id: string | null
+        }
+        Insert: {
+          access_token?: string | null
+          auth_code?: string | null
+          client_redirect_uri?: string | null
+          code_challenge?: string | null
+          code_challenge_method?: string | null
+          created_at?: string
+          expires_at?: string
+          id?: string
+          state?: string | null
+          user_email?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          access_token?: string | null
+          auth_code?: string | null
+          client_redirect_uri?: string | null
+          code_challenge?: string | null
+          code_challenge_method?: string | null
+          created_at?: string
+          expires_at?: string
+          id?: string
+          state?: string | null
+          user_email?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       posts: {
         Row: {
           author_avatar: string | null
