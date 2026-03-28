@@ -124,11 +124,21 @@
   }
 
   .skill-prose pre {
-    @apply bg-secondary border border-border rounded-md p-4 my-3 overflow-x-auto;
+    @apply bg-secondary border border-border rounded-md p-4 my-3;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
   }
 
   .skill-prose pre code {
     @apply bg-transparent p-0 text-foreground/90;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .skill-prose {
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .skill-prose hr {
