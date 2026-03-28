@@ -1,5 +1,4 @@
-import { Hono } from "hono";
-import { McpServer, StreamableHttpTransport } from "mcp-lite";
+import { Hono } from "jsr:@hono/hono@^4";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const app = new Hono();
@@ -11,55 +10,62 @@ const MS_TOKEN_URL = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0
 const SANITY_PROJECT_ID = "fkqm34od";
 const SANITY_DATASET = "production";
 
-function getEnv(key: string): string {
+function env(key: string): string {
   const v = Deno.env.get(key);
-  if (!v) throw new Error(`${key} is not configured`);
+  if (!v) throw new Error(`${key} not configured`);
   return v;
 }
 
-function getBaseUrl(): string {
-  return `${getEnv("SUPABASE_URL")}/functions/v1/mcp-server`;
+function baseUrl(): string {
+  return `${env("SUPABASE_URL")}/functions/v1/mcp-server`;
 }
 
-function supabaseAdmin() {
-  return createClient(getEnv("SUPABASE_URL"), getEnv("SUPABASE_SERVICE_ROLE_KEY"), {
+function adminClient() {
+  return createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"), {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 }
 
-// ── Helper: validate bearer token ──────────────────────────────────────
+// ── Auth helper ────────────────────────────────────────────────────────
 async function validateToken(req: Request): Promise<{ email: string; userId: string } | null> {
   const auth = req.headers.get("authorization");
   if (!auth?.startsWith("Bearer ")) return null;
   const token = auth.slice(7);
-  const sb = supabaseAdmin();
-  const { data, error } = await sb.from("mcp_sessions")
+  const sb = adminClient();
+  const { data } = await sb.from("mcp_sessions")
     .select("user_email, user_id")
     .eq("access_token", token)
     .gt("expires_at", new Date().toISOString())
     .maybeSingle();
-  if (error || !data) return null;
+  if (!data) return null;
   return { email: data.user_email, userId: data.user_id };
 }
 
+// ── CORS ───────────────────────────────────────────────────────────────
+app.options("*", (c) =>
+  new Response(null, {
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Headers": "authorization, content-type, x-client-info, apikey",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS, DELETE",
+    },
+  })
+);
+
 // ── OAuth: Protected Resource Metadata (RFC 9728) ──────────────────────
 app.get("/.well-known/oauth-protected-resource", (c) => {
-  const base = getBaseUrl();
-  return c.json({
-    resource: base,
-    authorization_servers: [base],
-    bearer_methods_supported: ["header"],
-  });
+  const b = baseUrl();
+  return c.json({ resource: b, authorization_servers: [b], bearer_methods_supported: ["header"] });
 });
 
 // ── OAuth: Authorization Server Metadata ───────────────────────────────
 app.get("/.well-known/oauth-authorization-server", (c) => {
-  const base = getBaseUrl();
+  const b = baseUrl();
   return c.json({
-    issuer: base,
-    authorization_endpoint: `${base}/authorize`,
-    token_endpoint: `${base}/token`,
-    registration_endpoint: `${base}/register`,
+    issuer: b,
+    authorization_endpoint: `${b}/authorize`,
+    token_endpoint: `${b}/token`,
+    registration_endpoint: `${b}/register`,
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code"],
     code_challenge_methods_supported: ["S256"],
@@ -67,13 +73,11 @@ app.get("/.well-known/oauth-authorization-server", (c) => {
   });
 });
 
-// ── OAuth: Dynamic Client Registration (MCP requires this) ────────────
+// ── OAuth: Dynamic Client Registration ─────────────────────────────────
 app.post("/register", async (c) => {
   const body = await c.req.json();
-  // MCP clients register dynamically; we just echo back with a generated client_id
-  const clientId = crypto.randomUUID();
   return c.json({
-    client_id: clientId,
+    client_id: crypto.randomUUID(),
     client_name: body.client_name || "MCP Client",
     redirect_uris: body.redirect_uris || [],
     grant_types: ["authorization_code"],
@@ -82,19 +86,16 @@ app.post("/register", async (c) => {
   }, 201);
 });
 
-// ── OAuth: Authorize (redirects to Microsoft) ──────────────────────────
+// ── OAuth: Authorize → Microsoft ───────────────────────────────────────
 app.get("/authorize", async (c) => {
   const clientRedirectUri = c.req.query("redirect_uri");
   const codeChallenge = c.req.query("code_challenge");
   const codeChallengeMethod = c.req.query("code_challenge_method") || "S256";
   const clientState = c.req.query("state") || "";
 
-  if (!clientRedirectUri) {
-    return c.json({ error: "redirect_uri is required" }, 400);
-  }
+  if (!clientRedirectUri) return c.json({ error: "redirect_uri required" }, 400);
 
-  // Generate our own state that wraps the client's info
-  const internalState = btoa(JSON.stringify({
+  const state = btoa(JSON.stringify({
     client_redirect_uri: clientRedirectUri,
     code_challenge: codeChallenge,
     code_challenge_method: codeChallengeMethod,
@@ -102,25 +103,21 @@ app.get("/authorize", async (c) => {
     nonce: crypto.randomUUID(),
   }));
 
-  // Store in DB
-  const sb = supabaseAdmin();
+  const sb = adminClient();
   await sb.from("mcp_sessions").insert({
-    state: internalState,
+    state,
     client_redirect_uri: clientRedirectUri,
     code_challenge: codeChallenge,
     code_challenge_method: codeChallengeMethod,
   });
 
-  const CLIENT_ID = getEnv("AZURE_CLIENT_ID");
-  const FUNCTION_BASE = getBaseUrl();
-
   const params = new URLSearchParams({
-    client_id: CLIENT_ID,
+    client_id: env("AZURE_CLIENT_ID"),
     response_type: "code",
-    redirect_uri: `${FUNCTION_BASE}/callback`,
+    redirect_uri: `${baseUrl()}/callback`,
     scope: "openid email profile",
     response_mode: "query",
-    state: internalState,
+    state,
     domain_hint: "astarconsulting.no",
   });
 
@@ -134,333 +131,251 @@ app.get("/callback", async (c) => {
   const msError = c.req.query("error");
 
   if (msError || !msCode || !state) {
-    return c.json({ error: msError || "Missing code or state" }, 400);
+    return c.json({ error: msError || "Missing code/state" }, 400);
   }
 
-  // Look up our session
-  const sb = supabaseAdmin();
-  const { data: session } = await sb.from("mcp_sessions")
-    .select("*")
-    .eq("state", state)
-    .maybeSingle();
+  const sb = adminClient();
+  const { data: session } = await sb.from("mcp_sessions").select("*").eq("state", state).maybeSingle();
+  if (!session) return c.json({ error: "Invalid state" }, 400);
 
-  if (!session) {
-    return c.json({ error: "Invalid state" }, 400);
-  }
-
-  // Exchange Microsoft code for tokens
-  const CLIENT_ID = getEnv("AZURE_CLIENT_ID");
-  const CLIENT_SECRET = getEnv("AZURE_CLIENT_SECRET");
-  const FUNCTION_BASE = getBaseUrl();
-
-  const tokenResponse = await fetch(MS_TOKEN_URL, {
+  // Exchange with Microsoft
+  const tokenRes = await fetch(MS_TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
-      client_id: CLIENT_ID,
-      client_secret: CLIENT_SECRET,
+      client_id: env("AZURE_CLIENT_ID"),
+      client_secret: env("AZURE_CLIENT_SECRET"),
       code: msCode,
-      redirect_uri: `${FUNCTION_BASE}/callback`,
+      redirect_uri: `${baseUrl()}/callback`,
       grant_type: "authorization_code",
       scope: "openid email profile",
     }),
   });
 
-  const tokenData = await tokenResponse.json();
-  if (!tokenResponse.ok) {
+  const tokenData = await tokenRes.json();
+  if (!tokenRes.ok) {
     console.error("MS token exchange failed:", tokenData);
     return c.json({ error: "Token exchange failed" }, 500);
   }
 
-  // Decode ID token
   const payload = JSON.parse(atob(tokenData.id_token.split(".")[1]));
   const email = payload.email || payload.preferred_username;
-  const name = payload.name || "";
 
   if (!email?.endsWith("@astarconsulting.no")) {
-    const redirectUrl = new URL(session.client_redirect_uri);
-    redirectUrl.searchParams.set("error", "access_denied");
-    redirectUrl.searchParams.set("error_description", "Only @astarconsulting.no accounts allowed");
-    return c.redirect(redirectUrl.toString());
+    const url = new URL(session.client_redirect_uri);
+    url.searchParams.set("error", "access_denied");
+    return c.redirect(url.toString());
   }
 
-  // Generate our own auth code for the MCP client
-  const authCode = crypto.randomUUID();
-
-  // Find or create user ID (reuse existing logic)
-  const { data: existingUsers } = await sb.auth.admin.listUsers();
-  const existingUser = existingUsers?.users?.find((u: any) => u.email === email);
-  let userId = existingUser?.id;
-
+  // Find/create user
+  const { data: users } = await sb.auth.admin.listUsers();
+  let userId = users?.users?.find((u: any) => u.email === email)?.id;
   if (!userId) {
-    const { data: newUser } = await sb.auth.admin.createUser({
-      email,
-      email_confirm: true,
-      user_metadata: { full_name: name },
-    });
-    userId = newUser?.user?.id;
+    const { data: nu } = await sb.auth.admin.createUser({ email, email_confirm: true, user_metadata: { full_name: payload.name || "" } });
+    userId = nu?.user?.id;
   }
 
-  // Update session with auth code and user info
-  await sb.from("mcp_sessions")
-    .update({
-      auth_code: authCode,
-      user_email: email,
-      user_id: userId,
-    })
-    .eq("id", session.id);
+  const authCode = crypto.randomUUID();
+  await sb.from("mcp_sessions").update({ auth_code: authCode, user_email: email, user_id: userId }).eq("id", session.id);
 
-  // Redirect back to Claude Desktop's callback with the auth code
-  const redirectUrl = new URL(session.client_redirect_uri);
-  redirectUrl.searchParams.set("code", authCode);
-  if (session.state) {
-    // Parse and return the original client state
-    try {
-      const parsed = JSON.parse(atob(session.state));
-      if (parsed.client_state) {
-        redirectUrl.searchParams.set("state", parsed.client_state);
-      }
-    } catch { /* ignore */ }
-  }
+  // Redirect to Claude Desktop
+  const url = new URL(session.client_redirect_uri);
+  url.searchParams.set("code", authCode);
+  try {
+    const parsed = JSON.parse(atob(state));
+    if (parsed.client_state) url.searchParams.set("state", parsed.client_state);
+  } catch { /* ignore */ }
 
-  return c.redirect(redirectUrl.toString());
+  return c.redirect(url.toString());
 });
 
-// ── OAuth: Token Endpoint ──────────────────────────────────────────────
+// ── OAuth: Token Exchange ──────────────────────────────────────────────
 app.post("/token", async (c) => {
   const body = await c.req.parseBody();
-  const grantType = body.grant_type as string;
   const code = body.code as string;
   const codeVerifier = body.code_verifier as string;
 
-  if (grantType !== "authorization_code" || !code) {
+  if (body.grant_type !== "authorization_code" || !code) {
     return c.json({ error: "invalid_grant" }, 400);
   }
 
-  const sb = supabaseAdmin();
-  const { data: session } = await sb.from("mcp_sessions")
-    .select("*")
-    .eq("auth_code", code)
-    .maybeSingle();
+  const sb = adminClient();
+  const { data: session } = await sb.from("mcp_sessions").select("*").eq("auth_code", code).maybeSingle();
+  if (!session) return c.json({ error: "invalid_grant" }, 400);
 
-  if (!session) {
-    return c.json({ error: "invalid_grant", error_description: "Invalid auth code" }, 400);
-  }
-
-  // Verify PKCE if code_challenge was provided
+  // PKCE verification
   if (session.code_challenge && codeVerifier) {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(codeVerifier);
-    const hash = await crypto.subtle.digest("SHA-256", data);
+    const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(codeVerifier));
     const computed = btoa(String.fromCharCode(...new Uint8Array(hash)))
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/, "");
-
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
     if (computed !== session.code_challenge) {
-      return c.json({ error: "invalid_grant", error_description: "PKCE verification failed" }, 400);
+      return c.json({ error: "invalid_grant", error_description: "PKCE failed" }, 400);
     }
   }
 
-  // Generate access token
   const accessToken = crypto.randomUUID();
-
-  await sb.from("mcp_sessions")
-    .update({
-      access_token: accessToken,
-      auth_code: null, // Invalidate the auth code
-      expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-    })
-    .eq("id", session.id);
-
-  return c.json({
+  await sb.from("mcp_sessions").update({
     access_token: accessToken,
-    token_type: "bearer",
-    expires_in: 30 * 24 * 60 * 60,
-  });
+    auth_code: null,
+    expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+  }).eq("id", session.id);
+
+  return c.json({ access_token: accessToken, token_type: "bearer", expires_in: 30 * 24 * 60 * 60 });
 });
 
-// ── MCP Server Setup ───────────────────────────────────────────────────
-const mcpServer = new McpServer({
-  name: "astar-mcp",
-  version: "1.0.0",
-});
-
-// Tool: Post a tweet
-mcpServer.tool({
-  name: "post_tweet",
-  description: "Post a new thought/tweet to the astar.sh timeline",
-  inputSchema: {
-    type: "object",
-    properties: {
-      content: { type: "string", description: "The thought/tweet content (max 500 chars)" },
-    },
-    required: ["content"],
-  },
-  handler: async ({ content }, extra) => {
-    const user = (extra as any)?._user;
-    if (!user) return { content: [{ type: "text", text: "Error: Not authenticated" }] };
-
-    const sb = supabaseAdmin();
-    const { error } = await sb.from("tweets").insert({
-      content: content.slice(0, 500),
-      author_name: user.email.split("@")[0],
-      author_email: user.email,
-    });
-
-    if (error) return { content: [{ type: "text", text: `Error: ${error.message}` }] };
-    return { content: [{ type: "text", text: "✓ Thought posted to the timeline." }] };
-  },
-});
-
-// Tool: List tweets
-mcpServer.tool({
-  name: "list_tweets",
-  description: "List recent thoughts/tweets from the astar.sh timeline",
-  inputSchema: {
-    type: "object",
-    properties: {
-      limit: { type: "number", description: "Number of tweets to return (default 10, max 50)" },
+// ── MCP Tools Definition ───────────────────────────────────────────────
+const TOOLS = [
+  {
+    name: "post_tweet",
+    description: "Post a new thought/tweet to the astar.sh timeline",
+    inputSchema: {
+      type: "object",
+      properties: { content: { type: "string", description: "The content (max 500 chars)" } },
+      required: ["content"],
     },
   },
-  handler: async ({ limit }) => {
-    const sb = supabaseAdmin();
-    const { data, error } = await sb.from("tweets")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(Math.min(limit || 10, 50));
-
-    if (error) return { content: [{ type: "text", text: `Error: ${error.message}` }] };
-    if (!data?.length) return { content: [{ type: "text", text: "No tweets yet." }] };
-
-    const formatted = data.map((t: any) =>
-      `[${t.created_at}] ${t.author_name || "anon"}: ${t.content}`
-    ).join("\n\n");
-
-    return { content: [{ type: "text", text: formatted }] };
-  },
-});
-
-// Tool: Delete a tweet
-mcpServer.tool({
-  name: "delete_tweet",
-  description: "Delete a tweet by its ID",
-  inputSchema: {
-    type: "object",
-    properties: {
-      id: { type: "string", description: "The UUID of the tweet to delete" },
+  {
+    name: "list_tweets",
+    description: "List recent thoughts/tweets from the timeline",
+    inputSchema: {
+      type: "object",
+      properties: { limit: { type: "number", description: "Max results (default 10, max 50)" } },
     },
-    required: ["id"],
   },
-  handler: async ({ id }, extra) => {
-    const user = (extra as any)?._user;
-    if (!user) return { content: [{ type: "text", text: "Error: Not authenticated" }] };
-
-    const sb = supabaseAdmin();
-    const { error } = await sb.from("tweets").delete().eq("id", id);
-    if (error) return { content: [{ type: "text", text: `Error: ${error.message}` }] };
-    return { content: [{ type: "text", text: "✓ Tweet deleted." }] };
+  {
+    name: "delete_tweet",
+    description: "Delete a tweet by ID",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string", description: "Tweet UUID" } },
+      required: ["id"],
+    },
   },
-});
-
-// Tool: Query Sanity content
-mcpServer.tool({
-  name: "query_content",
-  description: "Query news posts, research articles, or skills from the Sanity CMS. Use GROQ query syntax.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      type: {
-        type: "string",
-        enum: ["newsPost", "researchArticle", "skill"],
-        description: "Content type to query",
+  {
+    name: "query_content",
+    description: "Query news, research, or skills from Sanity CMS",
+    inputSchema: {
+      type: "object",
+      properties: {
+        type: { type: "string", enum: ["newsPost", "researchArticle", "skill"], description: "Content type" },
+        published_only: { type: "boolean", description: "Only published (default true)" },
+        limit: { type: "number", description: "Max results (default 10)" },
       },
-      published_only: { type: "boolean", description: "Only return published items (default true)" },
-      limit: { type: "number", description: "Max results (default 10)" },
+      required: ["type"],
     },
-    required: ["type"],
   },
-  handler: async ({ type, published_only, limit }) => {
-    const publishedFilter = (published_only !== false && type !== "skill")
-      ? ' && published == true'
-      : '';
-    const n = Math.min(limit || 10, 50);
-    const query = `*[_type == "${type}"${publishedFilter}] | order(_createdAt desc)[0...${n}]`;
-
-    const url = `https://${SANITY_PROJECT_ID}.api.sanity.io/v2024-01-01/data/query/${SANITY_DATASET}?query=${encodeURIComponent(query)}`;
-    const res = await fetch(url);
-    const json = await res.json();
-
-    if (!res.ok) return { content: [{ type: "text", text: `Sanity error: ${JSON.stringify(json)}` }] };
-
-    return { content: [{ type: "text", text: JSON.stringify(json.result, null, 2) }] };
+  {
+    name: "get_stats",
+    description: "Get content statistics",
+    inputSchema: { type: "object", properties: {} },
   },
-});
+];
 
-// Tool: Get stats
-mcpServer.tool({
-  name: "get_stats",
-  description: "Get content statistics: tweet count and Sanity content counts",
-  inputSchema: { type: "object", properties: {} },
-  handler: async () => {
-    const sb = supabaseAdmin();
-    const { count: tweetCount } = await sb.from("tweets").select("*", { count: "exact", head: true });
+// ── MCP Tool Handlers ──────────────────────────────────────────────────
+async function handleTool(name: string, args: any, user: { email: string; userId: string }): Promise<any[]> {
+  const sb = adminClient();
 
-    // Query Sanity for content counts
-    const sanityQuery = encodeURIComponent(`{
-      "news": count(*[_type == "newsPost"]),
-      "publishedNews": count(*[_type == "newsPost" && published == true]),
-      "research": count(*[_type == "researchArticle"]),
-      "publishedResearch": count(*[_type == "researchArticle" && published == true]),
-      "skills": count(*[_type == "skill"])
-    }`);
-    const sanityUrl = `https://${SANITY_PROJECT_ID}.api.sanity.io/v2024-01-01/data/query/${SANITY_DATASET}?query=${sanityQuery}`;
-    const sanityRes = await fetch(sanityUrl);
-    const sanityData = await sanityRes.json();
+  switch (name) {
+    case "post_tweet": {
+      const { error } = await sb.from("tweets").insert({
+        content: (args.content || "").slice(0, 500),
+        author_name: user.email.split("@")[0],
+        author_email: user.email,
+      });
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      return [{ type: "text", text: "✓ Thought posted." }];
+    }
+    case "list_tweets": {
+      const { data, error } = await sb.from("tweets")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(Math.min(args.limit || 10, 50));
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      if (!data?.length) return [{ type: "text", text: "No tweets yet." }];
+      const out = data.map((t: any) => `[${t.id}] ${t.created_at} — ${t.author_name || "anon"}: ${t.content}`).join("\n\n");
+      return [{ type: "text", text: out }];
+    }
+    case "delete_tweet": {
+      const { error } = await sb.from("tweets").delete().eq("id", args.id);
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      return [{ type: "text", text: "✓ Deleted." }];
+    }
+    case "query_content": {
+      const filter = (args.published_only !== false && args.type !== "skill") ? " && published == true" : "";
+      const n = Math.min(args.limit || 10, 50);
+      const query = `*[_type == "${args.type}"${filter}] | order(_createdAt desc)[0...${n}]`;
+      const url = `https://${SANITY_PROJECT_ID}.api.sanity.io/v2024-01-01/data/query/${SANITY_DATASET}?query=${encodeURIComponent(query)}`;
+      const res = await fetch(url);
+      const json = await res.json();
+      return [{ type: "text", text: JSON.stringify(json.result, null, 2) }];
+    }
+    case "get_stats": {
+      const { count } = await sb.from("tweets").select("*", { count: "exact", head: true });
+      const sq = encodeURIComponent(`{"news":count(*[_type=="newsPost"]),"publishedNews":count(*[_type=="newsPost"&&published==true]),"research":count(*[_type=="researchArticle"]),"skills":count(*[_type=="skill"])}`);
+      const res = await fetch(`https://${SANITY_PROJECT_ID}.api.sanity.io/v2024-01-01/data/query/${SANITY_DATASET}?query=${sq}`);
+      const sd = await res.json();
+      return [{ type: "text", text: JSON.stringify({ tweets: count || 0, ...(sd.result || {}) }, null, 2) }];
+    }
+    default:
+      return [{ type: "text", text: `Unknown tool: ${name}` }];
+  }
+}
 
-    const stats = {
-      tweets: tweetCount || 0,
-      ...((sanityRes.ok && sanityData.result) || {}),
-    };
-
-    return { content: [{ type: "text", text: JSON.stringify(stats, null, 2) }] };
-  },
-});
-
-// ── MCP Endpoint (with auth) ───────────────────────────────────────────
-const transport = new StreamableHttpTransport();
-
-app.all("/mcp", async (c) => {
+// ── MCP JSON-RPC Handler ───────────────────────────────────────────────
+app.post("/mcp", async (c) => {
   const user = await validateToken(c.req.raw);
   if (!user) {
-    const base = getBaseUrl();
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: {
-        "WWW-Authenticate": `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource"`,
+        "WWW-Authenticate": `Bearer resource_metadata="${baseUrl()}/.well-known/oauth-protected-resource"`,
         "Content-Type": "application/json",
       },
     });
   }
 
-  // Inject user context into the handler
-  // Note: mcp-lite doesn't have built-in user context, so we pass via a workaround
-  (mcpServer as any)._currentUser = user;
+  const body = await c.req.json();
+  const { jsonrpc, id, method, params } = body;
 
-  // Patch tool handlers to receive user
-  const originalHandleRequest = transport.handleRequest.bind(transport);
-  return await originalHandleRequest(c.req.raw, mcpServer);
+  let result: any;
+
+  switch (method) {
+    case "initialize":
+      result = {
+        protocolVersion: "2025-03-26",
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: { name: "astar-mcp", version: "1.0.0" },
+      };
+      break;
+
+    case "notifications/initialized":
+      // No response needed for notifications
+      return new Response("", { status: 204 });
+
+    case "tools/list":
+      result = { tools: TOOLS };
+      break;
+
+    case "tools/call": {
+      const toolName = params?.name;
+      const toolArgs = params?.arguments || {};
+      const content = await handleTool(toolName, toolArgs, user);
+      result = { content, isError: content[0]?.text?.startsWith("Error") };
+      break;
+    }
+
+    case "ping":
+      result = {};
+      break;
+
+    default:
+      return c.json({ jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${method}` } });
+  }
+
+  return c.json({ jsonrpc: "2.0", id, result });
 });
 
-// ── CORS preflight ─────────────────────────────────────────────────────
-app.options("*", (c) => {
-  return new Response(null, {
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS, DELETE",
-    },
-  });
-});
+// ── Health check ───────────────────────────────────────────────────────
+app.get("/", (c) => c.json({ status: "ok", name: "astar-mcp", version: "1.0.0" }));
 
 Deno.serve(app.fetch);
