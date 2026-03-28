@@ -55,13 +55,18 @@ app.options("*", (c) =>
 // ── OAuth: Protected Resource Metadata (RFC 9728) ──────────────────────
 app.get("/.well-known/oauth-protected-resource", (c) => {
   const b = baseUrl();
-  return c.json({ resource: b, authorization_servers: [b], bearer_methods_supported: ["header"] });
+  return c.json({
+    resource: `${b}/mcp`,
+    authorization_servers: [b],
+    bearer_methods_supported: ["header"],
+    scopes_supported: ["mcp:tools"],
+  });
 });
 
 // ── OAuth: Authorization Server Metadata ───────────────────────────────
-app.get("/.well-known/oauth-authorization-server", (c) => {
+function authServerMetadata() {
   const b = baseUrl();
-  return c.json({
+  return {
     issuer: b,
     authorization_endpoint: `${b}/authorize`,
     token_endpoint: `${b}/token`,
@@ -70,8 +75,14 @@ app.get("/.well-known/oauth-authorization-server", (c) => {
     grant_types_supported: ["authorization_code"],
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
-  });
-});
+    scopes_supported: ["mcp:tools"],
+  };
+}
+
+app.get("/.well-known/oauth-authorization-server", (c) => c.json(authServerMetadata()));
+
+// ── OAuth: OpenID Connect Discovery (fallback for Claude Desktop) ──────
+app.get("/.well-known/openid-configuration", (c) => c.json(authServerMetadata()));
 
 // ── OAuth: Dynamic Client Registration ─────────────────────────────────
 app.post("/register", async (c) => {
@@ -329,7 +340,7 @@ app.get("/mcp", async (c) => {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: {
-        "WWW-Authenticate": `Bearer resource_metadata="${baseUrl()}/.well-known/oauth-protected-resource"`,
+        "WWW-Authenticate": `Bearer resource_metadata="${baseUrl()}/.well-known/oauth-protected-resource", scope="mcp:tools"`,
         "Content-Type": "application/json",
       },
     });
@@ -350,7 +361,7 @@ app.post("/mcp", async (c) => {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: {
-        "WWW-Authenticate": `Bearer resource_metadata="${baseUrl()}/.well-known/oauth-protected-resource"`,
+        "WWW-Authenticate": `Bearer resource_metadata="${baseUrl()}/.well-known/oauth-protected-resource", scope="mcp:tools"`,
         "Content-Type": "application/json",
       },
     });
