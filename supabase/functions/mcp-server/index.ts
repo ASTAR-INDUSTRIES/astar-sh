@@ -340,7 +340,7 @@ app.get("/mcp", async (c) => {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: {
-        "WWW-Authenticate": `Bearer resource_metadata="${baseUrl()}/.well-known/oauth-protected-resource"`,
+        "WWW-Authenticate": `Bearer resource_metadata="${baseUrl()}/.well-known/oauth-protected-resource", scope="mcp:tools"`,
         "Content-Type": "application/json",
       },
     });
