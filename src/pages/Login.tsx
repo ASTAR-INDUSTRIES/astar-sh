@@ -1,9 +1,19 @@
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { Navigate } from "react-router-dom";
+import { sanityClient } from "@/lib/sanity";
 import Layout from "@/components/Layout";
 
 const Login = () => {
   const { user, isStaff, signIn, loading } = useAuth();
+
+  const { data: skills = [] } = useQuery({
+    queryKey: ["company-skills"],
+    queryFn: () =>
+      sanityClient.fetch<any[]>(
+        `*[_type == "skill"] | order(order asc) { _id, title, description, icon }`
+      ),
+  });
 
   if (!loading && user && isStaff) {
     return <Navigate to="/" replace />;
@@ -34,6 +44,32 @@ const Login = () => {
           <p className="text-destructive font-mono text-xs mt-4">
             Access denied. Only @astarconsulting.no accounts are allowed.
           </p>
+        )}
+
+        {/* Company Skills */}
+        {skills.length > 0 && (
+          <div className="mt-16 w-full max-w-lg">
+            <h2 className="text-xs font-mono uppercase tracking-[0.25em] text-muted-foreground text-center mb-6">
+              What We Do
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {skills.map((skill: any) => (
+                <div
+                  key={skill._id}
+                  className="bg-card border border-border rounded-md p-4"
+                >
+                  <h3 className="font-mono text-sm font-medium text-foreground mb-1">
+                    {skill.title}
+                  </h3>
+                  {skill.description && (
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {skill.description}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </Layout>

@@ -9,177 +9,67 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
   Trash2, Plus, Edit, Eye, EyeOff,
-  FileText, FlaskConical, LayoutDashboard,
+  FileText, FlaskConical, MessageCircle, Send,
 } from "lucide-react";
 import { format } from "date-fns";
 
-type PostForm = {
-  title: string;
+type TweetForm = {
   content: string;
-  excerpt: string;
-  category: string;
-  published: boolean;
 };
 
-type ResearchForm = {
-  title: string;
-  abstract: string;
-  content: string;
-  authors: string;
-  tags: string;
-  pdf_url: string;
-  published: boolean;
-};
-
-const emptyPost: PostForm = { title: "", content: "", excerpt: "", category: "update", published: false };
-const emptyResearch: ResearchForm = { title: "", abstract: "", content: "", authors: "", tags: "", pdf_url: "", published: false };
+const emptyTweet: TweetForm = { content: "" };
 
 const StaffWorkspace = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const [editingPost, setEditingPost] = useState<string | null>(null);
-  const [postForm, setPostForm] = useState<PostForm>(emptyPost);
-  const [editingResearch, setEditingResearch] = useState<string | null>(null);
-  const [researchForm, setResearchForm] = useState<ResearchForm>(emptyResearch);
-  const [showPostForm, setShowPostForm] = useState(false);
-  const [showResearchForm, setShowResearchForm] = useState(false);
+  const [tweetForm, setTweetForm] = useState<TweetForm>(emptyTweet);
 
-  const { data: posts = [] } = useQuery({
-    queryKey: ["admin-posts"],
+  // Tweets
+  const { data: tweets = [] } = useQuery({
+    queryKey: ["admin-tweets"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("posts").select("*").order("created_at", { ascending: false });
+      const { data, error } = await supabase
+        .from("tweets")
+        .select("*")
+        .order("created_at", { ascending: false });
       if (error) throw error;
       return data;
     },
   });
 
-  const { data: articles = [] } = useQuery({
-    queryKey: ["admin-research"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("research_articles").select("*").order("created_at", { ascending: false });
-      if (error) throw error;
-      return data;
-    },
-  });
-
-  // Stats
-  const publishedPosts = posts.filter((p) => p.published).length;
-  const draftPosts = posts.filter((p) => !p.published).length;
-  const publishedArticles = articles.filter((a) => a.published).length;
-  const draftArticles = articles.filter((a) => !a.published).length;
-
-  const savePost = useMutation({
+  const postTweet = useMutation({
     mutationFn: async () => {
-      const payload = {
-        title: postForm.title,
-        content: postForm.content,
-        excerpt: postForm.excerpt || null,
-        category: postForm.category,
-        published: postForm.published,
-        published_at: postForm.published ? new Date().toISOString() : null,
-        author_name: user?.user_metadata?.full_name || user?.email || null,
-      };
-      if (editingPost) {
-        const { error } = await supabase.from("posts").update(payload).eq("id", editingPost);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("posts").insert(payload);
-        if (error) throw error;
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin-posts"] });
-      setPostForm(emptyPost);
-      setEditingPost(null);
-      setShowPostForm(false);
-      toast.success(editingPost ? "Post updated" : "Post created");
-    },
-    onError: (e) => toast.error(e.message),
-  });
-
-  const deletePost = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("posts").delete().eq("id", id);
+      const { error } = await supabase.from("tweets").insert({
+        content: tweetForm.content,
+        author_name: user?.user_metadata?.full_name || user?.email?.split("@")[0] || null,
+        author_email: user?.email || null,
+      });
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin-posts"] });
-      toast.success("Post deleted");
+      queryClient.invalidateQueries({ queryKey: ["admin-tweets"] });
+      queryClient.invalidateQueries({ queryKey: ["public-tweets"] });
+      setTweetForm(emptyTweet);
+      toast.success("Thought posted");
     },
     onError: (e) => toast.error(e.message),
   });
 
-  const saveResearch = useMutation({
-    mutationFn: async () => {
-      const payload = {
-        title: researchForm.title,
-        abstract: researchForm.abstract || null,
-        content: researchForm.content || null,
-        authors: researchForm.authors ? researchForm.authors.split(",").map((a) => a.trim()) : [],
-        tags: researchForm.tags ? researchForm.tags.split(",").map((t) => t.trim()) : [],
-        pdf_url: researchForm.pdf_url || null,
-        published: researchForm.published,
-        published_at: researchForm.published ? new Date().toISOString() : null,
-      };
-      if (editingResearch) {
-        const { error } = await supabase.from("research_articles").update(payload).eq("id", editingResearch);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("research_articles").insert(payload);
-        if (error) throw error;
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin-research"] });
-      setResearchForm(emptyResearch);
-      setEditingResearch(null);
-      setShowResearchForm(false);
-      toast.success(editingResearch ? "Article updated" : "Article created");
-    },
-    onError: (e) => toast.error(e.message),
-  });
-
-  const deleteResearch = useMutation({
+  const deleteTweet = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("research_articles").delete().eq("id", id);
+      const { error } = await supabase.from("tweets").delete().eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin-research"] });
-      toast.success("Article deleted");
+      queryClient.invalidateQueries({ queryKey: ["admin-tweets"] });
+      toast.success("Thought deleted");
     },
     onError: (e) => toast.error(e.message),
   });
-
-  const startEditPost = (post: typeof posts[0]) => {
-    setPostForm({
-      title: post.title,
-      content: post.content,
-      excerpt: post.excerpt || "",
-      category: post.category,
-      published: post.published,
-    });
-    setEditingPost(post.id);
-    setShowPostForm(true);
-  };
-
-  const startEditResearch = (article: typeof articles[0]) => {
-    setResearchForm({
-      title: article.title,
-      abstract: article.abstract || "",
-      content: article.content || "",
-      authors: article.authors.join(", "),
-      tags: article.tags.join(", "),
-      pdf_url: article.pdf_url || "",
-      published: article.published,
-    });
-    setEditingResearch(article.id);
-    setShowResearchForm(true);
-  };
 
   return (
     <div className="space-y-8">
-      {/* Welcome + Stats */}
+      {/* Welcome */}
       <div>
         <h1 className="text-xl font-mono font-bold text-foreground mb-1">
           Welcome back{user?.user_metadata?.full_name ? `, ${user.user_metadata.full_name.split(" ")[0]}` : ""}
@@ -189,12 +79,12 @@ const StaffWorkspace = () => {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {/* Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         {[
-          { label: "Published Posts", value: publishedPosts, icon: Eye },
-          { label: "Draft Posts", value: draftPosts, icon: EyeOff },
-          { label: "Published Research", value: publishedArticles, icon: FlaskConical },
-          { label: "Draft Research", value: draftArticles, icon: Edit },
+          { label: "Thoughts", value: tweets.length, icon: MessageCircle },
+          { label: "News (Sanity)", value: "→", icon: FileText },
+          { label: "Research (Sanity)", value: "→", icon: FlaskConical },
         ].map((stat) => (
           <div key={stat.label} className="bg-card border border-border rounded-md p-4">
             <div className="flex items-center gap-2 mb-2">
@@ -209,125 +99,86 @@ const StaffWorkspace = () => {
       </div>
 
       {/* Content Management */}
-      <Tabs defaultValue="posts" className="w-full">
+      <Tabs defaultValue="tweets" className="w-full">
         <TabsList className="bg-secondary border border-border mb-6">
-          <TabsTrigger value="posts" className="font-mono text-xs gap-1.5">
-            <FileText className="h-3 w-3" /> Posts
-          </TabsTrigger>
-          <TabsTrigger value="research" className="font-mono text-xs gap-1.5">
-            <FlaskConical className="h-3 w-3" /> Research
+          <TabsTrigger value="tweets" className="font-mono text-xs gap-1.5">
+            <MessageCircle className="h-3 w-3" /> Thinking
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="posts">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-mono uppercase tracking-[0.25em] text-muted-foreground">Posts</h2>
-            <Button
-              variant="outline"
-              size="sm"
-              className="font-mono text-xs"
-              onClick={() => { setPostForm(emptyPost); setEditingPost(null); setShowPostForm(!showPostForm); }}
-            >
-              <Plus className="h-3 w-3 mr-1" /> New Post
-            </Button>
+        <TabsContent value="tweets">
+          {/* Compose */}
+          <div className="bg-card border border-border rounded-md p-4 mb-6">
+            <Textarea
+              placeholder="Share a thought..."
+              value={tweetForm.content}
+              onChange={(e) => setTweetForm({ content: e.target.value })}
+              className="font-sans text-sm bg-secondary border-border min-h-[80px] mb-3"
+            />
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                className="font-mono text-xs gap-1.5"
+                onClick={() => postTweet.mutate()}
+                disabled={!tweetForm.content.trim()}
+              >
+                <Send className="h-3 w-3" /> Post
+              </Button>
+            </div>
           </div>
 
-          {showPostForm && (
-            <div className="bg-card border border-border rounded-md p-4 mb-6 space-y-3">
-              <Input placeholder="Title" value={postForm.title} onChange={(e) => setPostForm({ ...postForm, title: e.target.value })} className="font-mono text-sm bg-secondary border-border" />
-              <Input placeholder="Category (e.g. update, announcement)" value={postForm.category} onChange={(e) => setPostForm({ ...postForm, category: e.target.value })} className="font-mono text-sm bg-secondary border-border" />
-              <Textarea placeholder="Excerpt (optional short summary)" value={postForm.excerpt} onChange={(e) => setPostForm({ ...postForm, excerpt: e.target.value })} className="font-mono text-sm bg-secondary border-border min-h-[60px]" />
-              <Textarea placeholder="Content (markdown supported)" value={postForm.content} onChange={(e) => setPostForm({ ...postForm, content: e.target.value })} className="font-mono text-sm bg-secondary border-border min-h-[200px]" />
-              <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2 font-mono text-xs text-muted-foreground cursor-pointer">
-                  <input type="checkbox" checked={postForm.published} onChange={(e) => setPostForm({ ...postForm, published: e.target.checked })} />
-                  Published
-                </label>
-                <div className="flex-1" />
-                <Button variant="ghost" size="sm" className="font-mono text-xs" onClick={() => { setShowPostForm(false); setEditingPost(null); }}>Cancel</Button>
-                <Button size="sm" className="font-mono text-xs" onClick={() => savePost.mutate()} disabled={!postForm.title || !postForm.content}>
-                  {editingPost ? "Update" : "Create"}
+          {/* Timeline */}
+          <div className="space-y-2">
+            {tweets.map((tweet) => (
+              <div
+                key={tweet.id}
+                className="flex items-start justify-between bg-card border border-border rounded-md px-4 py-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-foreground font-sans leading-relaxed">
+                    {tweet.content}
+                  </p>
+                  <div className="flex items-center gap-3 mt-1.5">
+                    {tweet.author_name && (
+                      <span className="text-xs font-mono text-muted-foreground">
+                        {tweet.author_name}
+                      </span>
+                    )}
+                    <span className="text-xs font-mono text-muted-foreground">
+                      {format(new Date(tweet.created_at), "MMM d · HH:mm")}
+                    </span>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-destructive shrink-0"
+                  onClick={() => deleteTweet.mutate(tweet.id)}
+                >
+                  <Trash2 className="h-3 w-3" />
                 </Button>
               </div>
-            </div>
-          )}
-
-          <div className="space-y-2">
-            {posts.map((post) => (
-              <div key={post.id} className="flex items-center justify-between bg-card border border-border rounded-md px-4 py-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  {post.published ? <Eye className="h-3 w-3 text-accent shrink-0" /> : <EyeOff className="h-3 w-3 text-muted-foreground shrink-0" />}
-                  <span className="font-mono text-sm text-foreground truncate">{post.title}</span>
-                  <span className="font-mono text-xs text-muted-foreground shrink-0">{post.category}</span>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEditPost(post)}>
-                    <Edit className="h-3 w-3" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => deletePost.mutate(post.id)}>
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                </div>
-              </div>
             ))}
-            {posts.length === 0 && <p className="text-muted-foreground font-mono text-xs text-center py-8">No posts yet.</p>}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="research">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-mono uppercase tracking-[0.25em] text-muted-foreground">Research Articles</h2>
-            <Button
-              variant="outline"
-              size="sm"
-              className="font-mono text-xs"
-              onClick={() => { setResearchForm(emptyResearch); setEditingResearch(null); setShowResearchForm(!showResearchForm); }}
-            >
-              <Plus className="h-3 w-3 mr-1" /> New Article
-            </Button>
+            {tweets.length === 0 && (
+              <p className="text-muted-foreground font-mono text-xs text-center py-8">
+                No thoughts yet. Share what's on the team's mind.
+              </p>
+            )}
           </div>
 
-          {showResearchForm && (
-            <div className="bg-card border border-border rounded-md p-4 mb-6 space-y-3">
-              <Input placeholder="Title" value={researchForm.title} onChange={(e) => setResearchForm({ ...researchForm, title: e.target.value })} className="font-mono text-sm bg-secondary border-border" />
-              <Input placeholder="Authors (comma-separated)" value={researchForm.authors} onChange={(e) => setResearchForm({ ...researchForm, authors: e.target.value })} className="font-mono text-sm bg-secondary border-border" />
-              <Input placeholder="Tags (comma-separated)" value={researchForm.tags} onChange={(e) => setResearchForm({ ...researchForm, tags: e.target.value })} className="font-mono text-sm bg-secondary border-border" />
-              <Input placeholder="PDF URL (optional)" value={researchForm.pdf_url} onChange={(e) => setResearchForm({ ...researchForm, pdf_url: e.target.value })} className="font-mono text-sm bg-secondary border-border" />
-              <Textarea placeholder="Abstract" value={researchForm.abstract} onChange={(e) => setResearchForm({ ...researchForm, abstract: e.target.value })} className="font-mono text-sm bg-secondary border-border min-h-[80px]" />
-              <Textarea placeholder="Content (markdown supported)" value={researchForm.content} onChange={(e) => setResearchForm({ ...researchForm, content: e.target.value })} className="font-mono text-sm bg-secondary border-border min-h-[200px]" />
-              <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2 font-mono text-xs text-muted-foreground cursor-pointer">
-                  <input type="checkbox" checked={researchForm.published} onChange={(e) => setResearchForm({ ...researchForm, published: e.target.checked })} />
-                  Published
-                </label>
-                <div className="flex-1" />
-                <Button variant="ghost" size="sm" className="font-mono text-xs" onClick={() => { setShowResearchForm(false); setEditingResearch(null); }}>Cancel</Button>
-                <Button size="sm" className="font-mono text-xs" onClick={() => saveResearch.mutate()} disabled={!researchForm.title}>
-                  {editingResearch ? "Update" : "Create"}
-                </Button>
-              </div>
-            </div>
-          )}
-
-          <div className="space-y-2">
-            {articles.map((article) => (
-              <div key={article.id} className="flex items-center justify-between bg-card border border-border rounded-md px-4 py-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  {article.published ? <Eye className="h-3 w-3 text-accent shrink-0" /> : <EyeOff className="h-3 w-3 text-muted-foreground shrink-0" />}
-                  <span className="font-mono text-sm text-foreground truncate">{article.title}</span>
-                  <span className="font-mono text-xs text-muted-foreground shrink-0">{article.authors.join(", ")}</span>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEditResearch(article)}>
-                    <Edit className="h-3 w-3" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => deleteResearch.mutate(article.id)}>
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                </div>
-              </div>
-            ))}
-            {articles.length === 0 && <p className="text-muted-foreground font-mono text-xs text-center py-8">No research articles yet.</p>}
+          <div className="mt-8 bg-secondary/50 border border-border border-dashed rounded-md p-4">
+            <p className="text-xs font-mono text-muted-foreground">
+              <strong className="text-foreground">News & Research</strong> are managed in{" "}
+              <a
+                href="https://fkqm34od.sanity.studio"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent underline underline-offset-2"
+              >
+                Sanity Studio
+              </a>
+              . Tweets are posted directly from here.
+            </p>
           </div>
         </TabsContent>
       </Tabs>
