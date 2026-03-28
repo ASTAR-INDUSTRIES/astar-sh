@@ -329,7 +329,7 @@ const PublicDashboard = () => {
                     <FileText className="h-3.5 w-3.5 text-accent" />
                     <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">skill.md</span>
                   </div>
-                  <div className="skill-prose max-w-none">
+                  <div className="skill-prose max-w-none break-words overflow-wrap-anywhere">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {selectedSkill.markdownContent}
                     </ReactMarkdown>
