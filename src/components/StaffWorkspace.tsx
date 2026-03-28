@@ -212,7 +212,7 @@ const StaffWorkspace = () => {
                   {expandedSkill === skill._id && (
                     <div className="border-t border-border px-4 py-3">
                       {skill.markdownContent && (
-                        <div className="prose prose-sm dark:prose-invert max-w-none font-sans">
+                        <div className="skill-prose max-w-none">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
                             {skill.markdownContent}
                           </ReactMarkdown>

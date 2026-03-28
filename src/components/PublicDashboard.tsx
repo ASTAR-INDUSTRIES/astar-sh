@@ -209,7 +209,7 @@ const PublicDashboard = () => {
                       <FileText className="h-3.5 w-3.5 text-accent" />
                       <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">skill.md</span>
                     </div>
-                    <div className="prose prose-sm dark:prose-invert max-w-none font-sans">
+                    <div className="skill-prose max-w-none">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
                         {selectedSkill.markdownContent}
                       </ReactMarkdown>
@@ -232,7 +232,7 @@ const PublicDashboard = () => {
                             <ChevronDown className="h-3 w-3 text-muted-foreground ml-auto group-data-[state=open]:rotate-180 transition-transform" />
                           </CollapsibleTrigger>
                           <CollapsibleContent>
-                            <div className="ml-5 mt-1 mb-2 prose prose-xs dark:prose-invert max-w-none">
+                            <div className="ml-5 mt-1 mb-2 skill-prose max-w-none">
                               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                 {ref.content || ""}
                               </ReactMarkdown>
