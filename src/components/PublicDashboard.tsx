@@ -282,7 +282,7 @@ const PublicDashboard = () => {
 
       {/* Skill Detail Modal */}
       <Dialog open={!!selectedSkill} onOpenChange={(open) => !open && setSelectedSkill(null)}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto bg-card border-border">
+        <DialogContent className="w-[680px] max-w-[90vw] max-h-[85vh] overflow-y-auto overflow-x-hidden bg-card border-border">
           {selectedSkill && (
             <>
               <DialogHeader>
