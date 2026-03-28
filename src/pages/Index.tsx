@@ -10,8 +10,8 @@ const Index = () => {
 
   if (loading) {
     return (
-      <Layout>
-        <div className="flex items-center justify-center py-20">
+      <Layout fullScreen>
+        <div className="flex items-center justify-center h-full">
           <span className="text-accent text-2xl animate-pulse">◆</span>
         </div>
       </Layout>
@@ -27,21 +27,23 @@ const Index = () => {
   }
 
   return (
-    <Layout>
+    <Layout fullScreen>
       {isStaff ? (
-        <Tabs defaultValue="dashboard" className="w-full">
-          <TabsList className="bg-secondary border border-border mb-8">
-            <TabsTrigger value="dashboard" className="font-mono text-xs data-[state=active]:bg-accent/10 data-[state=active]:text-accent">
-              Dashboard
-            </TabsTrigger>
-            <TabsTrigger value="manage" className="font-mono text-xs data-[state=active]:bg-accent/10 data-[state=active]:text-accent">
-              Manage
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="dashboard">
+        <Tabs defaultValue="dashboard" className="flex flex-col h-full overflow-hidden">
+          <div className="flex-shrink-0 px-5 pt-2 pb-0">
+            <TabsList className="bg-secondary border border-border h-7">
+              <TabsTrigger value="dashboard" className="font-mono text-[10px] h-5 data-[state=active]:bg-accent/10 data-[state=active]:text-accent">
+                Dashboard
+              </TabsTrigger>
+              <TabsTrigger value="manage" className="font-mono text-[10px] h-5 data-[state=active]:bg-accent/10 data-[state=active]:text-accent">
+                Manage
+              </TabsTrigger>
+            </TabsList>
+          </div>
+          <TabsContent value="dashboard" className="flex-1 overflow-hidden mt-0">
             <PublicDashboard />
           </TabsContent>
-          <TabsContent value="manage">
+          <TabsContent value="manage" className="flex-1 overflow-auto mt-0 px-5 py-4">
             <StaffWorkspace />
           </TabsContent>
         </Tabs>
