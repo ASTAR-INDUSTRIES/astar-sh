@@ -1,9 +1,8 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 
 const Layout = ({ children }: { children: React.ReactNode }) => {
-  const location = useLocation();
-  const { user, isStaff, signIn, signOut } = useAuth();
+  const { user, isStaff, signOut } = useAuth();
 
   return (
     <div className="min-h-screen bg-background">
@@ -14,20 +13,18 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
           <span className="text-foreground font-medium">astar.sh</span>
         </Link>
         <div className="flex items-center gap-4 text-sm font-mono">
-          {user && isStaff ? (
-            <button
-              onClick={signOut}
-              className="text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Sign Out
-            </button>
-          ) : (
-            <button
-              onClick={signIn}
-              className="text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Staff Sign In
-            </button>
+          {user && (
+            <>
+              <span className="text-muted-foreground/50 text-xs hidden sm:inline">
+                {user.email}
+              </span>
+              <button
+                onClick={signOut}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Sign Out
+              </button>
+            </>
           )}
         </div>
       </nav>
