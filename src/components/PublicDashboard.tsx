@@ -8,12 +8,17 @@ import {
   BookOpen, Search, Tag, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 const PublicDashboard = () => {
   const [skillSearch, setSkillSearch] = useState("");
-  const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
+  const [selectedSkill, setSelectedSkill] = useState<any | null>(null);
 
   const { data: skills = [], isLoading: skillsLoading } = useQuery({
     queryKey: ["public-skills"],
