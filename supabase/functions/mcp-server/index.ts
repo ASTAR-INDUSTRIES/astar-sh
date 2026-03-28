@@ -1,7 +1,7 @@
 import { Hono } from "jsr:@hono/hono@^4";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
-const app = new Hono();
+const app = new Hono().basePath("/mcp-server");
 
 // ── Config ──────────────────────────────────────────────────────────────
 const TENANT_ID = "d6af3688-b659-4f90-b701-35246b209b9d";
