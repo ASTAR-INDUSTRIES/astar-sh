@@ -9,6 +9,7 @@ const MS_AUTHORIZE = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0
 const MS_TOKEN_URL = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
 const SANITY_PROJECT_ID = "fkqm34od";
 const SANITY_DATASET = "production";
+const SANITY_API = `https://${SANITY_PROJECT_ID}.api.sanity.io/v2024-01-01`;
 
 function env(key: string): string {
   const v = Deno.env.get(key);
@@ -26,6 +27,10 @@ function adminClient() {
   });
 }
 
+function sanityToken(): string {
+  return env("SANITY_API_TOKEN");
+}
+
 // ── Auth helper ────────────────────────────────────────────────────────
 async function validateToken(req: Request): Promise<{ email: string; userId: string } | null> {
   const auth = req.headers.get("authorization");
@@ -39,6 +44,34 @@ async function validateToken(req: Request): Promise<{ email: string; userId: str
     .maybeSingle();
   if (!data) return null;
   return { email: data.user_email, userId: data.user_id };
+}
+
+// ── Sanity Mutate Helper ──────────────────────────────────────────────
+async function sanityMutate(mutations: any[]) {
+  const res = await fetch(`${SANITY_API}/data/mutate/${SANITY_DATASET}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${sanityToken()}`,
+    },
+    body: JSON.stringify({ mutations }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(JSON.stringify(json));
+  return json;
+}
+
+async function sanityQuery(query: string, params?: Record<string, any>) {
+  const url = new URL(`${SANITY_API}/data/query/${SANITY_DATASET}`);
+  url.searchParams.set("query", query);
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      url.searchParams.set(`$${k}`, JSON.stringify(v));
+    }
+  }
+  const res = await fetch(url.toString());
+  const json = await res.json();
+  return json.result;
 }
 
 // ── CORS ───────────────────────────────────────────────────────────────
@@ -80,8 +113,6 @@ function authServerMetadata() {
 }
 
 app.get("/.well-known/oauth-authorization-server", (c) => c.json(authServerMetadata()));
-
-// ── OAuth: OpenID Connect Discovery (fallback for Claude Desktop) ──────
 app.get("/.well-known/openid-configuration", (c) => c.json(authServerMetadata()));
 
 // ── OAuth: Dynamic Client Registration ─────────────────────────────────
@@ -149,7 +180,6 @@ app.get("/callback", async (c) => {
   const { data: session } = await sb.from("mcp_sessions").select("*").eq("state", state).maybeSingle();
   if (!session) return c.json({ error: "Invalid state" }, 400);
 
-  // Exchange with Microsoft
   const tokenRes = await fetch(MS_TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -178,7 +208,6 @@ app.get("/callback", async (c) => {
     return c.redirect(url.toString());
   }
 
-  // Find/create user
   const { data: users } = await sb.auth.admin.listUsers();
   let userId = users?.users?.find((u: any) => u.email === email)?.id;
   if (!userId) {
@@ -189,7 +218,6 @@ app.get("/callback", async (c) => {
   const authCode = crypto.randomUUID();
   await sb.from("mcp_sessions").update({ auth_code: authCode, user_email: email, user_id: userId }).eq("id", session.id);
 
-  // Redirect to Claude Desktop
   const url = new URL(session.client_redirect_uri);
   url.searchParams.set("code", authCode);
   try {
@@ -214,7 +242,6 @@ app.post("/token", async (c) => {
   const { data: session } = await sb.from("mcp_sessions").select("*").eq("auth_code", code).maybeSingle();
   if (!session) return c.json({ error: "invalid_grant" }, 400);
 
-  // PKCE verification
   if (session.code_challenge && codeVerifier) {
     const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(codeVerifier));
     const computed = btoa(String.fromCharCode(...new Uint8Array(hash)))
@@ -280,7 +307,142 @@ const TOOLS = [
     description: "Get content statistics",
     inputSchema: { type: "object", properties: {} },
   },
+  // ── Skills Tools ─────────────────────────────────────────────────────
+  {
+    name: "create_skill",
+    description: "Create a new knowledge skill document",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Skill title" },
+        slug: { type: "string", description: "URL-friendly slug (auto-generated from title if omitted)" },
+        description: { type: "string", description: "Short description" },
+        tags: { type: "array", items: { type: "string" }, description: "Tags" },
+        content: { type: "string", description: "Main skill content in Markdown" },
+        published: { type: "boolean", description: "Publish immediately (default false)" },
+        references: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              filename: { type: "string" },
+              folder: { type: "string" },
+              content: { type: "string" },
+            },
+            required: ["filename", "content"],
+          },
+          description: "Reference files to attach",
+        },
+      },
+      required: ["title", "content"],
+    },
+  },
+  {
+    name: "update_skill",
+    description: "Update an existing knowledge skill by slug or ID",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: { type: "string", description: "Skill slug (use this or id)" },
+        id: { type: "string", description: "Skill document ID (use this or slug)" },
+        title: { type: "string" },
+        description: { type: "string" },
+        tags: { type: "array", items: { type: "string" } },
+        content: { type: "string", description: "Updated Markdown content" },
+        published: { type: "boolean" },
+      },
+    },
+  },
+  {
+    name: "delete_skill",
+    description: "Delete a knowledge skill by slug or ID",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: { type: "string" },
+        id: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "list_skills",
+    description: "List/search knowledge skills",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search text (matches title, description, tags)" },
+        published_only: { type: "boolean", description: "Only published (default false)" },
+        limit: { type: "number", description: "Max results (default 20)" },
+      },
+    },
+  },
+  {
+    name: "get_skill",
+    description: "Get a single knowledge skill with all content and references",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: { type: "string" },
+        id: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "upload_skill_file",
+    description: "Add a reference file to a skill",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: { type: "string", description: "Skill slug (use this or skill_id)" },
+        skill_id: { type: "string", description: "Skill document ID" },
+        filename: { type: "string", description: "File name e.g. overview.md" },
+        folder: { type: "string", description: "Folder name e.g. references" },
+        content: { type: "string", description: "File content (Markdown)" },
+      },
+      required: ["filename", "content"],
+    },
+  },
+  {
+    name: "delete_skill_file",
+    description: "Remove a reference file from a skill by filename",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: { type: "string" },
+        skill_id: { type: "string" },
+        filename: { type: "string", description: "Filename to remove" },
+      },
+      required: ["filename"],
+    },
+  },
+  {
+    name: "get_skill_history",
+    description: "Get revision history for a skill (audit trail)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: { type: "string" },
+        id: { type: "string" },
+      },
+    },
+  },
 ];
+
+// ── Skill Helper: resolve slug to ID ──────────────────────────────────
+async function resolveSkillId(args: { slug?: string; id?: string; skill_id?: string }): Promise<string | null> {
+  if (args.id) return args.id;
+  if (args.skill_id) return args.skill_id;
+  if (!args.slug) return null;
+  const result = await sanityQuery(
+    `*[_type == "knowledgeSkill" && slug.current == $slug][0]{ _id }`,
+    { slug: args.slug }
+  );
+  return result?._id || null;
+}
+
+function toSlug(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
 
 // ── MCP Tool Handlers ──────────────────────────────────────────────────
 async function handleTool(name: string, args: any, user: { email: string; userId: string }): Promise<any[]> {
@@ -315,25 +477,154 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const filter = (args.published_only !== false && args.type !== "skill") ? " && published == true" : "";
       const n = Math.min(args.limit || 10, 50);
       const query = `*[_type == "${args.type}"${filter}] | order(_createdAt desc)[0...${n}]`;
-      const url = `https://${SANITY_PROJECT_ID}.api.sanity.io/v2024-01-01/data/query/${SANITY_DATASET}?query=${encodeURIComponent(query)}`;
-      const res = await fetch(url);
-      const json = await res.json();
-      return [{ type: "text", text: JSON.stringify(json.result, null, 2) }];
+      const result = await sanityQuery(query);
+      return [{ type: "text", text: JSON.stringify(result, null, 2) }];
     }
     case "get_stats": {
       const { count } = await sb.from("tweets").select("*", { count: "exact", head: true });
-      const sq = encodeURIComponent(`{"news":count(*[_type=="newsPost"]),"publishedNews":count(*[_type=="newsPost"&&published==true]),"research":count(*[_type=="researchArticle"]),"skills":count(*[_type=="skill"])}`);
-      const res = await fetch(`https://${SANITY_PROJECT_ID}.api.sanity.io/v2024-01-01/data/query/${SANITY_DATASET}?query=${sq}`);
-      const sd = await res.json();
-      return [{ type: "text", text: JSON.stringify({ tweets: count || 0, ...(sd.result || {}) }, null, 2) }];
+      const result = await sanityQuery(`{"news":count(*[_type=="newsPost"]),"publishedNews":count(*[_type=="newsPost"&&published==true]),"research":count(*[_type=="researchArticle"]),"skills":count(*[_type=="knowledgeSkill"]),"publishedSkills":count(*[_type=="knowledgeSkill"&&published==true])}`);
+      return [{ type: "text", text: JSON.stringify({ tweets: count || 0, ...(result || {}) }, null, 2) }];
     }
+
+    // ── Skills CRUD ──────────────────────────────────────────────────
+    case "create_skill": {
+      const slug = args.slug || toSlug(args.title);
+      const docId = `knowledgeSkill-${slug}`;
+      const refs = (args.references || []).map((r: any) => ({
+        _type: "referenceFile",
+        _key: crypto.randomUUID().slice(0, 8),
+        filename: r.filename,
+        folder: r.folder || "",
+        content: r.content,
+      }));
+      const doc: any = {
+        _id: docId,
+        _type: "knowledgeSkill",
+        title: args.title,
+        slug: { _type: "slug", current: slug },
+        description: args.description || "",
+        tags: args.tags || [],
+        markdownContent: args.content,
+        published: args.published || false,
+        author: user.email,
+        references: refs,
+      };
+      await sanityMutate([{ createOrReplace: doc }]);
+      return [{ type: "text", text: `✓ Skill "${args.title}" created (slug: ${slug}).` }];
+    }
+
+    case "update_skill": {
+      const docId = await resolveSkillId(args);
+      if (!docId) return [{ type: "text", text: "Error: Skill not found. Provide slug or id." }];
+      const patch: any = {};
+      if (args.title !== undefined) patch.title = args.title;
+      if (args.description !== undefined) patch.description = args.description;
+      if (args.tags !== undefined) patch.tags = args.tags;
+      if (args.content !== undefined) patch.markdownContent = args.content;
+      if (args.published !== undefined) patch.published = args.published;
+      if (Object.keys(patch).length === 0) return [{ type: "text", text: "No fields to update." }];
+      await sanityMutate([{ patch: { id: docId, set: patch } }]);
+      return [{ type: "text", text: `✓ Skill updated.` }];
+    }
+
+    case "delete_skill": {
+      const docId = await resolveSkillId(args);
+      if (!docId) return [{ type: "text", text: "Error: Skill not found." }];
+      await sanityMutate([{ delete: { id: docId } }]);
+      return [{ type: "text", text: `✓ Skill deleted.` }];
+    }
+
+    case "list_skills": {
+      const pubFilter = args.published_only ? " && published == true" : "";
+      const searchFilter = args.query
+        ? ` && (title match $q || description match $q || $q in tags)`
+        : "";
+      const n = Math.min(args.limit || 20, 50);
+      const q = `*[_type == "knowledgeSkill"${pubFilter}${searchFilter}] | order(_updatedAt desc)[0...${n}]{ _id, title, "slug": slug.current, description, tags, published, author, _updatedAt }`;
+      const result = await sanityQuery(q, args.query ? { q: `${args.query}*` } : undefined);
+      if (!result?.length) return [{ type: "text", text: "No skills found." }];
+      return [{ type: "text", text: JSON.stringify(result, null, 2) }];
+    }
+
+    case "get_skill": {
+      const docId = await resolveSkillId(args);
+      if (!docId) return [{ type: "text", text: "Error: Skill not found." }];
+      const result = await sanityQuery(
+        `*[_type == "knowledgeSkill" && _id == $id][0]`,
+        { id: docId }
+      );
+      if (!result) return [{ type: "text", text: "Skill not found." }];
+      return [{ type: "text", text: JSON.stringify(result, null, 2) }];
+    }
+
+    case "upload_skill_file": {
+      const docId = await resolveSkillId(args);
+      if (!docId) return [{ type: "text", text: "Error: Skill not found." }];
+      const fileItem = {
+        _type: "referenceFile",
+        _key: crypto.randomUUID().slice(0, 8),
+        filename: args.filename,
+        folder: args.folder || "",
+        content: args.content,
+      };
+      await sanityMutate([{
+        patch: {
+          id: docId,
+          setIfMissing: { references: [] },
+          insert: { after: "references[-1]", items: [fileItem] },
+        },
+      }]);
+      return [{ type: "text", text: `✓ File "${args.filename}" added.` }];
+    }
+
+    case "delete_skill_file": {
+      const docId = await resolveSkillId(args);
+      if (!docId) return [{ type: "text", text: "Error: Skill not found." }];
+      // Get current references to find the key
+      const skill = await sanityQuery(
+        `*[_type == "knowledgeSkill" && _id == $id][0]{ references }`,
+        { id: docId }
+      );
+      const ref = skill?.references?.find((r: any) => r.filename === args.filename);
+      if (!ref) return [{ type: "text", text: `File "${args.filename}" not found.` }];
+      await sanityMutate([{
+        patch: {
+          id: docId,
+          unset: [`references[_key=="${ref._key}"]`],
+        },
+      }]);
+      return [{ type: "text", text: `✓ File "${args.filename}" removed.` }];
+    }
+
+    case "get_skill_history": {
+      const docId = await resolveSkillId(args);
+      if (!docId) return [{ type: "text", text: "Error: Skill not found." }];
+      try {
+        const res = await fetch(
+          `https://${SANITY_PROJECT_ID}.api.sanity.io/v2024-01-01/data/history/${SANITY_DATASET}/transactions/${docId}?excludeContent=true`,
+          { headers: { Authorization: `Bearer ${sanityToken()}` } }
+        );
+        const text = await res.text();
+        // NDJSON response
+        const transactions = text.trim().split("\n").filter(Boolean).map((line: string) => {
+          try { return JSON.parse(line); } catch { return null; }
+        }).filter(Boolean).slice(0, 20);
+        if (!transactions.length) return [{ type: "text", text: "No history found." }];
+        const summary = transactions.map((t: any) =>
+          `${t.timestamp} — ${t.author} — ${t.mutations?.map((m: any) => Object.keys(m)[0]).join(", ") || "change"}`
+        ).join("\n");
+        return [{ type: "text", text: summary }];
+      } catch (e: any) {
+        return [{ type: "text", text: `Error fetching history: ${e.message}` }];
+      }
+    }
+
     default:
       return [{ type: "text", text: `Unknown tool: ${name}` }];
   }
 }
 
 // ── MCP JSON-RPC Handler ───────────────────────────────────────────────
-// GET /mcp — SSE endpoint (required by Streamable HTTP transport)
 app.get("/mcp", async (c) => {
   const user = await validateToken(c.req.raw);
   if (!user) {
@@ -345,14 +636,12 @@ app.get("/mcp", async (c) => {
       },
     });
   }
-  // Return 200 with SSE headers but no events (server-initiated notifications not used)
   return new Response("", {
     status: 200,
     headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
   });
 });
 
-// DELETE /mcp — session termination
 app.delete("/mcp", (c) => new Response(null, { status: 204 }));
 
 app.post("/mcp", async (c) => {
