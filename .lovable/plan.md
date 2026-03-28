@@ -1,41 +1,78 @@
 
 
-# Fix: MCP Server OAuth Discovery for Claude Desktop
+# Skills System via Sanity CMS
 
-## Problem
+## Why Sanity (not Supabase)
 
-The MCP server's OAuth discovery endpoints work (return 200) but Claude Desktop never proceeds to the OAuth flow (no `/register` or `/authorize` calls). The analytics show it discovers metadata, retries POST /mcp, gets 401 again, and gives up.
+You're right — Sanity is the better fit here. It already manages news and research, has **native revision history** (built-in audit trail for every document change), supports rich content (Portable Text for markdown-like editing), and the MCP server already queries Sanity. Keeping skills in Sanity means one content platform for all structured knowledge.
 
-**Root causes identified from request logs and MCP spec:**
+The existing `skill` schema (title, description, icon, order) is used for the login page cards. We'll create a new `knowledgeSkill` type for the rich skill packages, keeping the simple cards separate.
 
-1. **Wrong `resource` identifier** — Protected resource metadata returns `resource: "https://.../mcp-server"` but should be `"https://.../mcp-server/mcp"` (the actual protected endpoint URL). Claude can't match the resource to the endpoint it's protecting.
+## Architecture
 
-2. **Missing `scopes_supported`** — The MCP spec says clients use `scopes_supported` from the protected resource metadata to know what scopes to request. Without it, Claude may not know how to proceed.
+```text
+Sanity CMS
+├── skill (existing) ─── Login page decorative cards
+└── knowledgeSkill (new) ─── Rich skill packages
+    ├── title, slug, description, tags
+    ├── content (Portable Text / markdown body)
+    └── references[] (array of { filename, folder, content })
 
-3. **Missing `/.well-known/openid-configuration`** — Claude Desktop tries this endpoint first (returns 404). While not strictly required, serving it as a fallback would improve compatibility.
+Audit trail → Sanity's native revision history (free, automatic)
+```
 
-## Plan
+## Implementation Steps
 
-### Single file change: `supabase/functions/mcp-server/index.ts`
+### 1. Deploy new Sanity schema: `knowledgeSkill`
 
-1. **Fix protected resource metadata** (`/.well-known/oauth-protected-resource`):
-   - Set `resource` to `${baseUrl()}/mcp` (the actual MCP endpoint)
-   - Add `scopes_supported: ["mcp:tools"]`
-   - Add `bearer_methods_supported: ["header"]` (already present, keep it)
+Deploy a new document type with:
+- `title` (string, required)
+- `slug` (slug, sourced from title)
+- `description` (text)
+- `tags` (array of strings)
+- `content` (array of blocks — Portable Text for the main skill.md)
+- `references` (array of objects: `{ filename, folder, content }` for supporting files)
+- `published` (boolean, default false)
+- `author` (string)
 
-2. **Fix authorization server metadata** (`/.well-known/oauth-authorization-server`):
-   - Add `scopes_supported: ["mcp:tools"]`
+### 2. Update MCP server with skill CRUD tools
 
-3. **Add `/.well-known/openid-configuration`** endpoint — return the same content as `oauth-authorization-server` (Claude tries this first)
+Add these tools to `supabase/functions/mcp-server/index.ts`:
 
-4. **Update the 401 `WWW-Authenticate` header** on both GET and POST `/mcp`:
-   - Include the `scope` parameter: `Bearer resource_metadata="...", scope="mcp:tools"`
+- **`create_skill`** — Creates a knowledgeSkill document in Sanity via the HTTP API (mutate endpoint). Accepts title, slug, description, tags, content (markdown string converted to blocks or stored as plain text in a dedicated field), references array.
+- **`update_skill`** — Patches an existing skill by ID or slug.
+- **`delete_skill`** — Deletes a skill document.
+- **`list_skills`** — GROQ query with optional text search across title/description/tags.
+- **`get_skill`** — Fetch a single skill by slug or ID with all references.
+- **`upload_skill_file`** — Adds a reference file (filename, folder, markdown content) to a skill's references array.
+- **`delete_skill_file`** — Removes a reference file from the array by filename.
+- **`get_skill_history`** — Fetches Sanity revision history for a skill document (native audit).
 
-5. **Redeploy** the edge function
+### 3. Frontend — Public skills browser
 
-### Technical detail
-The MCP spec (2025-03-26) requires that:
-- The `resource` field in protected resource metadata MUST match the URL being protected
-- Clients use `scope` from the 401 challenge first, then fall back to `scopes_supported`
-- Claude Desktop also tries OpenID Connect discovery as a fallback
+Update `PublicDashboard.tsx`:
+- Add a "Skills" section with a search input
+- Query `*[_type == "knowledgeSkill" && published == true]` from Sanity
+- Display as a searchable grid of cards (title, description, tags)
+- Click to expand: render the full content with `react-markdown` + `remark-gfm`, show attached reference files
+
+### 4. Frontend — Staff skills management
+
+Update `StaffWorkspace.tsx`:
+- Add a "Skills" tab alongside "Thinking"
+- List all skills (published and draft) with edit/delete actions
+- Inline skill creator: title, slug, description, tags, markdown content textarea
+- Link to Sanity Studio for advanced editing
+- Show recent revision history (fetched from Sanity API)
+
+### 5. Install dependencies
+
+- `react-markdown` and `remark-gfm` for rendering skill markdown content on the frontend
+
+## Technical Details
+
+- Sanity's Mutate API (`/data/mutate`) is used from the MCP edge function for CRUD — same pattern as the existing `query_content` tool but with `createOrReplace`, `patch`, and `delete` mutations
+- Sanity revision history is available via `https://<projectId>.api.sanity.io/v1/data/history/<dataset>/documents/<docId>`
+- The `knowledgeSkill` uses a `markdownContent` text field (plain markdown string) alongside optional Portable Text, keeping MCP interactions simple while allowing rich editing in Sanity Studio
+- Search uses GROQ: `*[_type == "knowledgeSkill" && (title match $q || description match $q || $q in tags)]`
 
