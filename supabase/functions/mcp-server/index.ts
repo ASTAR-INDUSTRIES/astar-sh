@@ -322,6 +322,28 @@ async function handleTool(name: string, args: any, user: { email: string; userId
 }
 
 // ── MCP JSON-RPC Handler ───────────────────────────────────────────────
+// GET /mcp — SSE endpoint (required by Streamable HTTP transport)
+app.get("/mcp", async (c) => {
+  const user = await validateToken(c.req.raw);
+  if (!user) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: {
+        "WWW-Authenticate": `Bearer resource_metadata="${baseUrl()}/.well-known/oauth-protected-resource"`,
+        "Content-Type": "application/json",
+      },
+    });
+  }
+  // Return 200 with SSE headers but no events (server-initiated notifications not used)
+  return new Response("", {
+    status: 200,
+    headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+  });
+});
+
+// DELETE /mcp — session termination
+app.delete("/mcp", (c) => new Response(null, { status: 204 }));
+
 app.post("/mcp", async (c) => {
   const user = await validateToken(c.req.raw);
   if (!user) {
@@ -349,8 +371,7 @@ app.post("/mcp", async (c) => {
       break;
 
     case "notifications/initialized":
-      // No response needed for notifications
-      return new Response("", { status: 204 });
+      return new Response(null, { status: 202 });
 
     case "tools/list":
       result = { tools: TOOLS };
