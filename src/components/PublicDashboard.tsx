@@ -2,10 +2,11 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { sanityClient } from "@/lib/sanity";
-import { format } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 import {
   FileText, FlaskConical, MessageCircle,
   BookOpen, Search, ChevronDown, Folder,
+  Activity, Download, List, Terminal,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -16,6 +17,16 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { ScrollArea } from "@/components/ui/scroll-area";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+
+const eventIcons: Record<string, typeof Download> = {
+  "skill.download": Download,
+  "skill.list": List,
+};
+
+const eventLabels: Record<string, string> = {
+  "skill.download": "downloaded",
+  "skill.list": "listed skills",
+};
 
 const PublicDashboard = () => {
   const [skillSearch, setSkillSearch] = useState("");
@@ -65,7 +76,28 @@ const PublicDashboard = () => {
     },
   });
 
-  // Derive unique project values from skills
+  const { data: cliEvents = [] } = useQuery({
+    queryKey: ["cli-events"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("cli_events")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      return data;
+    },
+    refetchInterval: 30000,
+  });
+
+  // Derive download counts per skill
+  const downloadCounts = cliEvents.reduce<Record<string, number>>((acc, ev: any) => {
+    if (ev.event_type === "skill.download" && ev.skill_slug) {
+      acc[ev.skill_slug] = (acc[ev.skill_slug] || 0) + 1;
+    }
+    return acc;
+  }, {});
+
   const projects = Array.from(new Set(skills.map((s: any) => s.project || "general")));
 
   const filteredSkills = skills.filter((s: any) => {
@@ -81,10 +113,9 @@ const PublicDashboard = () => {
 
   return (
     <>
-      <div className="grid grid-cols-[1fr_380px] gap-0 h-[calc(100vh-57px)] overflow-hidden">
-        {/* LEFT: Skills */}
+      <div className="grid grid-cols-[1fr_420px] gap-0 h-[calc(100vh-57px)] overflow-hidden">
+        {/* LEFT: Skills (compact) */}
         <div className="flex flex-col border-r border-border overflow-hidden">
-          {/* Header + Search */}
           <div className="flex-shrink-0 px-5 pt-4 pb-3 border-b border-border">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
@@ -123,7 +154,6 @@ const PublicDashboard = () => {
             </div>
           </div>
 
-          {/* Skills Table */}
           <ScrollArea className="flex-1">
             {skillsLoading ? (
               <div className="p-5 space-y-2">
@@ -143,50 +173,62 @@ const PublicDashboard = () => {
                   <TableRow className="border-accent/20 hover:bg-transparent">
                     <TableHead className="w-8 font-mono text-[9px] uppercase tracking-wider text-muted-foreground pl-5">#</TableHead>
                     <TableHead className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Skill</TableHead>
+                    <TableHead className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground w-16 text-center">
+                      <Download className="h-3 w-3 inline-block" />
+                    </TableHead>
                     <TableHead className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground w-20">Project</TableHead>
                     <TableHead className="text-right font-mono text-[9px] uppercase tracking-wider text-muted-foreground w-20 pr-5">Updated</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredSkills.map((skill: any, index: number) => (
-                    <TableRow
-                      key={skill._id}
-                      className="cursor-pointer hover:bg-accent/5 transition-colors"
-                      onClick={() => setSelectedSkill(skill)}
-                    >
-                      <TableCell className="font-mono text-[10px] text-muted-foreground/50 pl-5 py-2">
-                        {index + 1}
-                      </TableCell>
-                      <TableCell className="py-2">
-                        <span className="font-mono text-xs font-medium text-foreground">
-                          {skill.title}
-                        </span>
-                        {skill.description && (
-                          <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">
-                            {skill.description}
-                          </p>
-                        )}
-                      </TableCell>
-                      <TableCell className="py-2">
-                        <span className="text-[10px] font-mono text-muted-foreground/60">
-                          {skill.project || "general"}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-[10px] text-muted-foreground pr-5 py-2">
-                        {skill._updatedAt ? format(new Date(skill._updatedAt), "MMM d") : "—"}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {filteredSkills.map((skill: any, index: number) => {
+                    const slug = skill.slug || skill.title?.toLowerCase().replace(/\s+/g, "-");
+                    const count = downloadCounts[slug] || 0;
+                    return (
+                      <TableRow
+                        key={skill._id}
+                        className="cursor-pointer hover:bg-accent/5 transition-colors"
+                        onClick={() => setSelectedSkill(skill)}
+                      >
+                        <TableCell className="font-mono text-[10px] text-muted-foreground/50 pl-5 py-2">
+                          {index + 1}
+                        </TableCell>
+                        <TableCell className="py-2">
+                          <span className="font-mono text-xs font-medium text-foreground">
+                            {skill.title}
+                          </span>
+                          {skill.description && (
+                            <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">
+                              {skill.description}
+                            </p>
+                          )}
+                        </TableCell>
+                        <TableCell className="py-2 text-center">
+                          <span className="text-[10px] font-mono text-muted-foreground/60">
+                            {count > 0 ? count : "—"}
+                          </span>
+                        </TableCell>
+                        <TableCell className="py-2">
+                          <span className="text-[10px] font-mono text-muted-foreground/60">
+                            {skill.project || "general"}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-[10px] text-muted-foreground pr-5 py-2">
+                          {skill._updatedAt ? format(new Date(skill._updatedAt), "MMM d") : "—"}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             )}
           </ScrollArea>
         </div>
 
-        {/* RIGHT: Feed */}
+        {/* RIGHT: Thinking + Activity Log + News/Research */}
         <div className="flex flex-col overflow-hidden">
-          {/* Thinking */}
-          <div className="flex-1 flex flex-col overflow-hidden border-b border-border">
+          {/* Thinking — larger */}
+          <div className="flex-[3] flex flex-col overflow-hidden border-b border-border">
             <div className="flex-shrink-0 px-4 pt-4 pb-2 flex items-center gap-2">
               <MessageCircle className="h-3 w-3 text-accent" />
               <h3 className="text-[10px] font-mono uppercase tracking-[0.25em] text-muted-foreground">Thinking</h3>
@@ -196,7 +238,7 @@ const PublicDashboard = () => {
                 {tweets.length === 0 ? (
                   <p className="text-muted-foreground/50 font-mono text-[10px] py-4 text-center">—</p>
                 ) : (
-                  tweets.slice(0, 8).map((tweet) => (
+                  tweets.slice(0, 12).map((tweet) => (
                     <div key={tweet.id} className="border-l-2 border-accent/30 pl-3 py-1">
                       <p className="text-xs text-foreground/80 font-sans leading-relaxed line-clamp-3">
                         {tweet.content}
@@ -212,27 +254,68 @@ const PublicDashboard = () => {
             </ScrollArea>
           </div>
 
-          {/* News */}
-          <div className="flex-1 flex flex-col overflow-hidden border-b border-border">
+          {/* Activity Log */}
+          <div className="flex-[2] flex flex-col overflow-hidden border-b border-border">
+            <div className="flex-shrink-0 px-4 pt-3 pb-2 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Terminal className="h-3 w-3 text-accent" />
+                <h3 className="text-[10px] font-mono uppercase tracking-[0.25em] text-muted-foreground">CLI Activity</h3>
+              </div>
+              <span className="text-[10px] font-mono text-muted-foreground/50">
+                {cliEvents.length} event{cliEvents.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+            <ScrollArea className="flex-1 px-4">
+              <div className="space-y-1 pb-3">
+                {cliEvents.length === 0 ? (
+                  <p className="text-muted-foreground/50 font-mono text-[10px] py-4 text-center">No activity yet</p>
+                ) : (
+                  cliEvents.map((ev: any) => {
+                    const Icon = eventIcons[ev.event_type] || Activity;
+                    const label = eventLabels[ev.event_type] || ev.event_type;
+                    return (
+                      <div key={ev.id} className="flex items-start gap-2 py-1 group">
+                        <Icon className="h-3 w-3 text-accent/60 mt-0.5 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[11px] font-mono text-foreground/80 leading-tight">
+                            {ev.skill_slug ? (
+                              <>
+                                <span className="text-accent">{ev.skill_title || ev.skill_slug}</span>
+                                {" "}
+                                <span className="text-muted-foreground">{label}</span>
+                              </>
+                            ) : (
+                              <span className="text-muted-foreground">{label}</span>
+                            )}
+                          </p>
+                          <span className="text-[9px] font-mono text-muted-foreground/40">
+                            {formatDistanceToNow(new Date(ev.created_at), { addSuffix: true })}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </ScrollArea>
+          </div>
+
+          {/* News + Research (compact) */}
+          <div className="flex-[1] flex flex-col overflow-hidden border-b border-border">
             <div className="flex-shrink-0 px-4 pt-3 pb-2 flex items-center gap-2">
               <FileText className="h-3 w-3 text-accent" />
               <h3 className="text-[10px] font-mono uppercase tracking-[0.25em] text-muted-foreground">News</h3>
             </div>
             <ScrollArea className="flex-1 px-4">
-              <div className="space-y-1.5 pb-3">
+              <div className="space-y-1 pb-2">
                 {posts.length === 0 ? (
-                  <p className="text-muted-foreground/50 font-mono text-[10px] py-4 text-center">—</p>
+                  <p className="text-muted-foreground/50 font-mono text-[10px] py-2 text-center">—</p>
                 ) : (
-                  posts.slice(0, 5).map((post: any) => (
-                    <div key={post._id} className="flex items-start justify-between gap-2 py-1">
-                      <div className="flex-1 min-w-0">
-                        <span className="font-mono text-xs text-foreground line-clamp-1">{post.title}</span>
-                        {post.excerpt && (
-                          <p className="text-[10px] text-muted-foreground line-clamp-1 mt-0.5">{post.excerpt}</p>
-                        )}
-                      </div>
+                  posts.slice(0, 4).map((post: any) => (
+                    <div key={post._id} className="flex items-start justify-between gap-2 py-0.5">
+                      <span className="font-mono text-[11px] text-foreground line-clamp-1 flex-1 min-w-0">{post.title}</span>
                       {post.publishedAt && (
-                        <span className="text-[10px] font-mono text-muted-foreground/50 shrink-0">
+                        <span className="text-[9px] font-mono text-muted-foreground/50 shrink-0">
                           {format(new Date(post.publishedAt), "MMM d")}
                         </span>
                       )}
@@ -243,31 +326,21 @@ const PublicDashboard = () => {
             </ScrollArea>
           </div>
 
-          {/* Research */}
-          <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-[1] flex flex-col overflow-hidden">
             <div className="flex-shrink-0 px-4 pt-3 pb-2 flex items-center gap-2">
               <FlaskConical className="h-3 w-3 text-accent" />
               <h3 className="text-[10px] font-mono uppercase tracking-[0.25em] text-muted-foreground">Research</h3>
             </div>
             <ScrollArea className="flex-1 px-4">
-              <div className="space-y-1.5 pb-3">
+              <div className="space-y-1 pb-2">
                 {articles.length === 0 ? (
-                  <p className="text-muted-foreground/50 font-mono text-[10px] py-4 text-center">—</p>
+                  <p className="text-muted-foreground/50 font-mono text-[10px] py-2 text-center">—</p>
                 ) : (
-                  articles.slice(0, 5).map((article: any) => (
-                    <div key={article._id} className="flex items-start justify-between gap-2 py-1">
-                      <div className="flex-1 min-w-0">
-                        <span className="font-mono text-xs text-foreground line-clamp-1">{article.title}</span>
-                        {article.tags?.length > 0 && (
-                          <div className="flex gap-1 mt-0.5">
-                            {article.tags.slice(0, 2).map((tag: string) => (
-                              <span key={tag} className="text-[9px] font-mono uppercase text-accent/60">{tag}</span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                  articles.slice(0, 4).map((article: any) => (
+                    <div key={article._id} className="flex items-start justify-between gap-2 py-0.5">
+                      <span className="font-mono text-[11px] text-foreground line-clamp-1 flex-1 min-w-0">{article.title}</span>
                       {article.publishedAt && (
-                        <span className="text-[10px] font-mono text-muted-foreground/50 shrink-0">
+                        <span className="text-[9px] font-mono text-muted-foreground/50 shrink-0">
                           {format(new Date(article.publishedAt), "MMM d")}
                         </span>
                       )}
@@ -315,11 +388,22 @@ const PublicDashboard = () => {
                     </Badge>
                   ))}
                 </div>
-                {selectedSkill._updatedAt && (
-                  <span className="text-xs font-mono text-muted-foreground">
-                    {format(new Date(selectedSkill._updatedAt), "MMM d, yyyy")}
-                  </span>
-                )}
+                <div className="flex items-center gap-3">
+                  {(() => {
+                    const slug = selectedSkill.slug || selectedSkill.title?.toLowerCase().replace(/\s+/g, "-");
+                    const count = downloadCounts[slug] || 0;
+                    return count > 0 ? (
+                      <span className="text-[10px] font-mono text-muted-foreground flex items-center gap-1">
+                        <Download className="h-3 w-3" /> {count}
+                      </span>
+                    ) : null;
+                  })()}
+                  {selectedSkill._updatedAt && (
+                    <span className="text-xs font-mono text-muted-foreground">
+                      {format(new Date(selectedSkill._updatedAt), "MMM d, yyyy")}
+                    </span>
+                  )}
+                </div>
               </div>
 
               {selectedSkill.markdownContent && (

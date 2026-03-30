@@ -14,6 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
+      cli_events: {
+        Row: {
+          created_at: string
+          event_type: string
+          id: string
+          metadata: Json | null
+          skill_slug: string | null
+          skill_title: string | null
+          user_email: string | null
+          user_name: string | null
+        }
+        Insert: {
+          created_at?: string
+          event_type: string
+          id?: string
+          metadata?: Json | null
+          skill_slug?: string | null
+          skill_title?: string | null
+          user_email?: string | null
+          user_name?: string | null
+        }
+        Update: {
+          created_at?: string
+          event_type?: string
+          id?: string
+          metadata?: Json | null
+          skill_slug?: string | null
+          skill_title?: string | null
+          user_email?: string | null
+          user_name?: string | null
+        }
+        Relationships: []
+      }
       mcp_sessions: {
         Row: {
           access_token: string | null
