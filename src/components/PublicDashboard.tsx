@@ -21,11 +21,13 @@ import remarkGfm from "remark-gfm";
 const eventIcons: Record<string, typeof Download> = {
   "skill.download": Download,
   "skill.list": List,
+  "user.login": Activity,
 };
 
 const eventLabels: Record<string, string> = {
   "skill.download": "downloaded",
   "skill.list": "listed skills",
+  "user.login": "signed in",
 };
 
 const PublicDashboard = () => {
