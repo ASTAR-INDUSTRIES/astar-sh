@@ -5,14 +5,18 @@ import { getConfig, getAuthCache, saveAuthCache, clearAuthCache, type AuthCache 
 
 const SCOPES = ["openid", "profile", "email"];
 
+let msalClient: PublicClientApplication | null = null;
+
 async function getMsalClient() {
+  if (msalClient) return msalClient;
   const config = await getConfig();
-  return new PublicClientApplication({
+  msalClient = new PublicClientApplication({
     auth: {
       clientId: config.clientId,
       authority: `https://login.microsoftonline.com/${config.tenantId}`,
     },
   });
+  return msalClient;
 }
 
 function openBrowser(url: string) {
@@ -29,6 +33,34 @@ async function waitForEnter(): Promise<void> {
       resolve();
     });
   });
+}
+
+async function silentRefresh(cache: AuthCache): Promise<AuthCache | null> {
+  if (!cache.homeAccountId) return null;
+
+  try {
+    const client = await getMsalClient();
+    const accounts = await client.getTokenCache().getAllAccounts();
+    const account = accounts.find((a) => a.homeAccountId === cache.homeAccountId);
+    if (!account) return null;
+
+    const result = await client.acquireTokenSilent({ scopes: SCOPES, account });
+    if (!result) return null;
+
+    const refreshed: AuthCache = {
+      accessToken: result.accessToken,
+      expiresAt: result.expiresOn?.getTime() ?? Date.now() + 3600_000,
+      homeAccountId: result.account?.homeAccountId,
+      account: {
+        name: result.account?.name ?? cache.account.name,
+        username: result.account?.username ?? cache.account.username,
+      },
+    };
+    await saveAuthCache(refreshed);
+    return refreshed;
+  } catch {
+    return null;
+  }
 }
 
 export async function login(): Promise<AuthCache> {
@@ -64,6 +96,7 @@ export async function login(): Promise<AuthCache> {
   const cache: AuthCache = {
     accessToken: result.accessToken,
     expiresAt: result.expiresOn?.getTime() ?? Date.now() + 3600_000,
+    homeAccountId: result.account?.homeAccountId,
     account: {
       name: result.account?.name ?? "Unknown",
       username: email,
@@ -75,6 +108,7 @@ export async function login(): Promise<AuthCache> {
 }
 
 export async function logout() {
+  msalClient = null;
   await clearAuthCache();
 }
 
@@ -87,5 +121,11 @@ export async function getAuthStatus(): Promise<{ name: string; email: string } |
 export async function getToken(): Promise<string> {
   const cache = await getAuthCache();
   if (!cache) throw new Error("Not authenticated. Run 'astar login' first.");
-  return cache.accessToken;
+
+  if (cache.expiresAt > Date.now()) return cache.accessToken;
+
+  const refreshed = await silentRefresh(cache);
+  if (refreshed) return refreshed.accessToken;
+
+  throw new Error("Session expired. Run 'astar login' to sign in again.");
 }

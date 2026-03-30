@@ -45,8 +45,8 @@ export async function saveConfig(config: Partial<Config>) {
 
 export interface AuthCache {
   accessToken: string;
-  refreshToken?: string;
   expiresAt: number;
+  homeAccountId?: string;
   account: {
     name: string;
     username: string;
@@ -56,8 +56,9 @@ export interface AuthCache {
 export async function getAuthCache(): Promise<AuthCache | null> {
   const file = Bun.file(AUTH_FILE);
   if (await file.exists()) {
-    const cache: AuthCache = await file.json();
-    if (cache.expiresAt > Date.now()) return cache;
+    const text = await file.text();
+    if (!text.trim()) return null;
+    return JSON.parse(text);
   }
   return null;
 }
