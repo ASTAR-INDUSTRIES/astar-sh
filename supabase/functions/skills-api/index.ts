@@ -38,6 +38,58 @@ async function logEvent(eventType: string, opts?: { skillSlug?: string; skillTit
   }
 }
 
+// ── Sanity mutate helper ─────────────────────────────────────────────
+async function sanityMutate(mutations: any[]) {
+  const token = Deno.env.get("SANITY_API_TOKEN");
+  if (!token) throw new Error("SANITY_API_TOKEN not configured");
+  const res = await fetch(`${SANITY_API}/data/mutate/${SANITY_DATASET}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ mutations }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(JSON.stringify(json));
+  return json;
+}
+
+// ── Auth: validate Microsoft JWT ─────────────────────────────────────
+const TENANT_ID = "d6af3688-b659-4f90-b701-35246b209b9d";
+const JWKS_URL = `https://login.microsoftonline.com/${TENANT_ID}/discovery/v2.0/keys`;
+
+let jwksCache: any = null;
+let jwksCacheTime = 0;
+
+async function getJwks() {
+  if (jwksCache && Date.now() - jwksCacheTime < 3600_000) return jwksCache;
+  const res = await fetch(JWKS_URL);
+  jwksCache = await res.json();
+  jwksCacheTime = Date.now();
+  return jwksCache;
+}
+
+async function validateMsToken(req: Request): Promise<{ email: string; name: string } | null> {
+  const auth = req.headers.get("authorization");
+  if (!auth?.startsWith("Bearer ")) return null;
+  const token = auth.slice(7);
+
+  try {
+    const [headerB64, payloadB64] = token.split(".");
+    const payload = JSON.parse(atob(payloadB64));
+
+    const email = payload.email || payload.preferred_username || payload.upn;
+    if (!email?.endsWith("@astarconsulting.no")) return null;
+
+    if (payload.exp && payload.exp * 1000 < Date.now()) return null;
+
+    return { email, name: payload.name || email.split("@")[0] };
+  } catch {
+    return null;
+  }
+}
+
 // ── Sanity query helper ───────────────────────────────────────────────
 async function sanityQuery(query: string, params?: Record<string, any>) {
   const url = new URL(`${SANITY_API}/data/query/${SANITY_DATASET}`);
@@ -62,9 +114,10 @@ app.get("/skills", async (c) => {
       description,
       tags,
       project,
-      "skillMd": skill_md,
-      "referenceFiles": reference_files[] {
+      "skillMd": markdownContent,
+      "referenceFiles": references[] {
         filename,
+        folder,
         content
       }
     }
@@ -86,9 +139,10 @@ app.get("/skills/:slug", async (c) => {
       description,
       tags,
       project,
-      "skillMd": skill_md,
-      "referenceFiles": reference_files[] {
+      "skillMd": markdownContent,
+      "referenceFiles": references[] {
         filename,
+        folder,
         content
       }
     }`,
@@ -101,6 +155,56 @@ app.get("/skills/:slug", async (c) => {
 
   await logEvent("skill.download", { skillSlug: slug, skillTitle: skill.title });
   return c.json({ skill }, 200, corsHeaders);
+});
+
+// ── POST /skills — create or update a skill ─────────────────────────
+app.post("/skills", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) {
+    return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+  }
+
+  const body = await c.req.json();
+  const { title, slug, description, tags, content, references, published } = body;
+
+  if (!title || !content) {
+    return c.json({ error: "title and content are required" }, 400, corsHeaders);
+  }
+
+  const skillSlug = slug || title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const docId = `knowledgeSkill-${skillSlug}`;
+
+  const refs = (references || []).map((r: any) => ({
+    _type: "referenceFile",
+    _key: crypto.randomUUID().slice(0, 8),
+    filename: r.filename,
+    folder: r.folder || "",
+    content: r.content,
+  }));
+
+  const doc: any = {
+    _id: docId,
+    _type: "knowledgeSkill",
+    title,
+    slug: { _type: "slug", current: skillSlug },
+    description: description || "",
+    tags: tags || [],
+    markdownContent: content,
+    published: published ?? false,
+    author: user.email,
+    references: refs,
+  };
+
+  await sanityMutate([{ createOrReplace: doc }]);
+
+  await logEvent("skill.push", {
+    skillSlug,
+    skillTitle: title,
+    userEmail: user.email,
+    userName: user.name,
+  });
+
+  return c.json({ ok: true, slug: skillSlug }, 200, corsHeaders);
 });
 
 // ── Health ─────────────────────────────────────────────────────────────

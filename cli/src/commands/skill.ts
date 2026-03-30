@@ -134,6 +134,49 @@ export function registerSkillCommands(program: Command) {
     });
 
   skill
+    .command("push <slug>")
+    .description("Publish a local skill to astar.sh")
+    .option("--publish", "Publish immediately")
+    .action(async (slug: string, opts: { publish?: boolean }) => {
+      const token = await requireAuth();
+      const api = new AstarAPI(token);
+      const dir = join(getSkillsDir(), slug);
+      const skillFile = Bun.file(join(dir, "SKILL.md"));
+
+      if (!(await skillFile.exists())) {
+        console.error(`✗ No skill found at .claude/skills/${slug}/`);
+        process.exit(1);
+      }
+
+      const content = await skillFile.text();
+
+      const refs: { filename: string; folder: string; content: string }[] = [];
+      const refsDir = join(dir, "references");
+      const refsGlob = new Bun.Glob("**/*");
+      try {
+        for await (const path of refsGlob.scan({ cwd: refsDir })) {
+          const file = Bun.file(join(refsDir, path));
+          refs.push({ filename: path, folder: "references", content: await file.text() });
+        }
+      } catch {}
+
+      try {
+        const result = await api.pushSkill({
+          title: slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+          slug,
+          content,
+          references: refs.length ? refs : undefined,
+          published: opts.publish ?? false,
+        });
+        console.log(`✓ Pushed "${slug}" to astar.sh`);
+        if (!opts.publish) console.log("  Use --publish to make it visible, or publish from the dashboard");
+      } catch (e: any) {
+        console.error(`✗ Failed to push: ${e.message}`);
+        process.exit(1);
+      }
+    });
+
+  skill
     .command("update [slug]")
     .description("Update installed skill(s) from astar.sh")
     .action(async (slug?: string) => {

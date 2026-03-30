@@ -49,4 +49,29 @@ export class AstarAPI {
     const data = await this.fetch<{ skill: SkillFull }>(`/skills/${slug}`);
     return data.skill;
   }
+
+  async pushSkill(skill: {
+    title: string;
+    slug: string;
+    description?: string;
+    tags?: string[];
+    content: string;
+    references?: SkillReference[];
+    published?: boolean;
+  }): Promise<{ ok: boolean; slug: string }> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/skills`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(skill),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`API error ${res.status}: ${body}`);
+    }
+    return res.json();
+  }
 }
