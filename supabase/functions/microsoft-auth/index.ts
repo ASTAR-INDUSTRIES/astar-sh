@@ -1,5 +1,16 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
+async function logCliEvent(supabaseAdmin: any, eventType: string, opts?: { userEmail?: string; userName?: string; metadata?: Record<string, any> }) {
+  try {
+    await supabaseAdmin.from("cli_events").insert({
+      event_type: eventType,
+      user_email: opts?.userEmail,
+      user_name: opts?.userName,
+      metadata: opts?.metadata ?? {},
+    });
+  } catch { /* non-blocking */ }
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
