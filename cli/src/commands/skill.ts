@@ -2,6 +2,7 @@ import { resolve, join } from "path";
 import type { Command } from "commander";
 import { getToken } from "../lib/auth";
 import { AstarAPI, type SkillFull } from "../lib/api";
+import { c, table, badge, tag } from "../lib/ui";
 
 function getSkillsDir(): string {
   return resolve(process.cwd(), ".claude", "skills");
@@ -42,9 +43,14 @@ async function requireAuth(): Promise<string> {
   try {
     return await getToken();
   } catch {
-    console.error("✗ Not authenticated. Run 'astar login' first.");
+    console.error(`${c.red}✗${c.reset} Not authenticated. Run ${c.cyan}astar login${c.reset} first.`);
     process.exit(1);
   }
+}
+
+function truncate(s: string, max: number): string {
+  if (!s) return "";
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }
 
 export function registerSkillCommands(program: Command) {
@@ -63,18 +69,25 @@ export function registerSkillCommands(program: Command) {
       const installed = await getInstalledSlugs().catch(() => []);
 
       if (!skills.length) {
-        console.log("No skills found.");
+        console.log(`${c.dim}No skills found.${c.reset}`);
         return;
       }
 
       console.log("");
-      for (const s of skills) {
-        const marker = installed.includes(s.slug) ? " [installed]" : "";
-        console.log(`  ${s.slug}${marker}`);
-        console.log(`    ${s.description}`);
-        if (s.tags.length) console.log(`    tags: ${s.tags.join(", ")}`);
-        console.log("");
-      }
+      table(
+        ["#", "Skill", "Description", "Tags", ""],
+        skills.map((s, i) => [
+          `${c.dim}${i + 1}${c.reset}`,
+          `${c.cyan}${s.slug}${c.reset}`,
+          `${c.dim}${truncate(s.description, 50)}${c.reset}`,
+          s.tags?.length ? s.tags.slice(0, 3).map((t) => tag(t)).join(` ${c.dim}·${c.reset} `) : "",
+          installed.includes(s.slug) ? badge("installed", c.green) : "",
+        ])
+      );
+      console.log("");
+      console.log(`  ${c.dim}${skills.length} skill(s) available${c.reset}`);
+      console.log(`  ${c.dim}Install with:${c.reset} ${c.cyan}astar skill install <slug>${c.reset}`);
+      console.log("");
     });
 
   skill
@@ -88,10 +101,10 @@ export function registerSkillCommands(program: Command) {
         const data = await api.getSkill(slug);
         const dir = await writeSkillToDisk(data);
         const refCount = data.referenceFiles?.length ?? 0;
-        console.log(`✓ Installed "${data.title}" → ${dir}`);
-        if (refCount) console.log(`  ${refCount} reference file(s) included`);
+        console.log(`${c.green}✓${c.reset} Installed ${c.cyan}${data.title}${c.reset} → ${c.dim}${dir}${c.reset}`);
+        if (refCount) console.log(`  ${c.dim}${refCount} reference file(s) included${c.reset}`);
       } catch (e: any) {
-        console.error(`✗ Failed to install "${slug}": ${e.message}`);
+        console.error(`${c.red}✗${c.reset} Failed to install "${slug}": ${e.message}`);
         process.exit(1);
       }
     });
@@ -104,13 +117,13 @@ export function registerSkillCommands(program: Command) {
       const skillFile = Bun.file(join(dir, "SKILL.md"));
 
       if (!(await skillFile.exists())) {
-        console.error(`✗ Skill "${slug}" is not installed.`);
+        console.error(`${c.red}✗${c.reset} Skill "${slug}" is not installed.`);
         process.exit(1);
       }
 
       const { execSync } = await import("child_process");
       execSync(`rm -rf "${dir}"`);
-      console.log(`✓ Removed "${slug}"`);
+      console.log(`${c.green}✓${c.reset} Removed ${c.cyan}${slug}${c.reset}`);
     });
 
   skill
@@ -120,16 +133,22 @@ export function registerSkillCommands(program: Command) {
       try {
         const slugs = await getInstalledSlugs();
         if (!slugs.length) {
-          console.log("No skills installed. Run 'astar skill install <slug>' to get started.");
+          console.log(`${c.dim}No skills installed.${c.reset}`);
+          console.log(`  Run ${c.cyan}astar skill install <slug>${c.reset} to get started.`);
           return;
         }
-        console.log("\nInstalled skills:\n");
-        for (const slug of slugs) {
-          console.log(`  ${slug}`);
-        }
+        console.log("");
+        table(
+          ["#", "Skill", "Path"],
+          slugs.map((slug, i) => [
+            `${c.dim}${i + 1}${c.reset}`,
+            `${c.cyan}${slug}${c.reset}`,
+            `${c.dim}.claude/skills/${slug}/${c.reset}`,
+          ])
+        );
         console.log("");
       } catch {
-        console.log("No skills installed.");
+        console.log(`${c.dim}No skills installed.${c.reset}`);
       }
     });
 
@@ -144,7 +163,7 @@ export function registerSkillCommands(program: Command) {
       const skillFile = Bun.file(join(dir, "SKILL.md"));
 
       if (!(await skillFile.exists())) {
-        console.error(`✗ No skill found at .claude/skills/${slug}/`);
+        console.error(`${c.red}✗${c.reset} No skill found at ${c.dim}.claude/skills/${slug}/${c.reset}`);
         process.exit(1);
       }
 
@@ -161,17 +180,17 @@ export function registerSkillCommands(program: Command) {
       } catch {}
 
       try {
-        const result = await api.pushSkill({
-          title: slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+        await api.pushSkill({
+          title: slug.replace(/-/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase()),
           slug,
           content,
           references: refs.length ? refs : undefined,
           published: opts.publish ?? false,
         });
-        console.log(`✓ Pushed "${slug}" to astar.sh`);
-        if (!opts.publish) console.log("  Use --publish to make it visible, or publish from the dashboard");
+        console.log(`${c.green}✓${c.reset} Pushed ${c.cyan}${slug}${c.reset} to astar.sh`);
+        if (!opts.publish) console.log(`  ${c.dim}Use ${c.reset}${c.yellow}--publish${c.reset}${c.dim} to make it visible${c.reset}`);
       } catch (e: any) {
-        console.error(`✗ Failed to push: ${e.message}`);
+        console.error(`${c.red}✗${c.reset} Failed to push: ${e.message}`);
         process.exit(1);
       }
     });
@@ -185,7 +204,7 @@ export function registerSkillCommands(program: Command) {
       const slugs = slug ? [slug] : await getInstalledSlugs().catch(() => []);
 
       if (!slugs.length) {
-        console.log("No skills to update.");
+        console.log(`${c.dim}No skills to update.${c.reset}`);
         return;
       }
 
@@ -193,9 +212,9 @@ export function registerSkillCommands(program: Command) {
         try {
           const data = await api.getSkill(s);
           await writeSkillToDisk(data);
-          console.log(`✓ Updated "${s}"`);
+          console.log(`${c.green}✓${c.reset} Updated ${c.cyan}${s}${c.reset}`);
         } catch (e: any) {
-          console.error(`✗ Failed to update "${s}": ${e.message}`);
+          console.error(`${c.red}✗${c.reset} Failed to update "${s}": ${e.message}`);
         }
       }
     });
