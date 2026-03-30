@@ -189,6 +189,13 @@ Deno.serve(async (req) => {
         return new Response(null, { status: 302, headers: { Location: errorUrl.toString() } });
       }
 
+      // Log the login event
+      await logCliEvent(supabaseAdmin, "user.login", {
+        userEmail: email,
+        userName: name,
+        metadata: { method: "microsoft_sso", isNewUser: !existingUser },
+      });
+
       // Redirect to app with session tokens in the URL hash (Supabase client picks these up)
       const redirectUrl = `${appRedirect}#access_token=${sessionData.session.access_token}&refresh_token=${sessionData.session.refresh_token}&token_type=bearer&expires_in=${sessionData.session.expires_in}`;
 
