@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { sanityClient } from "@/lib/sanity";
@@ -78,7 +78,7 @@ const PublicDashboard = () => {
     },
   });
 
-  const { data: cliEvents = [] } = useQuery({
+  const { data: cliEvents = [], refetch: refetchEvents } = useQuery({
     queryKey: ["cli-events"],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -89,8 +89,19 @@ const PublicDashboard = () => {
       if (error) throw error;
       return data;
     },
-    refetchInterval: 30000,
   });
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("cli-events-realtime")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "cli_events" },
+        () => refetchEvents()
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [refetchEvents]);
 
   // Derive download counts per skill
   const downloadCounts = cliEvents.reduce<Record<string, number>>((acc, ev: any) => {
