@@ -21,11 +21,13 @@ import remarkGfm from "remark-gfm";
 const eventIcons: Record<string, typeof Download> = {
   "skill.download": Download,
   "skill.list": List,
+  "user.login": Activity,
 };
 
 const eventLabels: Record<string, string> = {
   "skill.download": "downloaded",
   "skill.list": "listed skills",
+  "user.login": "signed in",
 };
 
 const PublicDashboard = () => {
@@ -278,7 +280,13 @@ const PublicDashboard = () => {
                         <Icon className="h-3 w-3 text-accent/60 mt-0.5 shrink-0" />
                         <div className="flex-1 min-w-0">
                           <p className="text-[11px] font-mono text-foreground/80 leading-tight">
-                            {ev.skill_slug ? (
+                            {ev.event_type === "user.login" ? (
+                              <>
+                                <span className="text-accent">{ev.user_name || ev.user_email?.split("@")[0] || "user"}</span>
+                                {" "}
+                                <span className="text-muted-foreground">{label}</span>
+                              </>
+                            ) : ev.skill_slug ? (
                               <>
                                 <span className="text-accent">{ev.skill_title || ev.skill_slug}</span>
                                 {" "}

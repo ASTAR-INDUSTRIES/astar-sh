@@ -1,5 +1,16 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
+async function logCliEvent(supabaseAdmin: any, eventType: string, opts?: { userEmail?: string; userName?: string; metadata?: Record<string, any> }) {
+  try {
+    await supabaseAdmin.from("cli_events").insert({
+      event_type: eventType,
+      user_email: opts?.userEmail,
+      user_name: opts?.userName,
+      metadata: opts?.metadata ?? {},
+    });
+  } catch { /* non-blocking */ }
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -177,6 +188,13 @@ Deno.serve(async (req) => {
         errorUrl.searchParams.set("auth_error", "Failed to create session");
         return new Response(null, { status: 302, headers: { Location: errorUrl.toString() } });
       }
+
+      // Log the login event
+      await logCliEvent(supabaseAdmin, "user.login", {
+        userEmail: email,
+        userName: name,
+        metadata: { method: "microsoft_sso", isNewUser: !existingUser },
+      });
 
       // Redirect to app with session tokens in the URL hash (Supabase client picks these up)
       const redirectUrl = `${appRedirect}#access_token=${sessionData.session.access_token}&refresh_token=${sessionData.session.refresh_token}&token_type=bearer&expires_in=${sessionData.session.expires_in}`;
