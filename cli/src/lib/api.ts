@@ -22,9 +22,11 @@ export interface SkillFull extends SkillSummary {
   author?: string;
 }
 
-export interface NewsLink {
-  title: string;
+export interface NewsSource {
+  name: string;
+  region: string;
   url: string;
+  perspective?: string;
 }
 
 export interface NewsSummary {
@@ -34,7 +36,7 @@ export interface NewsSummary {
   excerpt: string;
   category: string;
   coverImage?: string;
-  links?: NewsLink[];
+  sources?: NewsSource[];
   authorName: string;
   publishedAt: string;
   _updatedAt?: string;
@@ -42,6 +44,9 @@ export interface NewsSummary {
 
 export interface NewsFull extends NewsSummary {
   content: string;
+  consensus?: string[];
+  divergence?: string[];
+  takeaway?: string;
 }
 
 export class AstarAPI {

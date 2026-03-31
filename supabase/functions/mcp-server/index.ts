@@ -429,29 +429,37 @@ const TOOLS = [
   // ── News Tools ──────────────────────────────────────────────────────
   {
     name: "create_news",
-    description: "Create a news post on astar.sh with optional cover image and links",
+    description: "Create an intelligence briefing on astar.sh — cross-referenced from multiple sources with perspective analysis",
     inputSchema: {
       type: "object",
       properties: {
-        title: { type: "string", description: "Headline" },
+        title: { type: "string", description: "Factual, descriptive headline (no clickbait)" },
         slug: { type: "string", description: "URL slug (auto-generated from title if omitted)" },
-        excerpt: { type: "string", description: "1-2 sentence summary" },
+        excerpt: { type: "string", description: "1-2 sentence factual summary" },
         content: { type: "string", description: "Full article body in Markdown" },
-        category: { type: "string", description: "Category (e.g. infrastructure, models, engineering, economics)" },
+        category: { type: "string", description: "Category: infrastructure, models, engineering, economics, policy, security" },
         cover_image: { type: "string", description: "URL to cover image" },
-        links: {
+        sources: {
           type: "array",
           items: {
             type: "object",
-            properties: { title: { type: "string" }, url: { type: "string" } },
-            required: ["title", "url"],
+            properties: {
+              name: { type: "string", description: "Source name (e.g. Reuters, Fortune, Shifter)" },
+              region: { type: "string", description: "Region: US, EU, NO, UK, Intl" },
+              url: { type: "string", description: "Article URL" },
+              perspective: { type: "string", description: "How this source frames the story" },
+            },
+            required: ["name", "url"],
           },
-          description: "Source links",
+          description: "Cross-referenced sources with their perspectives",
         },
+        consensus: { type: "array", items: { type: "string" }, description: "Points where all sources agree" },
+        divergence: { type: "array", items: { type: "string" }, description: "Points where sources disagree or frame differently" },
+        takeaway: { type: "string", description: "Astar-specific actionable insight for the team" },
         author_name: { type: "string", description: "Author display name (defaults to your name)" },
         published: { type: "boolean", description: "Publish immediately (default true)" },
       },
-      required: ["title", "content"],
+      required: ["title", "content", "sources"],
     },
   },
   {
@@ -467,14 +475,20 @@ const TOOLS = [
         content: { type: "string" },
         category: { type: "string" },
         cover_image: { type: "string" },
-        links: {
+        sources: {
           type: "array",
           items: {
             type: "object",
-            properties: { title: { type: "string" }, url: { type: "string" } },
-            required: ["title", "url"],
+            properties: {
+              name: { type: "string" }, region: { type: "string" },
+              url: { type: "string" }, perspective: { type: "string" },
+            },
+            required: ["name", "url"],
           },
         },
+        consensus: { type: "array", items: { type: "string" } },
+        divergence: { type: "array", items: { type: "string" } },
+        takeaway: { type: "string" },
         author_name: { type: "string" },
         published: { type: "boolean" },
       },
@@ -711,11 +725,13 @@ async function handleTool(name: string, args: any, user: { email: string; userId
     case "create_news": {
       const slug = args.slug || toSlug(args.title);
       const docId = `newsPost-${slug}`;
-      const links = (args.links || []).map((l: any) => ({
-        _type: "newsLink",
+      const sources = (args.sources || []).map((s: any) => ({
+        _type: "newsSource",
         _key: crypto.randomUUID().slice(0, 8),
-        title: l.title,
-        url: l.url,
+        name: s.name,
+        region: s.region || "Intl",
+        url: s.url,
+        perspective: s.perspective || "",
       }));
       const doc: any = {
         _id: docId,
@@ -726,13 +742,16 @@ async function handleTool(name: string, args: any, user: { email: string; userId
         content: args.content,
         category: args.category || "general",
         coverImage: args.cover_image || "",
-        links,
+        sources,
+        consensus: args.consensus || [],
+        divergence: args.divergence || [],
+        takeaway: args.takeaway || "",
         authorName: args.author_name || user.email.split("@")[0],
         publishedAt: new Date().toISOString(),
         published: args.published ?? true,
       };
       await sanityMutate([{ createOrReplace: doc }]);
-      return [{ type: "text", text: `✓ News "${args.title}" published (slug: ${slug}).` }];
+      return [{ type: "text", text: `✓ News "${args.title}" published (slug: ${slug}, ${sources.length} sources).` }];
     }
 
     case "update_news": {
@@ -746,12 +765,15 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       if (args.cover_image !== undefined) patch.coverImage = args.cover_image;
       if (args.author_name !== undefined) patch.authorName = args.author_name;
       if (args.published !== undefined) patch.published = args.published;
-      if (args.links !== undefined) {
-        patch.links = args.links.map((l: any) => ({
-          _type: "newsLink",
+      if (args.consensus !== undefined) patch.consensus = args.consensus;
+      if (args.divergence !== undefined) patch.divergence = args.divergence;
+      if (args.takeaway !== undefined) patch.takeaway = args.takeaway;
+      if (args.sources !== undefined) {
+        patch.sources = args.sources.map((s: any) => ({
+          _type: "newsSource",
           _key: crypto.randomUUID().slice(0, 8),
-          title: l.title,
-          url: l.url,
+          name: s.name, region: s.region || "Intl",
+          url: s.url, perspective: s.perspective || "",
         }));
       }
       if (Object.keys(patch).length === 0) return [{ type: "text", text: "No fields to update." }];

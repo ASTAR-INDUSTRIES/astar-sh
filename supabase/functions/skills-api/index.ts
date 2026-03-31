@@ -262,7 +262,7 @@ app.get("/news", async (c) => {
       excerpt,
       category,
       coverImage,
-      links,
+      sources[] { name, region, url },
       authorName,
       publishedAt
     }`,
@@ -286,7 +286,10 @@ app.get("/news/:slug", async (c) => {
       content,
       category,
       coverImage,
-      links,
+      sources[] { name, region, url, perspective },
+      consensus,
+      divergence,
+      takeaway,
       authorName,
       publishedAt
     }`,
@@ -317,11 +320,13 @@ app.post("/news", async (c) => {
   const slug = body.slug || title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const docId = `newsPost-${slug}`;
 
-  const links = (body.links || []).map((l: any) => ({
-    _type: "newsLink",
+  const sources = (body.sources || []).map((s: any) => ({
+    _type: "newsSource",
     _key: crypto.randomUUID().slice(0, 8),
-    title: l.title,
-    url: l.url,
+    name: s.name,
+    region: s.region || "Intl",
+    url: s.url,
+    perspective: s.perspective || "",
   }));
 
   const doc: any = {
@@ -333,7 +338,10 @@ app.post("/news", async (c) => {
     content,
     category: body.category || "general",
     coverImage: body.cover_image || "",
-    links,
+    sources,
+    consensus: body.consensus || [],
+    divergence: body.divergence || [],
+    takeaway: body.takeaway || "",
     authorName: body.author_name || user.name,
     publishedAt: new Date().toISOString(),
     published: body.published ?? true,
