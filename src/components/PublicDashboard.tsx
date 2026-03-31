@@ -301,29 +301,19 @@ const PublicDashboard = () => {
                         {tweet.author_name && `${tweet.author_name} · `}
                         {format(new Date(tweet.created_at), "MMM d · HH:mm")}
                       </span>
+                      {Object.keys(counts).length > 0 && (
                       <div className="flex gap-1.5 mt-2 flex-wrap">
-                        {REACTION_EMOJIS.map((emoji) => {
-                          const count = counts[emoji] || 0;
-                          const isReacting = reactingId === `${tweet.id}-${emoji}`;
-                          return (
-                            <button
+                        {Object.entries(counts).map(([emoji, count]) => (
+                            <span
                               key={emoji}
-                              onClick={() => handleReact(tweet.id, emoji)}
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-mono border transition-all cursor-pointer select-none
-                                ${count > 0
-                                  ? "border-accent/30 bg-accent/10 text-foreground/80"
-                                  : "border-border bg-background text-muted-foreground/40 hover:border-accent/20 hover:bg-accent/5"
-                                }
-                                ${isReacting ? "scale-125" : "hover:scale-105"}
-                              `}
-                              style={{ transition: "transform 0.15s ease" }}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-mono border border-accent/30 bg-accent/10 text-foreground/80"
                             >
                               <span>{emoji}</span>
-                              {count > 0 && <span>{count}</span>}
-                            </button>
-                          );
-                        })}
+                              <span>{count}</span>
+                            </span>
+                        ))}
                       </div>
+                      )}
                     </div>
                     );
                   })
