@@ -5,9 +5,13 @@ import { sanityClient } from "@/lib/sanity";
 import { format, formatDistanceToNow } from "date-fns";
 import {
   FileText, FlaskConical, MessageCircle,
-  BookOpen, Activity, Download, Terminal, Zap,
+  BookOpen, Activity, Download, Terminal, Zap, ExternalLink, Globe,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import ShippedCalendar from "@/components/ShippedCalendar";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 const eventLabels: Record<string, string> = {
   "skill.download": "downloaded",
@@ -15,13 +19,36 @@ const eventLabels: Record<string, string> = {
   "user.login": "signed in",
 };
 
+const regionColors: Record<string, string> = {
+  US: "text-blue-400 bg-blue-400/10",
+  EU: "text-yellow-400 bg-yellow-400/10",
+  NO: "text-red-400 bg-red-400/10",
+  UK: "text-purple-400 bg-purple-400/10",
+  Intl: "text-emerald-400 bg-emerald-400/10",
+};
+
 const PublicDashboard = () => {
   const [now, setNow] = useState(new Date());
+  const [selectedNewsId, setSelectedNewsId] = useState<string | null>(null);
+  const [newsDetail, setNewsDetail] = useState<any | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 10);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    if (!selectedNewsId) { setNewsDetail(null); return; }
+    sanityClient.fetch(
+      `*[_type == "newsPost" && _id == $id][0] {
+        _id, title, excerpt, content, category, coverImage,
+        sources[] { name, region, url, perspective },
+        consensus, divergence, takeaway,
+        authorName, publishedAt
+      }`,
+      { id: selectedNewsId }
+    ).then(setNewsDetail);
+  }, [selectedNewsId]);
 
   const { data: skills = [] } = useQuery({
     queryKey: ["public-skills"],
@@ -134,6 +161,9 @@ const PublicDashboard = () => {
           </div>
         ))}
       </div>
+
+      {/* Shipped Calendar */}
+      <ShippedCalendar />
 
       {/* Main grid */}
       <div className="flex-1 grid grid-cols-[45fr_28fr_27fr] gap-px bg-border overflow-hidden">
@@ -317,7 +347,7 @@ const PublicDashboard = () => {
                   <p className="px-6 py-6 text-sm font-mono text-muted-foreground/40 text-center">—</p>
                 ) : (
                   posts.map((post: any) => (
-                    <div key={post._id} className="px-6 py-4">
+                    <div key={post._id} className="px-6 py-4 cursor-pointer hover:bg-accent/5 transition-colors" onClick={() => setSelectedNewsId(post._id)}>
                       <div className="flex items-start justify-between gap-3">
                         <span className="font-mono text-sm font-medium text-foreground leading-snug">
                           {post.title}
@@ -376,6 +406,109 @@ const PublicDashboard = () => {
           </div>
         </div>
       </div>
+
+      <Dialog open={!!selectedNewsId} onOpenChange={(open) => !open && setSelectedNewsId(null)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          {newsDetail && (
+            <>
+              {newsDetail.coverImage && (
+                <img src={newsDetail.coverImage} alt="" className="w-full h-48 object-cover rounded-md -mt-2 mb-4" />
+              )}
+              <DialogHeader>
+                <DialogTitle className="font-mono text-xl leading-snug">
+                  {newsDetail.title}
+                </DialogTitle>
+                <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground mt-1">
+                  <span>{newsDetail.authorName}</span>
+                  <span>·</span>
+                  <span>{newsDetail.publishedAt && format(new Date(newsDetail.publishedAt), "MMM d, yyyy")}</span>
+                  <span>·</span>
+                  <span className="text-accent uppercase tracking-wider">{newsDetail.category}</span>
+                </div>
+              </DialogHeader>
+
+              {newsDetail.excerpt && (
+                <div className="bg-secondary/50 border border-border rounded-md p-4 mt-4">
+                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">Summary</p>
+                  <p className="text-sm text-foreground/80 leading-relaxed">{newsDetail.excerpt}</p>
+                </div>
+              )}
+
+              {newsDetail.sources?.length > 0 && (
+                <div className="mt-4">
+                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-3">Source Perspectives</p>
+                  <div className="space-y-3">
+                    {newsDetail.sources.map((src: any, i: number) => (
+                      <div key={i} className="flex gap-3 items-start">
+                        <div className="shrink-0 mt-0.5">
+                          <span className={`text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded ${regionColors[src.region] || regionColors.Intl}`}>
+                            {src.region || "Intl"}
+                          </span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <a href={src.url} target="_blank" rel="noopener noreferrer" className="text-sm font-mono font-medium text-foreground hover:text-accent transition-colors inline-flex items-center gap-1">
+                            {src.name}
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                          {src.perspective && (
+                            <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{src.perspective}</p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {newsDetail.consensus?.length > 0 && (
+                <div className="mt-4">
+                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-2">Where Sources Agree</p>
+                  <ul className="space-y-1">
+                    {newsDetail.consensus.map((point: string, i: number) => (
+                      <li key={i} className="text-sm text-foreground/80 flex gap-2">
+                        <span className="text-emerald-400 shrink-0">•</span>
+                        {point}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {newsDetail.divergence?.length > 0 && (
+                <div className="mt-4">
+                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-2">Where Sources Diverge</p>
+                  <ul className="space-y-1">
+                    {newsDetail.divergence.map((point: string, i: number) => (
+                      <li key={i} className="text-sm text-foreground/80 flex gap-2">
+                        <span className="text-yellow-400 shrink-0">•</span>
+                        {point}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {newsDetail.takeaway && (
+                <div className="mt-4 bg-accent/5 border border-accent/20 rounded-md p-4">
+                  <p className="text-[10px] font-mono uppercase tracking-wider text-accent mb-1">Astar Takeaway</p>
+                  <p className="text-sm text-foreground leading-relaxed">{newsDetail.takeaway}</p>
+                </div>
+              )}
+
+              {newsDetail.content && (
+                <div className="mt-4">
+                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-2">Full Article</p>
+                  <div className="prose prose-sm prose-invert max-w-none text-foreground/80">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {newsDetail.content}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
