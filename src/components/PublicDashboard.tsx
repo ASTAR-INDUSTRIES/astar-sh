@@ -124,6 +124,44 @@ const PublicDashboard = () => {
     return () => { supabase.removeChannel(channel); };
   }, [refetchEvents]);
 
+  // Reactions
+  const queryClient = useQueryClient();
+  const { data: reactions = [] } = useQuery({
+    queryKey: ["tweet-reactions"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("tweet_reactions")
+        .select("tweet_id, emoji");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("tweet-reactions-realtime")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "tweet_reactions" },
+        () => queryClient.invalidateQueries({ queryKey: ["tweet-reactions"] })
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [queryClient]);
+
+  const reactionCounts = reactions.reduce<Record<string, Record<string, number>>>((acc, r: any) => {
+    if (!acc[r.tweet_id]) acc[r.tweet_id] = {};
+    acc[r.tweet_id][r.emoji] = (acc[r.tweet_id][r.emoji] || 0) + 1;
+    return acc;
+  }, {});
+
+  const [reactingId, setReactingId] = useState<string | null>(null);
+  const handleReact = useCallback(async (tweetId: string, emoji: string) => {
+    setReactingId(`${tweetId}-${emoji}`);
+    await supabase.from("tweet_reactions").insert({ tweet_id: tweetId, emoji });
+    setTimeout(() => setReactingId(null), 300);
+  }, []);
+
   const downloadCounts = cliEvents.reduce<Record<string, number>>((acc, ev: any) => {
     if (ev.event_type === "skill.download" && ev.skill_slug) {
       acc[ev.skill_slug] = (acc[ev.skill_slug] || 0) + 1;
