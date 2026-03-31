@@ -1,76 +1,35 @@
 
 
-# Redesign Skills UI: Table List + Detail Modal
+## Emoji Reactions on Tweets (Thinking)
 
-## Current State
-Skills display as a 2-column card grid with inline expand/collapse. The user wants it to look like the reference screenshots: a numbered table list (image 1) that opens a detail modal on click (image 2).
+### What we're building
+Public visitors can react to any tweet/thought with emoji reactions (like 🔥 👏 🧠 💡 🎯). No login required — reactions are anonymous and stored in the database. Each tweet shows reaction counts inline.
 
-## Target Layout
+### Database
 
-### Skills Table (replaces card grid)
-```text
-SKILLS & KNOWLEDGE
-_______________________________________________
-Q  Search skills...                          /
-_______________________________________________
+**New table: `tweet_reactions`**
+- `id` (uuid, PK)
+- `tweet_id` (uuid, FK → tweets.id ON DELETE CASCADE)
+- `emoji` (text, not null) — the emoji character
+- `created_at` (timestamptz, default now())
 
-#    SKILL                           UPDATED
-_______________________________________________
-1    skill-name                     Mar 28
-     description text here...
-_______________________________________________
-2    another-skill                  Mar 25
-     short description...
-_______________________________________________
-```
-- Full-width rows, numbered, monospace skill name bold
-- Description as muted subtitle underneath
-- Tags shown inline after description
-- Right-aligned date column
-- Minimal borders (bottom border per row, accent underline on header)
+**RLS policies:**
+- SELECT: public (everyone can see counts)
+- INSERT: public (anonymous reactions allowed)
+- No UPDATE/DELETE (reactions are permanent)
 
-### Skill Detail Modal (on row click)
-```text
-+--------------------------------------------------+
-|  skills / skill-name                         [X]  |
-|                                                   |
-|  skill-name                                       |
-|                                                   |
-|  +-------------------------------------------+    |
-|  | SUMMARY                                   |    |
-|  | Description text here as summary box      |    |
-|  | - bullet point 1                          |    |
-|  | - bullet point 2                          |    |
-|  +-------------------------------------------+    |
-|                                                   |
-|  TAGS: tag1  tag2  tag3           UPDATED         |
-|                                          Mar 28   |
-|  ─────────────────────────────────                |
-|  📄 SKILL.md                                      |
-|  ─────────────────────────────────                |
-|                                                   |
-|  ## Rendered markdown content                     |
-|  Full skill.md rendered here...                   |
-|                                                   |
-|  ─────────────────────────────────                |
-|  REFERENCE FILES                                  |
-|  📄 filename.md  (expandable)                     |
-|  📄 template.md  (expandable)                     |
-+--------------------------------------------------+
-```
-- Uses Dialog component (already available)
-- Breadcrumb path at top
-- Summary box with description
-- Sidebar-style metadata (tags, updated date) or below summary
-- Markdown content rendered with `react-markdown`
-- Reference files as expandable sections
+**Realtime:** Enable `supabase_realtime` on `tweet_reactions` so counts update live.
 
-## Files Changed
+### UI Changes — `PublicDashboard.tsx`
 
-**`src/components/PublicDashboard.tsx`** — Replace the skills card grid (lines 80-185) with:
-1. A `<Table>` layout with `#`, `SKILL`, `UPDATED` columns
-2. Each row clickable, opens `selectedSkill` state
-3. A `<Dialog>` that renders the full skill detail view styled like image 2
+Below each tweet, add a row of preset emoji buttons (🔥 👏 🧠 💡 🎯):
+- Show current count next to each emoji (only emojis with count > 0 shown, plus a "+" button to pick)
+- Clicking an emoji inserts a row into `tweet_reactions` — no auth needed
+- Use a realtime subscription to keep counts live
+- Subtle animation on click (scale bounce)
+- Style: small pill-shaped buttons matching the dark terminal aesthetic
 
-No new files needed. Uses existing `Table`, `Dialog`, `Input` components.
+### Files touched
+1. **Migration** — create `tweet_reactions` table + RLS + realtime
+2. **`src/components/PublicDashboard.tsx`** — add reaction row beneath each tweet, fetch counts, subscribe to realtime, handle clicks
 
