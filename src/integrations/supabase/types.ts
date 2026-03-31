@@ -14,33 +14,6 @@ export type Database = {
   }
   public: {
     Tables: {
-      milestones: {
-        Row: {
-          id: string
-          title: string
-          date: string
-          category: string
-          created_at: string
-          created_by: string | null
-        }
-        Insert: {
-          id?: string
-          title: string
-          date: string
-          category?: string
-          created_at?: string
-          created_by?: string | null
-        }
-        Update: {
-          id?: string
-          title?: string
-          date?: string
-          category?: string
-          created_at?: string
-          created_by?: string | null
-        }
-        Relationships: []
-      }
       cli_events: {
         Row: {
           created_at: string
