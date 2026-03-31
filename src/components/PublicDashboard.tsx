@@ -290,7 +290,9 @@ const PublicDashboard = () => {
                 {tweets.length === 0 ? (
                   <p className="px-6 py-8 text-sm font-mono text-muted-foreground/40 text-center">—</p>
                 ) : (
-                  tweets.slice(0, 10).map((tweet) => (
+                  tweets.slice(0, 10).map((tweet) => {
+                    const counts = reactionCounts[tweet.id] || {};
+                    return (
                     <div key={tweet.id} className="px-6 py-4">
                       <p className="text-sm text-foreground/90 leading-relaxed">
                         {tweet.content}
@@ -299,8 +301,32 @@ const PublicDashboard = () => {
                         {tweet.author_name && `${tweet.author_name} · `}
                         {format(new Date(tweet.created_at), "MMM d · HH:mm")}
                       </span>
+                      <div className="flex gap-1.5 mt-2 flex-wrap">
+                        {REACTION_EMOJIS.map((emoji) => {
+                          const count = counts[emoji] || 0;
+                          const isReacting = reactingId === `${tweet.id}-${emoji}`;
+                          return (
+                            <button
+                              key={emoji}
+                              onClick={() => handleReact(tweet.id, emoji)}
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-mono border transition-all cursor-pointer select-none
+                                ${count > 0
+                                  ? "border-accent/30 bg-accent/10 text-foreground/80"
+                                  : "border-border bg-background text-muted-foreground/40 hover:border-accent/20 hover:bg-accent/5"
+                                }
+                                ${isReacting ? "scale-125" : "hover:scale-105"}
+                              `}
+                              style={{ transition: "transform 0.15s ease" }}
+                            >
+                              <span>{emoji}</span>
+                              {count > 0 && <span>{count}</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </ScrollArea>
