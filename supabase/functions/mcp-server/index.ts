@@ -426,7 +426,95 @@ const TOOLS = [
       },
     },
   },
+  // ── News Tools ──────────────────────────────────────────────────────
+  {
+    name: "create_news",
+    description: "Create a news post on astar.sh with optional cover image and links",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Headline" },
+        slug: { type: "string", description: "URL slug (auto-generated from title if omitted)" },
+        excerpt: { type: "string", description: "1-2 sentence summary" },
+        content: { type: "string", description: "Full article body in Markdown" },
+        category: { type: "string", description: "Category (e.g. infrastructure, models, engineering, economics)" },
+        cover_image: { type: "string", description: "URL to cover image" },
+        links: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { title: { type: "string" }, url: { type: "string" } },
+            required: ["title", "url"],
+          },
+          description: "Source links",
+        },
+        author_name: { type: "string", description: "Author display name (defaults to your name)" },
+        published: { type: "boolean", description: "Publish immediately (default true)" },
+      },
+      required: ["title", "content"],
+    },
+  },
+  {
+    name: "update_news",
+    description: "Update an existing news post by slug or ID",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: { type: "string" },
+        id: { type: "string" },
+        title: { type: "string" },
+        excerpt: { type: "string" },
+        content: { type: "string" },
+        category: { type: "string" },
+        cover_image: { type: "string" },
+        links: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { title: { type: "string" }, url: { type: "string" } },
+            required: ["title", "url"],
+          },
+        },
+        author_name: { type: "string" },
+        published: { type: "boolean" },
+      },
+    },
+  },
+  {
+    name: "delete_news",
+    description: "Delete a news post by slug or ID",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: { type: "string" },
+        id: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "list_news",
+    description: "List news posts from astar.sh",
+    inputSchema: {
+      type: "object",
+      properties: {
+        category: { type: "string", description: "Filter by category" },
+        published_only: { type: "boolean", description: "Only published (default true)" },
+        limit: { type: "number", description: "Max results (default 20)" },
+      },
+    },
+  },
 ];
+
+// ── News Helper: resolve slug to ID ──────────────────────────────────
+async function resolveNewsId(args: { slug?: string; id?: string }): Promise<string | null> {
+  if (args.id) return args.id;
+  if (!args.slug) return null;
+  const result = await sanityQuery(
+    `*[_type == "newsPost" && slug.current == $slug][0]{ _id }`,
+    { slug: args.slug }
+  );
+  return result?._id || null;
+}
 
 // ── Skill Helper: resolve slug to ID ──────────────────────────────────
 async function resolveSkillId(args: { slug?: string; id?: string; skill_id?: string }): Promise<string | null> {
@@ -617,6 +705,75 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       } catch (e: any) {
         return [{ type: "text", text: `Error fetching history: ${e.message}` }];
       }
+    }
+
+    // ── News CRUD ──────────────────────────────────────────────────
+    case "create_news": {
+      const slug = args.slug || toSlug(args.title);
+      const docId = `newsPost-${slug}`;
+      const links = (args.links || []).map((l: any) => ({
+        _type: "newsLink",
+        _key: crypto.randomUUID().slice(0, 8),
+        title: l.title,
+        url: l.url,
+      }));
+      const doc: any = {
+        _id: docId,
+        _type: "newsPost",
+        title: args.title,
+        slug: { _type: "slug", current: slug },
+        excerpt: args.excerpt || "",
+        content: args.content,
+        category: args.category || "general",
+        coverImage: args.cover_image || "",
+        links,
+        authorName: args.author_name || user.email.split("@")[0],
+        publishedAt: new Date().toISOString(),
+        published: args.published ?? true,
+      };
+      await sanityMutate([{ createOrReplace: doc }]);
+      return [{ type: "text", text: `✓ News "${args.title}" published (slug: ${slug}).` }];
+    }
+
+    case "update_news": {
+      const docId = await resolveNewsId(args);
+      if (!docId) return [{ type: "text", text: "Error: News post not found. Provide slug or id." }];
+      const patch: any = {};
+      if (args.title !== undefined) patch.title = args.title;
+      if (args.excerpt !== undefined) patch.excerpt = args.excerpt;
+      if (args.content !== undefined) patch.content = args.content;
+      if (args.category !== undefined) patch.category = args.category;
+      if (args.cover_image !== undefined) patch.coverImage = args.cover_image;
+      if (args.author_name !== undefined) patch.authorName = args.author_name;
+      if (args.published !== undefined) patch.published = args.published;
+      if (args.links !== undefined) {
+        patch.links = args.links.map((l: any) => ({
+          _type: "newsLink",
+          _key: crypto.randomUUID().slice(0, 8),
+          title: l.title,
+          url: l.url,
+        }));
+      }
+      if (Object.keys(patch).length === 0) return [{ type: "text", text: "No fields to update." }];
+      await sanityMutate([{ patch: { id: docId, set: patch } }]);
+      return [{ type: "text", text: `✓ News post updated.` }];
+    }
+
+    case "delete_news": {
+      const docId = await resolveNewsId(args);
+      if (!docId) return [{ type: "text", text: "Error: News post not found." }];
+      await sanityMutate([{ delete: { id: docId } }]);
+      return [{ type: "text", text: `✓ News post deleted.` }];
+    }
+
+    case "list_news": {
+      const pubFilter = (args.published_only !== false) ? " && published == true" : "";
+      const catFilter = args.category ? ` && category == $cat` : "";
+      const n = Math.min(args.limit || 20, 50);
+      const q = `*[_type == "newsPost"${pubFilter}${catFilter}] | order(publishedAt desc)[0...${n}]{ _id, title, "slug": slug.current, excerpt, category, coverImage, links, authorName, publishedAt, published, _updatedAt }`;
+      const result = await sanityQuery(q, args.category ? { cat: args.category } : undefined);
+      if (!result?.length) return [{ type: "text", text: "No news posts found." }];
+      return [{ type: "text", text: JSON.stringify(result, null, 2) }];
     }
 
     default:

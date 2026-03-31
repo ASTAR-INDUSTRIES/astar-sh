@@ -241,6 +241,116 @@ app.post("/skills", async (c) => {
   return c.json({ ok: true, slug: skillSlug }, 200, corsHeaders);
 });
 
+// ── GET /news — list published news ──────────────────────────────────
+app.get("/news", async (c) => {
+  const category = c.req.query("category");
+
+  let filter = `_type == "newsPost" && published == true`;
+  const params: Record<string, any> = {};
+
+  if (category) {
+    filter += ` && category == $cat`;
+    params.cat = category;
+  }
+
+  const news = await sanityQuery(
+    `*[${filter}] | order(publishedAt desc)[0...20] {
+      _id,
+      _updatedAt,
+      title,
+      "slug": slug.current,
+      excerpt,
+      category,
+      coverImage,
+      links,
+      authorName,
+      publishedAt
+    }`,
+    Object.keys(params).length ? params : undefined
+  );
+
+  return c.json({ news: news || [] }, 200, corsHeaders);
+});
+
+// ── GET /news/:slug — single news article ───────────────────────────
+app.get("/news/:slug", async (c) => {
+  const slug = c.req.param("slug");
+
+  const article = await sanityQuery(
+    `*[_type == "newsPost" && slug.current == $slug && published == true][0] {
+      _id,
+      _updatedAt,
+      title,
+      "slug": slug.current,
+      excerpt,
+      content,
+      category,
+      coverImage,
+      links,
+      authorName,
+      publishedAt
+    }`,
+    { slug }
+  );
+
+  if (!article) {
+    return c.json({ error: "Article not found" }, 404, corsHeaders);
+  }
+
+  return c.json({ article }, 200, corsHeaders);
+});
+
+// ── POST /news — create a news post ─────────────────────────────────
+app.post("/news", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) {
+    return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+  }
+
+  const body = await c.req.json();
+  const { title, content } = body;
+
+  if (!title || !content) {
+    return c.json({ error: "title and content are required" }, 400, corsHeaders);
+  }
+
+  const slug = body.slug || title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const docId = `newsPost-${slug}`;
+
+  const links = (body.links || []).map((l: any) => ({
+    _type: "newsLink",
+    _key: crypto.randomUUID().slice(0, 8),
+    title: l.title,
+    url: l.url,
+  }));
+
+  const doc: any = {
+    _id: docId,
+    _type: "newsPost",
+    title,
+    slug: { _type: "slug", current: slug },
+    excerpt: body.excerpt || "",
+    content,
+    category: body.category || "general",
+    coverImage: body.cover_image || "",
+    links,
+    authorName: body.author_name || user.name,
+    publishedAt: new Date().toISOString(),
+    published: body.published ?? true,
+  };
+
+  await sanityMutate([{ createOrReplace: doc }]);
+
+  await logEvent("news.publish", {
+    skillSlug: slug,
+    skillTitle: title,
+    userEmail: user.email,
+    userName: user.name,
+  });
+
+  return c.json({ ok: true, slug }, 200, corsHeaders);
+});
+
 // ── Health ─────────────────────────────────────────────────────────────
 app.get("/", (c) => c.json({ status: "ok", service: "skills-api" }, 200, corsHeaders));
 

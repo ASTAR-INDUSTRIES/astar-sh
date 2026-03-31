@@ -22,6 +22,28 @@ export interface SkillFull extends SkillSummary {
   author?: string;
 }
 
+export interface NewsLink {
+  title: string;
+  url: string;
+}
+
+export interface NewsSummary {
+  _id: string;
+  slug: string;
+  title: string;
+  excerpt: string;
+  category: string;
+  coverImage?: string;
+  links?: NewsLink[];
+  authorName: string;
+  publishedAt: string;
+  _updatedAt?: string;
+}
+
+export interface NewsFull extends NewsSummary {
+  content: string;
+}
+
 export class AstarAPI {
   constructor(private token?: string) {}
 
@@ -73,5 +95,18 @@ export class AstarAPI {
       throw new Error(`API error ${res.status}: ${body}`);
     }
     return res.json();
+  }
+
+  async listNews(category?: string): Promise<NewsSummary[]> {
+    const params = new URLSearchParams();
+    if (category) params.set("category", category);
+    const qs = params.toString();
+    const data = await this.fetch<{ news: NewsSummary[] }>(`/news${qs ? `?${qs}` : ""}`);
+    return data.news;
+  }
+
+  async getNews(slug: string): Promise<NewsFull> {
+    const data = await this.fetch<{ article: NewsFull }>(`/news/${slug}`);
+    return data.article;
   }
 }
