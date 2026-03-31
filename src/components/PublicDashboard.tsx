@@ -162,82 +162,78 @@ const PublicDashboard = () => {
         ))}
       </div>
 
-      {/* Shipped Calendar */}
-      <ShippedCalendar />
-
       {/* Main grid */}
       <div className="flex-1 grid grid-cols-[45fr_28fr_27fr] gap-px bg-border overflow-hidden">
 
-        {/* LEFT: Skills */}
+        {/* LEFT: Skills + Calendar 50/50 */}
         <div className="bg-background flex flex-col overflow-hidden">
-          <div className="flex-shrink-0 flex items-center justify-between px-8 py-4 border-b border-border">
-            <div className="flex items-center gap-3">
-              <BookOpen className="h-4 w-4 text-accent" />
-              <span className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
-                Skills & Knowledge
+          {/* Skills - top half */}
+          <div className="flex-1 flex flex-col overflow-hidden border-b border-border">
+            <div className="flex-shrink-0 flex items-center justify-between px-8 py-4 border-b border-border">
+              <div className="flex items-center gap-3">
+                <BookOpen className="h-4 w-4 text-accent" />
+                <span className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
+                  Skills & Knowledge
+                </span>
+              </div>
+              <span className="text-xs font-mono text-muted-foreground/40">
+                {skills.length} published
               </span>
             </div>
-            <span className="text-xs font-mono text-muted-foreground/40">
-              {skills.length} published
-            </span>
-          </div>
-          <ScrollArea className="flex-1">
-            <div className="divide-y divide-border">
-              {skills.map((skill: any, i: number) => {
-                const slug = skill.slug || skill.title?.toLowerCase().replace(/\s+/g, "-");
-                const count = downloadCounts[slug] || 0;
-                return (
-                  <div key={skill._id} className="px-8 py-4 flex items-start gap-5">
-                    <span className="text-sm font-mono text-muted-foreground/30 w-6 shrink-0 pt-0.5">
-                      {i + 1}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline gap-3 mb-1">
-                        <span className="font-mono text-base font-medium text-foreground">
-                          {skill.title}
-                        </span>
-                        {skill.project && skill.project !== "general" && (
-                          <span className="text-[11px] font-mono text-accent/60 uppercase tracking-wider">
-                            {skill.project}
+            <ScrollArea className="flex-1">
+              <div className="divide-y divide-border">
+                {skills.map((skill: any, i: number) => {
+                  const slug = skill.slug || skill.title?.toLowerCase().replace(/\s+/g, "-");
+                  const count = downloadCounts[slug] || 0;
+                  return (
+                    <div key={skill._id} className="px-8 py-3 flex items-start gap-5">
+                      <span className="text-sm font-mono text-muted-foreground/30 w-6 shrink-0 pt-0.5">
+                        {i + 1}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline gap-3 mb-0.5">
+                          <span className="font-mono text-sm font-medium text-foreground">
+                            {skill.title}
                           </span>
+                          {skill.project && skill.project !== "general" && (
+                            <span className="text-[10px] font-mono text-accent/60 uppercase tracking-wider">
+                              {skill.project}
+                            </span>
+                          )}
+                        </div>
+                        {skill.tags?.length > 0 && (
+                          <div className="flex gap-1 mt-1 flex-wrap">
+                            {skill.tags.slice(0, 4).map((tag: string) => (
+                              <span key={tag} className="text-[9px] font-mono uppercase tracking-wider text-accent bg-accent/10 px-1 py-0.5 rounded">
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
                         )}
                       </div>
-                      {skill.description && (
-                        <p className="text-sm text-muted-foreground leading-snug line-clamp-2">
-                          {skill.description}
-                        </p>
-                      )}
-                      {skill.tags?.length > 0 && (
-                        <div className="flex gap-1.5 mt-2 flex-wrap">
-                          {skill.tags.slice(0, 5).map((tag: string) => (
-                            <span key={tag} className="text-[10px] font-mono uppercase tracking-wider text-accent bg-accent/10 px-1.5 py-0.5 rounded">
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="shrink-0 text-right">
-                      {count > 0 && (
-                        <div className="flex items-center gap-1 text-sm font-mono text-muted-foreground">
-                          <Download className="h-3.5 w-3.5" />
-                          {count}
-                        </div>
-                      )}
-                      <div className="text-xs font-mono text-muted-foreground/40 mt-1">
-                        {skill._updatedAt ? format(new Date(skill._updatedAt), "MMM d") : ""}
+                      <div className="shrink-0 text-right">
+                        {count > 0 && (
+                          <div className="flex items-center gap-1 text-xs font-mono text-muted-foreground">
+                            <Download className="h-3 w-3" />
+                            {count}
+                          </div>
+                        )}
                       </div>
                     </div>
+                  );
+                })}
+                {skills.length === 0 && (
+                  <div className="px-8 py-8 text-center">
+                    <p className="text-muted-foreground font-mono text-sm">No skills published yet.</p>
                   </div>
-                );
-              })}
-              {skills.length === 0 && (
-                <div className="px-8 py-16 text-center">
-                  <p className="text-muted-foreground font-mono text-sm">No skills published yet.</p>
-                </div>
-              )}
-            </div>
-          </ScrollArea>
+                )}
+              </div>
+            </ScrollArea>
+          </div>
+          {/* Calendar - bottom half */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <ShippedCalendar />
+          </div>
         </div>
 
         {/* MIDDLE: Thinking + CLI Activity */}

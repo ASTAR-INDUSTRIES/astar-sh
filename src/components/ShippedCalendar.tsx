@@ -53,7 +53,7 @@ const ShippedCalendar = () => {
     milestones.filter((m: any) => isSameDay(new Date(m.date + "T00:00:00"), day));
 
   return (
-    <div className="flex-shrink-0 border-b border-border">
+    <div className="flex flex-col h-full overflow-hidden">
       <div className="flex items-center justify-between px-8 py-3 border-b border-border">
         <div className="flex items-center gap-3">
           <Rocket className="h-4 w-4 text-accent" />
@@ -80,12 +80,12 @@ const ShippedCalendar = () => {
         </div>
       </div>
 
-      <div className="px-8 py-3">
+      <div className="px-8 py-2 flex-1 overflow-auto">
         <div className="grid grid-cols-7 gap-px mb-px">
           {["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"].map((d) => (
             <div
               key={d}
-              className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground/30 px-2 py-1"
+              className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground/30 px-1.5 py-0.5"
             >
               {d}
             </div>
@@ -97,18 +97,18 @@ const ShippedCalendar = () => {
             <div key={wi} className="grid grid-cols-7 gap-px">
               {week.map((day, di) => {
                 if (!day)
-                  return <div key={di} className="bg-background min-h-[64px]" />;
+                  return <div key={di} className="bg-background min-h-[40px]" />;
                 const dayMilestones = getMilestones(day);
                 const hasEvents = dayMilestones.length > 0;
                 return (
                   <div
                     key={di}
-                    className={`bg-background min-h-[64px] px-2 py-1.5 ${
+                    className={`bg-background min-h-[40px] px-1.5 py-1 ${
                       hasEvents ? "bg-accent/5" : ""
                     }`}
                   >
                     <span
-                      className={`text-[11px] font-mono ${
+                      className={`text-[10px] font-mono ${
                         hasEvents
                           ? "text-accent font-bold"
                           : "text-muted-foreground/25"
@@ -116,11 +116,11 @@ const ShippedCalendar = () => {
                     >
                       {format(day, "d")}
                     </span>
-                    <div className="mt-1 space-y-0.5">
-                      {dayMilestones.map((m: any) => (
+                    <div className="mt-0.5 space-y-0.5">
+                      {dayMilestones.slice(0, 2).map((m: any) => (
                         <p
                           key={m.id}
-                          className={`text-[10px] font-mono leading-tight truncate ${
+                          className={`text-[9px] font-mono leading-tight truncate ${
                             categoryColors[m.category] ?? categoryColors.general
                           }`}
                           title={m.title}
