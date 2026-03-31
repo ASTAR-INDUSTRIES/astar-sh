@@ -18,20 +18,28 @@ Use this skill when asked to create news briefings, check for AI news, or when r
 
 ### 1. Identify Stories
 
-Search the web for the most significant AI/tech developments. Use multiple search queries:
+Search the web for the most significant developments. Use multiple search queries:
 - "AI news today" / "AI news this week"
-- Check specific sources: Reuters AI, TechCrunch AI, VentureBeat AI, Ars Technica
+- "breaking news today" / "world news today" (for major non-AI events)
+- Check specific sources: Reuters, BBC, CNBC, TechCrunch, VentureBeat
 - "Norway AI" / "Nordic AI" / "European AI"
 
 **Recency check**: For every story you consider, verify the publication date on at least 2 sources. Only cover stories published within the last 48 hours. If a story is older than 48h, skip it — it's not breaking news.
 
-Focus areas:
+**Primary focus — AI and tech:**
 - AI infrastructure (compute, data centers, chip supply)
 - Foundation models (new releases, benchmarks, capabilities)
 - AI engineering tools (IDEs, agents, dev workflows)
 - Enterprise AI adoption (deployments, case studies, failures)
 - AI economics (funding, revenue, cost structures)
 - AI policy and regulation (EU AI Act, US executive orders, Norwegian policy)
+
+**Secondary focus — major world events (only if truly significant):**
+- Geopolitical events that impact tech/business (conflicts, sanctions, trade wars)
+- Major economic shifts (market crashes, central bank decisions, currency events)
+- Norwegian/Nordic events of national significance
+
+The bar for non-AI news is HIGH — it must be the kind of event that fundamentally changes the operating environment for a consulting firm. A new military conflict, a major trade embargo, a financial crisis. Not routine politics.
 
 Pick the 1-3 most impactful stories that are NOT already on astar.sh. If nothing significant and new happened, say so — don't manufacture importance.
 
