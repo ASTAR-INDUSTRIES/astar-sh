@@ -106,13 +106,24 @@ async function sanityQuery(query: string, params?: Record<string, any>) {
 
 // ── GET /skills — list all published skills ───────────────────────────
 app.get("/skills", async (c) => {
-  const skills = await sanityQuery(`
-    *[_type == "knowledgeSkill" && published == true] | order(title asc) {
+  const query = c.req.query("query");
+
+  let filter = `_type == "knowledgeSkill" && published == true`;
+  const params: Record<string, any> = {};
+
+  if (query) {
+    filter += ` && (title match $q || description match $q || $q in tags)`;
+    params.q = `${query}*`;
+  }
+
+  const skills = await sanityQuery(
+    `*[${filter}] | order(title asc) {
       _id,
       title,
       "slug": slug.current,
       description,
       tags,
+      author,
       project,
       "skillMd": markdownContent,
       "referenceFiles": references[] {
@@ -120,11 +131,31 @@ app.get("/skills", async (c) => {
         folder,
         content
       }
-    }
-  `);
+    }`,
+    Object.keys(params).length ? params : undefined
+  );
 
-  await logEvent("skill.list", { metadata: { count: skills?.length ?? 0 } });
-  return c.json({ skills }, 200, corsHeaders);
+  const sb = getSupabase();
+  const { data: events } = await sb
+    .from("cli_events")
+    .select("skill_slug")
+    .eq("event_type", "skill.download")
+    .not("skill_slug", "is", null);
+
+  const dlCounts: Record<string, number> = {};
+  if (events) {
+    for (const ev of events) {
+      if (ev.skill_slug) dlCounts[ev.skill_slug] = (dlCounts[ev.skill_slug] || 0) + 1;
+    }
+  }
+
+  const enriched = (skills || []).map((s: any) => ({
+    ...s,
+    downloadCount: dlCounts[s.slug] || 0,
+  }));
+
+  await logEvent("skill.list", { metadata: { count: skills?.length ?? 0, query: query || undefined } });
+  return c.json({ skills: enriched }, 200, corsHeaders);
 });
 
 // ── GET /skills/:slug — single skill by slug ─────────────────────────
@@ -138,6 +169,7 @@ app.get("/skills/:slug", async (c) => {
       "slug": slug.current,
       description,
       tags,
+      author,
       project,
       "skillMd": markdownContent,
       "referenceFiles": references[] {

@@ -6,6 +6,7 @@ export interface SkillSummary {
   title: string;
   description: string;
   tags: string[];
+  downloadCount?: number;
 }
 
 export interface SkillReference {
@@ -17,6 +18,7 @@ export interface SkillReference {
 export interface SkillFull extends SkillSummary {
   skillMd: string;
   referenceFiles: SkillReference[] | null;
+  author?: string;
 }
 
 export class AstarAPI {
