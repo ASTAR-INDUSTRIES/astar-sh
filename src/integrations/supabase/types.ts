@@ -197,6 +197,35 @@ export type Database = {
         }
         Relationships: []
       }
+      tweet_reactions: {
+        Row: {
+          created_at: string
+          emoji: string
+          id: string
+          tweet_id: string
+        }
+        Insert: {
+          created_at?: string
+          emoji: string
+          id?: string
+          tweet_id: string
+        }
+        Update: {
+          created_at?: string
+          emoji?: string
+          id?: string
+          tweet_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tweet_reactions_tweet_id_fkey"
+            columns: ["tweet_id"]
+            isOneToOne: false
+            referencedRelation: "tweets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tweets: {
         Row: {
           author_email: string | null
