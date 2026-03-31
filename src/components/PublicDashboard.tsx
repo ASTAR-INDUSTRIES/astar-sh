@@ -297,7 +297,8 @@ const PublicDashboard = () => {
           {/* Clock */}
           <div className="flex-shrink-0 px-6 py-5 border-b border-border flex items-baseline justify-between">
             <span className="text-4xl font-mono font-bold text-foreground tabular-nums">
-              {format(now, "HH:mm")}
+              {format(now, "HH:mm:ss")}
+              <span className="text-2xl text-muted-foreground/70">.{String(now.getMilliseconds()).padStart(3, "0").slice(0, 2)}</span>
             </span>
             <span className="text-sm font-mono text-muted-foreground/60">
               {format(now, "EEE MMM d")}
