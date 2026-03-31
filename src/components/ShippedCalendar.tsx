@@ -1,17 +1,17 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   format,
-  startOfMonth,
-  endOfMonth,
+  startOfWeek,
+  endOfWeek,
   eachDayOfInterval,
-  getDay,
   isSameDay,
-  addMonths,
-  subMonths,
+  subWeeks,
+  isToday,
 } from "date-fns";
-import { ChevronLeft, ChevronRight, Rocket } from "lucide-react";
+import { Rocket } from "lucide-react";
+
+const WEEKS_TO_SHOW = 5;
 
 const categoryColors: Record<string, string> = {
   contract: "text-accent",
@@ -22,18 +22,19 @@ const categoryColors: Record<string, string> = {
 };
 
 const ShippedCalendar = () => {
-  const [viewDate, setViewDate] = useState(new Date());
-  const monthStart = startOfMonth(viewDate);
-  const monthEnd = endOfMonth(viewDate);
+  const today = new Date();
+  const currentWeekEnd = endOfWeek(today, { weekStartsOn: 1 });
+  const rangeStart = startOfWeek(subWeeks(today, WEEKS_TO_SHOW - 1), { weekStartsOn: 1 });
+  const rangeEnd = currentWeekEnd;
 
   const { data: milestones = [] } = useQuery({
-    queryKey: ["milestones", format(viewDate, "yyyy-MM")],
+    queryKey: ["milestones", format(rangeStart, "yyyy-MM-dd"), format(rangeEnd, "yyyy-MM-dd")],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("milestones")
         .select("*")
-        .gte("date", format(monthStart, "yyyy-MM-dd"))
-        .lte("date", format(monthEnd, "yyyy-MM-dd"))
+        .gte("date", format(rangeStart, "yyyy-MM-dd"))
+        .lte("date", format(rangeEnd, "yyyy-MM-dd"))
         .order("date", { ascending: true });
       if (error) throw error;
       return data;
@@ -41,13 +42,9 @@ const ShippedCalendar = () => {
     refetchInterval: 60000,
   });
 
-  const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
-  const startPad = (getDay(monthStart) + 6) % 7;
-  const cells: (Date | null)[] = [...Array(startPad).fill(null), ...days];
-  while (cells.length % 7 !== 0) cells.push(null);
-
-  const weeks: (Date | null)[][] = [];
-  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+  const allDays = eachDayOfInterval({ start: rangeStart, end: rangeEnd });
+  const weeks: Date[][] = [];
+  for (let i = 0; i < allDays.length; i += 7) weeks.push(allDays.slice(i, i + 7));
 
   const getMilestones = (day: Date) =>
     milestones.filter((m: any) => isSameDay(new Date(m.date + "T00:00:00"), day));
@@ -61,22 +58,8 @@ const ShippedCalendar = () => {
             Astar Shipped
           </span>
           <span className="text-xs font-mono text-muted-foreground/40">
-            {format(viewDate, "MMMM yyyy")}
+            {format(rangeStart, "MMM d")} — {format(rangeEnd, "MMM d")}
           </span>
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setViewDate((d) => subMonths(d, 1))}
-            className="p-1 text-muted-foreground/40 hover:text-accent transition-colors"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-          </button>
-          <button
-            onClick={() => setViewDate((d) => addMonths(d, 1))}
-            className="p-1 text-muted-foreground/40 hover:text-accent transition-colors"
-          >
-            <ChevronRight className="h-3.5 w-3.5" />
-          </button>
         </div>
       </div>
 
@@ -96,22 +79,23 @@ const ShippedCalendar = () => {
           {weeks.map((week, wi) => (
             <div key={wi} className="grid grid-cols-7 gap-px">
               {week.map((day, di) => {
-                if (!day)
-                  return <div key={di} className="bg-background min-h-[40px]" />;
                 const dayMilestones = getMilestones(day);
                 const hasEvents = dayMilestones.length > 0;
+                const todayCell = isToday(day);
                 return (
                   <div
                     key={di}
                     className={`bg-background min-h-[40px] px-1.5 py-1 ${
-                      hasEvents ? "bg-accent/5" : ""
-                    }`}
+                      todayCell ? "ring-1 ring-inset ring-accent/40" : ""
+                    } ${hasEvents ? "bg-accent/5" : ""}`}
                   >
                     <span
                       className={`text-[10px] font-mono ${
-                        hasEvents
+                        todayCell
                           ? "text-accent font-bold"
-                          : "text-muted-foreground/25"
+                          : hasEvents
+                            ? "text-accent font-bold"
+                            : "text-muted-foreground/25"
                       }`}
                     >
                       {format(day, "d")}
