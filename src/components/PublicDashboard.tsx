@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect, useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { sanityClient } from "@/lib/sanity";
 import { format, formatDistanceToNow } from "date-fns";
@@ -7,6 +7,8 @@ import {
   FileText, FlaskConical, MessageCircle,
   BookOpen, Activity, Download, Terminal, Zap, ExternalLink, Globe,
 } from "lucide-react";
+
+const REACTION_EMOJIS = ["🔥", "👏", "🧠", "💡", "🎯"];
 import { ScrollArea } from "@/components/ui/scroll-area";
 import ShippedCalendar from "@/components/ShippedCalendar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
