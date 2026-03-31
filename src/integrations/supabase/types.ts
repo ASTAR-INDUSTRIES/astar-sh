@@ -89,6 +89,30 @@ export type Database = {
         }
         Relationships: []
       }
+      milestones: {
+        Row: {
+          category: string
+          created_at: string
+          date: string
+          id: string
+          title: string
+        }
+        Insert: {
+          category?: string
+          created_at?: string
+          date: string
+          id?: string
+          title: string
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          date?: string
+          id?: string
+          title?: string
+        }
+        Relationships: []
+      }
       posts: {
         Row: {
           author_avatar: string | null
