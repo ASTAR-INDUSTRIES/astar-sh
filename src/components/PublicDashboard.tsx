@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect, useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { sanityClient } from "@/lib/sanity";
 import { format, formatDistanceToNow } from "date-fns";
@@ -7,6 +7,8 @@ import {
   FileText, FlaskConical, MessageCircle,
   BookOpen, Activity, Download, Terminal, Zap, ExternalLink, Globe,
 } from "lucide-react";
+
+const REACTION_EMOJIS = ["🔥", "👏", "🧠", "💡", "🎯"];
 import { ScrollArea } from "@/components/ui/scroll-area";
 import ShippedCalendar from "@/components/ShippedCalendar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -121,6 +123,44 @@ const PublicDashboard = () => {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [refetchEvents]);
+
+  // Reactions
+  const queryClient = useQueryClient();
+  const { data: reactions = [] } = useQuery({
+    queryKey: ["tweet-reactions"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("tweet_reactions")
+        .select("tweet_id, emoji");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("tweet-reactions-realtime")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "tweet_reactions" },
+        () => queryClient.invalidateQueries({ queryKey: ["tweet-reactions"] })
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [queryClient]);
+
+  const reactionCounts = reactions.reduce<Record<string, Record<string, number>>>((acc, r: any) => {
+    if (!acc[r.tweet_id]) acc[r.tweet_id] = {};
+    acc[r.tweet_id][r.emoji] = (acc[r.tweet_id][r.emoji] || 0) + 1;
+    return acc;
+  }, {});
+
+  const [reactingId, setReactingId] = useState<string | null>(null);
+  const handleReact = useCallback(async (tweetId: string, emoji: string) => {
+    setReactingId(`${tweetId}-${emoji}`);
+    await supabase.from("tweet_reactions").insert({ tweet_id: tweetId, emoji });
+    setTimeout(() => setReactingId(null), 300);
+  }, []);
 
   const downloadCounts = cliEvents.reduce<Record<string, number>>((acc, ev: any) => {
     if (ev.event_type === "skill.download" && ev.skill_slug) {
@@ -250,7 +290,9 @@ const PublicDashboard = () => {
                 {tweets.length === 0 ? (
                   <p className="px-6 py-8 text-sm font-mono text-muted-foreground/40 text-center">—</p>
                 ) : (
-                  tweets.slice(0, 10).map((tweet) => (
+                  tweets.slice(0, 10).map((tweet) => {
+                    const counts = reactionCounts[tweet.id] || {};
+                    return (
                     <div key={tweet.id} className="px-6 py-4">
                       <p className="text-sm text-foreground/90 leading-relaxed">
                         {tweet.content}
@@ -259,8 +301,32 @@ const PublicDashboard = () => {
                         {tweet.author_name && `${tweet.author_name} · `}
                         {format(new Date(tweet.created_at), "MMM d · HH:mm")}
                       </span>
+                      <div className="flex gap-1.5 mt-2 flex-wrap">
+                        {REACTION_EMOJIS.map((emoji) => {
+                          const count = counts[emoji] || 0;
+                          const isReacting = reactingId === `${tweet.id}-${emoji}`;
+                          return (
+                            <button
+                              key={emoji}
+                              onClick={() => handleReact(tweet.id, emoji)}
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-mono border transition-all cursor-pointer select-none
+                                ${count > 0
+                                  ? "border-accent/30 bg-accent/10 text-foreground/80"
+                                  : "border-border bg-background text-muted-foreground/40 hover:border-accent/20 hover:bg-accent/5"
+                                }
+                                ${isReacting ? "scale-125" : "hover:scale-105"}
+                              `}
+                              style={{ transition: "transform 0.15s ease" }}
+                            >
+                              <span>{emoji}</span>
+                              {count > 0 && <span>{count}</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </ScrollArea>
