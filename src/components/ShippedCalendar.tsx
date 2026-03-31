@@ -9,16 +9,16 @@ import {
   subWeeks,
   isToday,
 } from "date-fns";
-import { Rocket } from "lucide-react";
+import { Rocket, Zap, FileText, Users, Briefcase } from "lucide-react";
 
 const WEEKS_TO_SHOW = 5;
 
-const categoryColors: Record<string, string> = {
-  contract: "text-accent",
-  technical: "text-blue-400",
-  product: "text-purple-400",
-  team: "text-yellow-400",
-  general: "text-muted-foreground",
+const categoryConfig: Record<string, { color: string; icon: typeof Zap }> = {
+  contract: { color: "text-accent", icon: Briefcase },
+  technical: { color: "text-blue-400", icon: Zap },
+  product: { color: "text-purple-400", icon: FileText },
+  team: { color: "text-yellow-400", icon: Users },
+  general: { color: "text-muted-foreground", icon: Zap },
 };
 
 const ShippedCalendar = () => {
@@ -51,7 +51,7 @@ const ShippedCalendar = () => {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <div className="flex items-center justify-between px-8 py-3 border-b border-border">
+      <div className="flex items-center justify-between px-6 py-3 border-b border-border">
         <div className="flex items-center gap-3">
           <Rocket className="h-4 w-4 text-accent" />
           <span className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
@@ -63,56 +63,68 @@ const ShippedCalendar = () => {
         </div>
       </div>
 
-      <div className="px-8 py-2 flex-1 overflow-auto">
+      <div className="px-6 py-2 flex-1 overflow-auto">
+        {/* Day headers */}
         <div className="grid grid-cols-7 gap-px mb-px">
           {["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"].map((d) => (
             <div
               key={d}
-              className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground/30 px-1.5 py-0.5"
+              className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground/40 px-2 py-1"
             >
               {d}
             </div>
           ))}
         </div>
 
-        <div className="grid gap-px bg-border border border-border rounded overflow-hidden">
+        {/* Calendar grid */}
+        <div className="grid gap-px bg-border/50 border border-border/50 rounded overflow-hidden">
           {weeks.map((week, wi) => (
             <div key={wi} className="grid grid-cols-7 gap-px">
               {week.map((day, di) => {
                 const dayMilestones = getMilestones(day);
                 const hasEvents = dayMilestones.length > 0;
                 const todayCell = isToday(day);
+
                 return (
                   <div
                     key={di}
-                    className={`bg-background min-h-[40px] px-1.5 py-1 ${
-                      todayCell ? "ring-1 ring-inset ring-accent/40" : ""
-                    } ${hasEvents ? "bg-accent/5" : ""}`}
+                    className={`min-h-[52px] px-2 py-1.5 transition-colors ${
+                      hasEvents
+                        ? "bg-accent/15"
+                        : "bg-background"
+                    } ${todayCell ? "ring-1 ring-inset ring-accent/50" : ""}`}
                   >
                     <span
-                      className={`text-[10px] font-mono ${
-                        todayCell
+                      className={`text-[11px] font-mono leading-none ${
+                        hasEvents
                           ? "text-accent font-bold"
-                          : hasEvents
+                          : todayCell
                             ? "text-accent font-bold"
-                            : "text-muted-foreground/25"
+                            : "text-muted-foreground/20"
                       }`}
                     >
                       {format(day, "d")}
                     </span>
-                    <div className="mt-0.5 space-y-0.5">
-                      {dayMilestones.slice(0, 2).map((m: any) => (
-                        <p
-                          key={m.id}
-                          className={`text-[9px] font-mono leading-tight truncate ${
-                            categoryColors[m.category] ?? categoryColors.general
-                          }`}
-                          title={m.title}
-                        >
-                          {m.title}
-                        </p>
-                      ))}
-                    </div>
+                    {hasEvents && (
+                      <div className="mt-1.5 space-y-1">
+                        {dayMilestones.slice(0, 3).map((m: any) => {
+                          const config = categoryConfig[m.category] ?? categoryConfig.general;
+                          const Icon = config.icon;
+                          return (
+                            <div
+                              key={m.id}
+                              className="flex items-start gap-1"
+                              title={m.title}
+                            >
+                              <Icon className={`h-2.5 w-2.5 mt-px shrink-0 ${config.color}`} />
+                              <span className={`text-[9px] font-mono leading-tight line-clamp-2 ${config.color}`}>
+                                {m.title}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })}
