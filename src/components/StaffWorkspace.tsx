@@ -11,20 +11,27 @@ import { toast } from "sonner";
 import {
   Trash2, Plus, Edit, Eye, EyeOff,
   FileText, FlaskConical, MessageCircle, Send,
-  BookOpen, Search, Tag, ChevronDown, ChevronUp,
+  BookOpen, Search, Tag, ChevronDown, ChevronUp, Rocket,
 } from "lucide-react";
 import { format } from "date-fns";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type TweetForm = { content: string };
 const emptyTweet: TweetForm = { content: "" };
+
+type MilestoneForm = { title: string; date: string; category: string };
+const emptyMilestone: MilestoneForm = { title: "", date: format(new Date(), "yyyy-MM-dd"), category: "general" };
+
+const milestoneCategories = ["general", "contract", "technical", "product", "team"] as const;
 
 const StaffWorkspace = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [tweetForm, setTweetForm] = useState<TweetForm>(emptyTweet);
   const [skillSearch, setSkillSearch] = useState("");
+  const [milestoneForm, setMilestoneForm] = useState<MilestoneForm>(emptyMilestone);
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
 
   // Tweets
@@ -81,6 +88,50 @@ const StaffWorkspace = () => {
     onError: (e) => toast.error(e.message),
   });
 
+  const { data: milestones = [] } = useQuery({
+    queryKey: ["admin-milestones"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("milestones")
+        .select("*")
+        .order("date", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const addMilestone = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from("milestones").insert({
+        title: milestoneForm.title,
+        date: milestoneForm.date,
+        category: milestoneForm.category,
+        created_by: user?.user_metadata?.full_name || user?.email?.split("@")[0] || null,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-milestones"] });
+      queryClient.invalidateQueries({ queryKey: ["milestones"] });
+      setMilestoneForm(emptyMilestone);
+      toast.success("Milestone added");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const deleteMilestone = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("milestones").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-milestones"] });
+      queryClient.invalidateQueries({ queryKey: ["milestones"] });
+      toast.success("Milestone deleted");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
   const filteredSkills = skills.filter((s: any) => {
     if (!skillSearch.trim()) return true;
     const q = skillSearch.toLowerCase();
@@ -106,8 +157,8 @@ const StaffWorkspace = () => {
         {[
           { label: "Thoughts", value: tweets.length, icon: MessageCircle },
           { label: "Skills", value: skills.length, icon: BookOpen },
+          { label: "Shipped", value: milestones.length, icon: Rocket },
           { label: "News (Sanity)", value: "→", icon: FileText },
-          { label: "Research (Sanity)", value: "→", icon: FlaskConical },
         ].map((stat) => (
           <div key={stat.label} className="bg-card border border-border rounded-md p-4">
             <div className="flex items-center gap-2 mb-2">
@@ -129,6 +180,9 @@ const StaffWorkspace = () => {
           </TabsTrigger>
           <TabsTrigger value="tweets" className="font-mono text-xs gap-1.5">
             <MessageCircle className="h-3 w-3" /> Thinking
+          </TabsTrigger>
+          <TabsTrigger value="shipped" className="font-mono text-xs gap-1.5">
+            <Rocket className="h-3 w-3" /> Shipped
           </TabsTrigger>
         </TabsList>
 
@@ -338,6 +392,84 @@ const StaffWorkspace = () => {
               </a>
               . Tweets are posted directly from here.
             </p>
+          </div>
+        </TabsContent>
+        {/* Shipped Tab */}
+        <TabsContent value="shipped">
+          <div className="bg-card border border-border rounded-md p-4 mb-6">
+            <div className="grid grid-cols-[1fr_auto_auto] gap-3 mb-3">
+              <Input
+                placeholder="What did we ship?"
+                value={milestoneForm.title}
+                onChange={(e) => setMilestoneForm((f) => ({ ...f, title: e.target.value }))}
+                className="font-mono text-sm bg-secondary border-border"
+              />
+              <Input
+                type="date"
+                value={milestoneForm.date}
+                onChange={(e) => setMilestoneForm((f) => ({ ...f, date: e.target.value }))}
+                className="font-mono text-sm bg-secondary border-border w-40"
+              />
+              <Select
+                value={milestoneForm.category}
+                onValueChange={(v) => setMilestoneForm((f) => ({ ...f, category: v }))}
+              >
+                <SelectTrigger className="font-mono text-xs bg-secondary border-border w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {milestoneCategories.map((c) => (
+                    <SelectItem key={c} value={c} className="font-mono text-xs">
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                className="font-mono text-xs gap-1.5"
+                onClick={() => addMilestone.mutate()}
+                disabled={!milestoneForm.title.trim() || !milestoneForm.date}
+              >
+                <Plus className="h-3 w-3" /> Add
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {milestones.map((m: any) => (
+              <div
+                key={m.id}
+                className="flex items-center justify-between bg-card border border-border rounded-md px-4 py-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-mono text-foreground leading-snug">{m.title}</p>
+                  <div className="flex items-center gap-3 mt-1">
+                    <span className="text-xs font-mono text-muted-foreground">
+                      {format(new Date(m.date + "T00:00:00"), "MMM d, yyyy")}
+                    </span>
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-accent bg-accent/10 px-1.5 py-0.5 rounded">
+                      {m.category}
+                    </span>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-destructive shrink-0"
+                  onClick={() => deleteMilestone.mutate(m.id)}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </div>
+            ))}
+            {milestones.length === 0 && (
+              <p className="text-muted-foreground font-mono text-xs text-center py-8">
+                Nothing logged yet. Add your first shipped milestone.
+              </p>
+            )}
           </div>
         </TabsContent>
       </Tabs>
