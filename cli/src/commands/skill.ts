@@ -1,7 +1,7 @@
 import { resolve, join } from "path";
 import { createInterface } from "readline";
 import type { Command } from "commander";
-import { getToken } from "../lib/auth";
+import { getToken, getAuthStatus } from "../lib/auth";
 import { AstarAPI, type SkillFull, type SkillSummary } from "../lib/api";
 import { c, table, badge, tag } from "../lib/ui";
 
@@ -46,6 +46,14 @@ async function requireAuth(): Promise<string> {
   } catch {
     console.error(`${c.red}✗${c.reset} Not authenticated. Run ${c.cyan}astar login${c.reset} first.`);
     process.exit(1);
+  }
+}
+
+async function optionalAuth(): Promise<string | undefined> {
+  try {
+    return await getToken();
+  } catch {
+    return undefined;
   }
 }
 
@@ -107,7 +115,7 @@ export function registerSkillCommands(program: Command) {
     .description("List available skills")
     .option("-q, --query <query>", "Search by title/tag")
     .action(async (opts) => {
-      const token = await requireAuth();
+      const token = await optionalAuth();
       const api = new AstarAPI(token);
       const skills = await api.listSkills(opts.query);
       await displaySkillList(skills, opts.query);
@@ -117,7 +125,7 @@ export function registerSkillCommands(program: Command) {
     .command("search <query>")
     .description("Search skills by title, description, or tag")
     .action(async (query: string) => {
-      const token = await requireAuth();
+      const token = await optionalAuth();
       const api = new AstarAPI(token);
       const skills = await api.listSkills(query);
       await displaySkillList(skills, query);
@@ -127,7 +135,7 @@ export function registerSkillCommands(program: Command) {
     .command("info <slug>")
     .description("Show detailed info about a skill")
     .action(async (slug: string) => {
-      const token = await requireAuth();
+      const token = await optionalAuth();
       const api = new AstarAPI(token);
 
       try {

@@ -22,16 +22,13 @@ export interface SkillFull extends SkillSummary {
 }
 
 export class AstarAPI {
-  constructor(private token: string) {}
+  constructor(private token?: string) {}
 
   private async fetch<T>(path: string): Promise<T> {
     const config = await getConfig();
-    const res = await fetch(`${config.apiUrl}${path}`, {
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        "Content-Type": "application/json",
-      },
-    });
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
+    const res = await fetch(`${config.apiUrl}${path}`, { headers });
     if (!res.ok) {
       const body = await res.text();
       throw new Error(`API error ${res.status}: ${body}`);
