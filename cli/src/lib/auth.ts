@@ -1,22 +1,34 @@
 import { PublicClientApplication, DeviceCodeRequest } from "@azure/msal-node";
 import { execSync } from "child_process";
 import { createInterface } from "readline";
+import { homedir } from "os";
+import { join } from "path";
 import { getConfig, getAuthCache, saveAuthCache, clearAuthCache, type AuthCache } from "./config";
 
 const SCOPES = ["openid", "profile", "email"];
-
-let msalClient: PublicClientApplication | null = null;
+const MSAL_CACHE_FILE = join(homedir(), ".astar", "msal-cache.json");
 
 async function getMsalClient() {
-  if (msalClient) return msalClient;
   const config = await getConfig();
-  msalClient = new PublicClientApplication({
+  const client = new PublicClientApplication({
     auth: {
       clientId: config.clientId,
       authority: `https://login.microsoftonline.com/${config.tenantId}`,
     },
   });
-  return msalClient;
+
+  const cacheFile = Bun.file(MSAL_CACHE_FILE);
+  if (await cacheFile.exists()) {
+    const data = await cacheFile.text();
+    if (data.trim()) client.getTokenCache().deserialize(data);
+  }
+
+  return client;
+}
+
+async function persistMsalCache(client: PublicClientApplication) {
+  const data = client.getTokenCache().serialize();
+  await Bun.write(MSAL_CACHE_FILE, data);
 }
 
 function openBrowser(url: string) {
@@ -33,34 +45,6 @@ async function waitForEnter(): Promise<void> {
       resolve();
     });
   });
-}
-
-async function silentRefresh(cache: AuthCache): Promise<AuthCache | null> {
-  if (!cache.homeAccountId) return null;
-
-  try {
-    const client = await getMsalClient();
-    const accounts = await client.getTokenCache().getAllAccounts();
-    const account = accounts.find((a) => a.homeAccountId === cache.homeAccountId);
-    if (!account) return null;
-
-    const result = await client.acquireTokenSilent({ scopes: SCOPES, account });
-    if (!result) return null;
-
-    const refreshed: AuthCache = {
-      accessToken: result.accessToken,
-      expiresAt: result.expiresOn?.getTime() ?? Date.now() + 3600_000,
-      homeAccountId: result.account?.homeAccountId,
-      account: {
-        name: result.account?.name ?? cache.account.name,
-        username: result.account?.username ?? cache.account.username,
-      },
-    };
-    await saveAuthCache(refreshed);
-    return refreshed;
-  } catch {
-    return null;
-  }
 }
 
 export async function login(): Promise<AuthCache> {
@@ -93,6 +77,8 @@ export async function login(): Promise<AuthCache> {
     throw new Error(`Access denied. Only @astarconsulting.no accounts allowed (got ${email})`);
   }
 
+  await persistMsalCache(client);
+
   const cache: AuthCache = {
     accessToken: result.accessToken,
     expiresAt: result.expiresOn?.getTime() ?? Date.now() + 3600_000,
@@ -108,8 +94,9 @@ export async function login(): Promise<AuthCache> {
 }
 
 export async function logout() {
-  msalClient = null;
   await clearAuthCache();
+  const file = Bun.file(MSAL_CACHE_FILE);
+  if (await file.exists()) await Bun.write(MSAL_CACHE_FILE, "");
 }
 
 export async function getAuthStatus(): Promise<{ name: string; email: string } | null> {
@@ -128,4 +115,34 @@ export async function getToken(): Promise<string> {
   if (refreshed) return refreshed.accessToken;
 
   throw new Error("Session expired. Run 'astar login' to sign in again.");
+}
+
+async function silentRefresh(cache: AuthCache): Promise<AuthCache | null> {
+  if (!cache.homeAccountId) return null;
+
+  try {
+    const client = await getMsalClient();
+    const accounts = await client.getTokenCache().getAllAccounts();
+    const account = accounts.find((a) => a.homeAccountId === cache.homeAccountId);
+    if (!account) return null;
+
+    const result = await client.acquireTokenSilent({ scopes: SCOPES, account });
+    if (!result) return null;
+
+    await persistMsalCache(client);
+
+    const refreshed: AuthCache = {
+      accessToken: result.accessToken,
+      expiresAt: result.expiresOn?.getTime() ?? Date.now() + 3600_000,
+      homeAccountId: result.account?.homeAccountId,
+      account: {
+        name: result.account?.name ?? cache.account.name,
+        username: result.account?.username ?? cache.account.username,
+      },
+    };
+    await saveAuthCache(refreshed);
+    return refreshed;
+  } catch {
+    return null;
+  }
 }

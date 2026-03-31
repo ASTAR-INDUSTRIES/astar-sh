@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import { login, logout, getAuthStatus } from "../lib/auth";
+import { getAuthCache } from "../lib/config";
 
 export function registerAuthCommands(program: Command) {
   program
@@ -29,7 +30,9 @@ export function registerAuthCommands(program: Command) {
     .action(async () => {
       const status = await getAuthStatus();
       if (status) {
-        console.log(`${status.name} (${status.email})`);
+        const cache = await getAuthCache();
+        const expired = cache && cache.expiresAt < Date.now();
+        console.log(`${status.name} (${status.email})${expired ? " [session expired — run astar login]" : ""}`);
       } else {
         console.log("Not signed in. Run 'astar login' to authenticate.");
       }
