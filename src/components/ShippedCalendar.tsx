@@ -53,7 +53,7 @@ const ShippedCalendar = () => {
     milestones.filter((m: any) => isSameDay(new Date(m.date + "T00:00:00"), day));
 
   return (
-    <div className="flex-shrink-0 border-b border-border">
+    <div className="flex flex-col h-full overflow-hidden">
       <div className="flex items-center justify-between px-8 py-3 border-b border-border">
         <div className="flex items-center gap-3">
           <Rocket className="h-4 w-4 text-accent" />
