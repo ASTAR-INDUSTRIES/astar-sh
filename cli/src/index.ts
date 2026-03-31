@@ -2,7 +2,7 @@
 import { Command } from "commander";
 import { registerAuthCommands } from "./commands/auth";
 import { registerSkillCommands } from "./commands/skill";
-import { registerUpdateCommand } from "./commands/update";
+import { registerUpdateCommand, checkForUpdates } from "./commands/update";
 
 const program = new Command()
   .name("astar")
@@ -13,4 +13,5 @@ registerAuthCommands(program);
 registerSkillCommands(program);
 registerUpdateCommand(program);
 
+await checkForUpdates();
 program.parse();
