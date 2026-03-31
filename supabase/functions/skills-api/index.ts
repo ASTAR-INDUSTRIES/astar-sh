@@ -119,6 +119,7 @@ app.get("/skills", async (c) => {
   const skills = await sanityQuery(
     `*[${filter}] | order(title asc) {
       _id,
+      _updatedAt,
       title,
       "slug": slug.current,
       description,
@@ -165,6 +166,7 @@ app.get("/skills/:slug", async (c) => {
   const skill = await sanityQuery(
     `*[_type == "knowledgeSkill" && slug.current == $slug && published == true][0] {
       _id,
+      _updatedAt,
       title,
       "slug": slug.current,
       description,

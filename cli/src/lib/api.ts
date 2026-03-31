@@ -7,6 +7,7 @@ export interface SkillSummary {
   description: string;
   tags: string[];
   downloadCount?: number;
+  _updatedAt?: string;
 }
 
 export interface SkillReference {

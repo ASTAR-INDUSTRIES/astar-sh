@@ -4,6 +4,8 @@ import type { Command } from "commander";
 import { getToken, getAuthStatus } from "../lib/auth";
 import { AstarAPI, type SkillFull, type SkillSummary } from "../lib/api";
 import { c, table, badge, tag } from "../lib/ui";
+import { writeManifest, readManifest, isOutdated, type SkillManifest } from "../lib/manifest";
+import { diffFiles, renderDiff, type FileDiff } from "../lib/diff";
 
 function getSkillsDir(): string {
   return resolve(process.cwd(), ".claude", "skills");
@@ -26,6 +28,14 @@ async function writeSkillToDisk(skill: SkillFull) {
       await Bun.write(refPath, ref.content);
     }
   }
+
+  await writeManifest(skillDir, {
+    slug: skill.slug,
+    title: skill.title,
+    author: skill.author,
+    installedAt: new Date().toISOString(),
+    remoteUpdatedAt: skill._updatedAt ?? new Date().toISOString(),
+  });
 
   return skillDir;
 }
@@ -77,8 +87,18 @@ function prompt(question: string, defaultValue?: string): Promise<string> {
   });
 }
 
+function fmtDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
 async function displaySkillList(skills: SkillSummary[], query?: string) {
   const installed = await getInstalledSlugs().catch(() => []);
+
+  const manifests = new Map<string, SkillManifest>();
+  for (const slug of installed) {
+    const m = await readManifest(join(getSkillsDir(), slug));
+    if (m) manifests.set(slug, m);
+  }
 
   if (!skills.length) {
     console.log(query
@@ -90,14 +110,25 @@ async function displaySkillList(skills: SkillSummary[], query?: string) {
   console.log("");
   table(
     ["#", "Skill", "Description", "DLs", "Tags", ""],
-    skills.map((s, i) => [
-      `${c.dim}${i + 1}${c.reset}`,
-      `${c.cyan}${s.slug}${c.reset}`,
-      `${c.dim}${truncate(s.description, 44)}${c.reset}`,
-      s.downloadCount ? `${c.yellow}${s.downloadCount}${c.reset}` : `${c.dim}—${c.reset}`,
-      s.tags?.length ? s.tags.slice(0, 3).map((t) => tag(t)).join(` ${c.dim}·${c.reset} `) : "",
-      installed.includes(s.slug) ? badge("installed", c.green) : "",
-    ])
+    skills.map((s, i) => {
+      let statusBadge = "";
+      if (installed.includes(s.slug)) {
+        const manifest = manifests.get(s.slug);
+        if (manifest && s._updatedAt && isOutdated(manifest, s._updatedAt)) {
+          statusBadge = badge("update ↑", c.yellow);
+        } else {
+          statusBadge = badge("installed", c.green);
+        }
+      }
+      return [
+        `${c.dim}${i + 1}${c.reset}`,
+        `${c.cyan}${s.slug}${c.reset}`,
+        `${c.dim}${truncate(s.description, 44)}${c.reset}`,
+        s.downloadCount ? `${c.yellow}${s.downloadCount}${c.reset}` : `${c.dim}—${c.reset}`,
+        s.tags?.length ? s.tags.slice(0, 3).map((t) => tag(t)).join(` ${c.dim}·${c.reset} `) : "",
+        statusBadge,
+      ];
+    })
   );
   console.log("");
   console.log(`  ${c.dim}${skills.length} skill(s)${query ? ` matching "${query}"` : " available"}${c.reset}`);
@@ -141,12 +172,19 @@ export function registerSkillCommands(program: Command) {
       try {
         const s = await api.getSkill(slug);
         const installed = await getInstalledSlugs().catch(() => []);
-        const isInstalled = installed.includes(s.slug);
+        const isInst = installed.includes(s.slug);
+        const manifest = isInst ? await readManifest(join(getSkillsDir(), s.slug)) : null;
+        const outdated = manifest && s._updatedAt && isOutdated(manifest, s._updatedAt);
 
         console.log("");
-        console.log(`  ${c.bold}${c.white}${s.title}${c.reset}${isInstalled ? ` ${c.green}[installed]${c.reset}` : ""}`);
+        let statusStr = "";
+        if (isInst && outdated) statusStr = ` ${c.yellow}[update available]${c.reset}`;
+        else if (isInst) statusStr = ` ${c.green}[installed]${c.reset}`;
+        console.log(`  ${c.bold}${c.white}${s.title}${c.reset}${statusStr}`);
         console.log(`  ${c.dim}slug:${c.reset}   ${c.cyan}${s.slug}${c.reset}`);
         if (s.author) console.log(`  ${c.dim}author:${c.reset} ${s.author}`);
+        if (s._updatedAt) console.log(`  ${c.dim}updated:${c.reset} ${fmtDate(s._updatedAt)}`);
+        if (manifest) console.log(`  ${c.dim}installed:${c.reset} ${fmtDate(manifest.installedAt)}`);
         console.log("");
         if (s.description) console.log(`  ${c.dim}${s.description}${c.reset}`);
         console.log("");
@@ -171,16 +209,71 @@ export function registerSkillCommands(program: Command) {
           for (const line of lines) {
             console.log(`  ${c.dim}${line}${c.reset}`);
           }
-          if (s.skillMd.split("\n").length > 12) {
-            console.log(`  ${c.dim}...${c.reset}`);
-          }
+          if (s.skillMd.split("\n").length > 12) console.log(`  ${c.dim}...${c.reset}`);
           console.log("");
         }
 
-        if (!isInstalled) {
+        if (outdated) {
+          console.log(`  ${c.yellow}Update available!${c.reset} Run: ${c.cyan}astar skill diff ${s.slug}${c.reset}`);
+          console.log("");
+        } else if (!isInst) {
           console.log(`  ${c.dim}Install with:${c.reset} ${c.cyan}astar skill install ${s.slug}${c.reset}`);
           console.log("");
         }
+      } catch (e: any) {
+        console.error(`${c.red}✗${c.reset} ${e.message}`);
+        process.exit(1);
+      }
+    });
+
+  skill
+    .command("diff <slug>")
+    .description("Show changes between local and remote skill")
+    .action(async (slug: string) => {
+      const token = await optionalAuth();
+      const api = new AstarAPI(token);
+      const skillDir = join(getSkillsDir(), slug);
+
+      if (!(await Bun.file(join(skillDir, "SKILL.md")).exists())) {
+        console.error(`${c.red}✗${c.reset} Skill "${slug}" is not installed.`);
+        process.exit(1);
+      }
+
+      try {
+        const remote = await api.getSkill(slug);
+        const manifest = await readManifest(skillDir);
+
+        const localSkillMd = await Bun.file(join(skillDir, "SKILL.md")).text();
+
+        const files: FileDiff[] = [];
+        files.push(diffFiles("SKILL.md", localSkillMd, remote.skillMd || ""));
+
+        if (remote.referenceFiles?.length) {
+          for (const ref of remote.referenceFiles) {
+            const refDir = ref.folder ? join(skillDir, ref.folder) : skillDir;
+            const localPath = join(refDir, ref.filename);
+            const localFile = Bun.file(localPath);
+            const localContent = await localFile.exists() ? await localFile.text() : "";
+            const displayName = ref.folder ? `${ref.folder}/${ref.filename}` : ref.filename;
+            files.push(diffFiles(displayName, localContent, ref.content));
+          }
+        }
+
+        const refsDir = join(skillDir, "references");
+        const remoteNames = new Set((remote.referenceFiles || []).map((r) => r.filename));
+        try {
+          const glob = new Bun.Glob("*");
+          for await (const path of glob.scan({ cwd: refsDir })) {
+            if (path === ".gitkeep" || remoteNames.has(path)) continue;
+            const content = await Bun.file(join(refsDir, path)).text();
+            files.push(diffFiles(`references/${path}`, content, ""));
+          }
+        } catch {}
+
+        const localDate = manifest?.remoteUpdatedAt ? fmtDate(manifest.remoteUpdatedAt) : "unknown";
+        const remoteDate = remote._updatedAt ? fmtDate(remote._updatedAt) : "latest";
+
+        renderDiff(remote.title || slug, localDate, remoteDate, files);
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} ${e.message}`);
         process.exit(1);
@@ -213,9 +306,6 @@ export function registerSkillCommands(program: Command) {
         console.error(`\n${c.red}✗${c.reset} Skill "${slug}" already exists at ${c.dim}.claude/skills/${slug}/${c.reset}`);
         process.exit(1);
       }
-
-      const tags = tagsRaw ? tagsRaw.split(",").map((t) => t.trim()).filter(Boolean) : [];
-      const tagLine = tags.length ? `\ntags: ${tags.join(", ")}` : "";
 
       const template = `# ${name}
 
@@ -286,15 +376,21 @@ ${description || ""}
           console.log(`  Run ${c.cyan}astar skill install <slug>${c.reset} to get started.`);
           return;
         }
-        console.log("");
-        table(
-          ["#", "Skill", "Path"],
-          slugs.map((slug, i) => [
-            `${c.dim}${i + 1}${c.reset}`,
+
+        const rows: string[][] = [];
+        for (const slug of slugs) {
+          const manifest = await readManifest(join(getSkillsDir(), slug));
+          const installed = manifest?.installedAt ? fmtDate(manifest.installedAt) : `${c.dim}—${c.reset}`;
+          rows.push([
+            `${c.dim}${rows.length + 1}${c.reset}`,
             `${c.cyan}${slug}${c.reset}`,
+            `${c.dim}${installed}${c.reset}`,
             `${c.dim}.claude/skills/${slug}/${c.reset}`,
-          ])
-        );
+          ]);
+        }
+
+        console.log("");
+        table(["#", "Skill", "Installed", "Path"], rows);
         console.log("");
       } catch {
         console.log(`${c.dim}No skills installed.${c.reset}`);
@@ -323,6 +419,7 @@ ${description || ""}
       const refsGlob = new Bun.Glob("**/*");
       try {
         for await (const path of refsGlob.scan({ cwd: refsDir })) {
+          if (path === ".gitkeep") continue;
           const file = Bun.file(join(refsDir, path));
           refs.push({ filename: path, folder: "references", content: await file.text() });
         }
@@ -357,14 +454,42 @@ ${description || ""}
         return;
       }
 
+      let updated = 0;
+      let skipped = 0;
+
       for (const s of slugs) {
         try {
+          const skillDir = join(getSkillsDir(), s);
+          const manifest = await readManifest(skillDir);
           const data = await api.getSkill(s);
+
+          if (manifest && data._updatedAt && !isOutdated(manifest, data._updatedAt)) {
+            console.log(`  ${c.dim}─ ${s} already up to date${c.reset}`);
+            skipped++;
+            continue;
+          }
+
+          const oldSkillMd = await Bun.file(join(skillDir, "SKILL.md")).text().catch(() => "");
           await writeSkillToDisk(data);
-          console.log(`${c.green}✓${c.reset} Updated ${c.cyan}${s}${c.reset}`);
+          updated++;
+
+          const diff = diffFiles("SKILL.md", oldSkillMd, data.skillMd || "");
+          if (diff.additions || diff.removals) {
+            console.log(`  ${c.green}✓${c.reset} Updated ${c.cyan}${s}${c.reset} (${c.green}+${diff.additions}${c.reset} ${c.red}-${diff.removals}${c.reset})`);
+          } else {
+            console.log(`  ${c.green}✓${c.reset} Updated ${c.cyan}${s}${c.reset} ${c.dim}(metadata only)${c.reset}`);
+          }
         } catch (e: any) {
-          console.error(`${c.red}✗${c.reset} Failed to update "${s}": ${e.message}`);
+          console.error(`  ${c.red}✗${c.reset} Failed to update "${s}": ${e.message}`);
         }
       }
+
+      console.log("");
+      if (updated === 0 && skipped > 0) {
+        console.log(`  ${c.green}✓${c.reset} All ${skipped} skill(s) already up to date.`);
+      } else {
+        console.log(`  ${c.dim}${updated} updated, ${skipped} already current${c.reset}`);
+      }
+      console.log("");
     });
 }
