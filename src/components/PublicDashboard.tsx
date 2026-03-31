@@ -19,7 +19,7 @@ const PublicDashboard = () => {
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
+    const t = setInterval(() => setNow(new Date()), 10);
     return () => clearInterval(t);
   }, []);
 
