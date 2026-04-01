@@ -263,6 +263,13 @@ export type Database = {
             foreignKeyName: "tweet_reactions_tweet_id_fkey"
             columns: ["tweet_id"]
             isOneToOne: false
+            referencedRelation: "public_tweets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tweet_reactions_tweet_id_fkey"
+            columns: ["tweet_id"]
+            isOneToOne: false
             referencedRelation: "tweets"
             referencedColumns: ["id"]
           },
@@ -297,7 +304,30 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      public_tweets: {
+        Row: {
+          author_name: string | null
+          content: string | null
+          created_at: string | null
+          id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          author_name?: string | null
+          content?: string | null
+          created_at?: string | null
+          id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          author_name?: string | null
+          content?: string | null
+          created_at?: string | null
+          id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       [_ in never]: never
