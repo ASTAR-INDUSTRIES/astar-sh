@@ -31,15 +31,22 @@ function sanityToken(): string {
   return env("SANITY_API_TOKEN");
 }
 
+// ── Hashing helper ─────────────────────────────────────────────────────
+async function sha256Hex(input: string): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
 // ── Auth helper ────────────────────────────────────────────────────────
 async function validateToken(req: Request): Promise<{ email: string; userId: string } | null> {
   const auth = req.headers.get("authorization");
   if (!auth?.startsWith("Bearer ")) return null;
   const token = auth.slice(7);
+  const tokenHash = await sha256Hex(token);
   const sb = adminClient();
   const { data } = await sb.from("mcp_sessions")
     .select("user_email, user_id")
-    .eq("access_token", token)
+    .eq("access_token", tokenHash)
     .gt("expires_at", new Date().toISOString())
     .maybeSingle();
   if (!data) return null;
