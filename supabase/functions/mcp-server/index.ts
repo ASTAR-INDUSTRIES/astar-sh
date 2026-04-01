@@ -517,6 +517,19 @@ const TOOLS = [
       },
     },
   },
+  // ── Reaction Tools ─────────────────────────────────────────────────
+  {
+    name: "react_to_tweet",
+    description: "Add an emoji reaction to a tweet/thought on the timeline",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tweet_id: { type: "string", description: "UUID of the tweet to react to" },
+        emoji: { type: "string", description: "Emoji character (e.g. 🔥 👏 🧠 💡 🎯)" },
+      },
+      required: ["tweet_id", "emoji"],
+    },
+  },
   // ── Feedback Tools ──────────────────────────────────────────────────
   {
     name: "submit_feedback",
