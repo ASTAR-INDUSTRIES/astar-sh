@@ -259,8 +259,9 @@ app.post("/token", async (c) => {
   }
 
   const accessToken = crypto.randomUUID();
+  const accessTokenHash = await sha256Hex(accessToken);
   await sb.from("mcp_sessions").update({
-    access_token: accessToken,
+    access_token: accessTokenHash,
     auth_code: null,
     expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
   }).eq("id", session.id);
