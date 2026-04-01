@@ -89,6 +89,54 @@ export type Database = {
         }
         Relationships: []
       }
+      financial_inquiries: {
+        Row: {
+          author_email: string
+          author_name: string | null
+          content: string
+          created_at: string
+          delivery_channel: string | null
+          id: string
+          locked_at: string | null
+          locked_by: string | null
+          processed_at: string | null
+          processed_by: string | null
+          response: string | null
+          status: string
+          type: string
+        }
+        Insert: {
+          author_email: string
+          author_name?: string | null
+          content: string
+          created_at?: string
+          delivery_channel?: string | null
+          id?: string
+          locked_at?: string | null
+          locked_by?: string | null
+          processed_at?: string | null
+          processed_by?: string | null
+          response?: string | null
+          status?: string
+          type?: string
+        }
+        Update: {
+          author_email?: string
+          author_name?: string | null
+          content?: string
+          created_at?: string
+          delivery_channel?: string | null
+          id?: string
+          locked_at?: string | null
+          locked_by?: string | null
+          processed_at?: string | null
+          processed_by?: string | null
+          response?: string | null
+          status?: string
+          type?: string
+        }
+        Relationships: []
+      }
       mcp_sessions: {
         Row: {
           access_token: string | null
@@ -135,6 +183,7 @@ export type Database = {
         Row: {
           category: string
           created_at: string
+          created_by: string | null
           date: string
           id: string
           title: string
@@ -142,6 +191,7 @@ export type Database = {
         Insert: {
           category?: string
           created_at?: string
+          created_by?: string | null
           date: string
           id?: string
           title: string
@@ -149,6 +199,7 @@ export type Database = {
         Update: {
           category?: string
           created_at?: string
+          created_by?: string | null
           date?: string
           id?: string
           title?: string
