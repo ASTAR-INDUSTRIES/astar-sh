@@ -223,7 +223,8 @@ app.get("/callback", async (c) => {
   }
 
   const authCode = crypto.randomUUID();
-  await sb.from("mcp_sessions").update({ auth_code: authCode, user_email: email, user_id: userId }).eq("id", session.id);
+  const authCodeHash = await sha256Hex(authCode);
+  await sb.from("mcp_sessions").update({ auth_code: authCodeHash, user_email: email, user_id: userId }).eq("id", session.id);
 
   const url = new URL(session.client_redirect_uri);
   url.searchParams.set("code", authCode);
