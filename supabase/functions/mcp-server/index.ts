@@ -517,6 +517,19 @@ const TOOLS = [
       },
     },
   },
+  // ── Reaction Tools ─────────────────────────────────────────────────
+  {
+    name: "react_to_tweet",
+    description: "Add an emoji reaction to a tweet/thought on the timeline",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tweet_id: { type: "string", description: "UUID of the tweet to react to" },
+        emoji: { type: "string", description: "Emoji character (e.g. 🔥 👏 🧠 💡 🎯)" },
+      },
+      required: ["tweet_id", "emoji"],
+    },
+  },
   // ── Feedback Tools ──────────────────────────────────────────────────
   {
     name: "submit_feedback",
@@ -822,6 +835,16 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const result = await sanityQuery(q, args.category ? { cat: args.category } : undefined);
       if (!result?.length) return [{ type: "text", text: "No news posts found." }];
       return [{ type: "text", text: JSON.stringify(result, null, 2) }];
+    }
+
+    // ── Reactions ──────────────────────────────────────────────────
+    case "react_to_tweet": {
+      const { error } = await sb.from("tweet_reactions").insert({
+        tweet_id: args.tweet_id,
+        emoji: args.emoji,
+      });
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      return [{ type: "text", text: `✓ Reacted with ${args.emoji}` }];
     }
 
     // ── Feedback ──────────────────────────────────────────────────
