@@ -47,6 +47,48 @@ export type Database = {
         }
         Relationships: []
       }
+      feedback: {
+        Row: {
+          author_email: string
+          author_name: string | null
+          content: string
+          context: Json | null
+          created_at: string | null
+          id: string
+          linked_news: string | null
+          linked_skill: string | null
+          source: string | null
+          status: string | null
+          type: string | null
+        }
+        Insert: {
+          author_email: string
+          author_name?: string | null
+          content: string
+          context?: Json | null
+          created_at?: string | null
+          id?: string
+          linked_news?: string | null
+          linked_skill?: string | null
+          source?: string | null
+          status?: string | null
+          type?: string | null
+        }
+        Update: {
+          author_email?: string
+          author_name?: string | null
+          content?: string
+          context?: Json | null
+          created_at?: string | null
+          id?: string
+          linked_news?: string | null
+          linked_skill?: string | null
+          source?: string | null
+          status?: string | null
+          type?: string | null
+        }
+        Relationships: []
+      }
       mcp_sessions: {
         Row: {
           access_token: string | null
