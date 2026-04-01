@@ -377,14 +377,18 @@ const PublicDashboard = () => {
         <div className="bg-background flex flex-col overflow-hidden">
 
           {/* Clock */}
-          <div className="flex-shrink-0 px-6 py-5 border-b border-border flex items-baseline justify-between">
-            <span className="text-4xl font-mono font-bold text-foreground tabular-nums">
-              {format(now, "HH:mm:ss")}
-              <span className="text-2xl text-muted-foreground/70">.{String(now.getMilliseconds()).padStart(3, "0").slice(0, 2)}</span>
-            </span>
-            <span className="text-[10px] font-mono text-muted-foreground/40 tracking-[0.3em] uppercase">every second counts</span>
-            <span className="text-sm font-mono text-muted-foreground/60">
-              {format(now, "EEE MMM d")}
+          <div className="flex-shrink-0 px-6 py-5 border-b border-border flex flex-col gap-1">
+            <div className="flex items-baseline justify-between">
+              <span className="text-4xl font-mono font-bold text-foreground tabular-nums">
+                {format(now, "HH:mm:ss")}
+                <span className="text-2xl text-muted-foreground/70">.{String(now.getMilliseconds()).padStart(3, "0").slice(0, 2)}</span>
+              </span>
+              <span className="text-sm font-mono text-muted-foreground/60">
+                {format(now, "EEE MMM d")}
+              </span>
+            </div>
+            <span className="w-full text-[10px] font-mono text-muted-foreground/40 tracking-[0.3em] uppercase animate-clock-shimmer bg-clip-text" style={{ backgroundSize: '200% 100%' }}>
+              every second counts
             </span>
           </div>
 
