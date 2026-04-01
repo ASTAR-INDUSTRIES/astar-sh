@@ -90,7 +90,7 @@ const PublicDashboard = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("tweets")
-        .select("*")
+        .select("id, content, author_name, created_at, updated_at")
         .order("created_at", { ascending: false })
         .limit(20);
       if (error) throw error;
