@@ -837,6 +837,16 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       return [{ type: "text", text: JSON.stringify(result, null, 2) }];
     }
 
+    // ── Reactions ──────────────────────────────────────────────────
+    case "react_to_tweet": {
+      const { error } = await sb.from("tweet_reactions").insert({
+        tweet_id: args.tweet_id,
+        emoji: args.emoji,
+      });
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      return [{ type: "text", text: `✓ Reacted with ${args.emoji}` }];
+    }
+
     // ── Feedback ──────────────────────────────────────────────────
     case "submit_feedback": {
       const sb = adminClient();
