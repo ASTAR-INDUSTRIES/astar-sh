@@ -31,15 +31,22 @@ function sanityToken(): string {
   return env("SANITY_API_TOKEN");
 }
 
+// ── Hashing helper ─────────────────────────────────────────────────────
+async function sha256Hex(input: string): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
 // ── Auth helper ────────────────────────────────────────────────────────
 async function validateToken(req: Request): Promise<{ email: string; userId: string } | null> {
   const auth = req.headers.get("authorization");
   if (!auth?.startsWith("Bearer ")) return null;
   const token = auth.slice(7);
+  const tokenHash = await sha256Hex(token);
   const sb = adminClient();
   const { data } = await sb.from("mcp_sessions")
     .select("user_email, user_id")
-    .eq("access_token", token)
+    .eq("access_token", tokenHash)
     .gt("expires_at", new Date().toISOString())
     .maybeSingle();
   if (!data) return null;
@@ -216,7 +223,8 @@ app.get("/callback", async (c) => {
   }
 
   const authCode = crypto.randomUUID();
-  await sb.from("mcp_sessions").update({ auth_code: authCode, user_email: email, user_id: userId }).eq("id", session.id);
+  const authCodeHash = await sha256Hex(authCode);
+  await sb.from("mcp_sessions").update({ auth_code: authCodeHash, user_email: email, user_id: userId }).eq("id", session.id);
 
   const url = new URL(session.client_redirect_uri);
   url.searchParams.set("code", authCode);
@@ -239,7 +247,8 @@ app.post("/token", async (c) => {
   }
 
   const sb = adminClient();
-  const { data: session } = await sb.from("mcp_sessions").select("*").eq("auth_code", code).maybeSingle();
+  const codeHash = await sha256Hex(code);
+  const { data: session } = await sb.from("mcp_sessions").select("*").eq("auth_code", codeHash).maybeSingle();
   if (!session) return c.json({ error: "invalid_grant" }, 400);
 
   if (session.code_challenge && codeVerifier) {
@@ -252,8 +261,9 @@ app.post("/token", async (c) => {
   }
 
   const accessToken = crypto.randomUUID();
+  const accessTokenHash = await sha256Hex(accessToken);
   await sb.from("mcp_sessions").update({
-    access_token: accessToken,
+    access_token: accessTokenHash,
     auth_code: null,
     expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
   }).eq("id", session.id);
