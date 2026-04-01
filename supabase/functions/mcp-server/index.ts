@@ -247,7 +247,8 @@ app.post("/token", async (c) => {
   }
 
   const sb = adminClient();
-  const { data: session } = await sb.from("mcp_sessions").select("*").eq("auth_code", code).maybeSingle();
+  const codeHash = await sha256Hex(code);
+  const { data: session } = await sb.from("mcp_sessions").select("*").eq("auth_code", codeHash).maybeSingle();
   if (!session) return c.json({ error: "invalid_grant" }, 400);
 
   if (session.code_challenge && codeVerifier) {
