@@ -382,6 +382,7 @@ const PublicDashboard = () => {
               {format(now, "HH:mm:ss")}
               <span className="text-2xl text-muted-foreground/70">.{String(now.getMilliseconds()).padStart(3, "0").slice(0, 2)}</span>
             </span>
+            <span className="text-[10px] font-mono text-muted-foreground/40 tracking-[0.3em] uppercase">every second counts</span>
             <span className="text-sm font-mono text-muted-foreground/60">
               {format(now, "EEE MMM d")}
             </span>
