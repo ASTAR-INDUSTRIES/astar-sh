@@ -21,6 +21,8 @@ const eventLabels: Record<string, string> = {
   "user.login": "signed in",
 };
 
+const ASTAR_VERSION = "0.0.1";
+
 const regionColors: Record<string, string> = {
   US: "text-blue-400 bg-blue-400/10",
   EU: "text-yellow-400 bg-yellow-400/10",
@@ -383,6 +385,7 @@ const PublicDashboard = () => {
                 {format(now, "HH:mm:ss")}
                 <span className="text-2xl text-muted-foreground/70">.{String(now.getMilliseconds()).padStart(3, "0").slice(0, 2)}</span>
               </span>
+              <span className="text-[10px] font-mono text-muted-foreground/20">v{ASTAR_VERSION}</span>
               <span className="text-sm font-mono text-muted-foreground/60">
                 {format(now, "EEE MMM d")}
               </span>

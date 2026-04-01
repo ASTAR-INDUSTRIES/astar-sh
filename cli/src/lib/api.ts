@@ -93,8 +93,9 @@ export class AstarAPI {
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
     const res = await fetch(`${config.apiUrl}${path}`, { headers });
     if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`API error ${res.status}: ${body}`);
+      if (res.status === 404) throw new Error("This feature isn't available yet. The API may need to be redeployed.");
+      if (res.status === 401) throw new Error("Session expired. Run 'astar login' to sign in again.");
+      throw new Error(`API error ${res.status}: ${await res.text()}`);
     }
     return res.json();
   }

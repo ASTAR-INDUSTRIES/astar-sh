@@ -139,7 +139,10 @@ async function displaySkillList(skills: SkillSummary[], query?: string) {
 export function registerSkillCommands(program: Command) {
   const skill = program
     .command("skill")
-    .description("Manage Claude Code skills from astar.sh");
+    .description("Manage Claude Code skills from astar.sh")
+    .action(async () => {
+      await skill.commands.find((cmd) => cmd.name() === "list")!.parseAsync([], { from: "user" });
+    });
 
   skill
     .command("list")
