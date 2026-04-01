@@ -591,6 +591,53 @@ const TOOLS = [
       },
     },
   },
+  // ── Financial Inquiry Tools ─────────────────────────────────────────
+  {
+    name: "submit_inquiry",
+    description: "Submit a financial inquiry to the CFA (Chief Financial Agent) — log hours, ask about pay, or submit expenses",
+    inputSchema: {
+      type: "object",
+      properties: {
+        content: { type: "string", description: "What do you need? e.g. 'Log 8h on Equinor today' or 'How much have I worked this week?'" },
+        type: { type: "string", enum: ["log_hours", "question", "expense"], description: "Type of inquiry (default: question)" },
+      },
+      required: ["content"],
+    },
+  },
+  {
+    name: "list_own_inquiries",
+    description: "Check your financial inquiries and CFA responses",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: { type: "string", enum: ["pending", "processing", "completed", "failed"], description: "Filter by status" },
+        limit: { type: "number", description: "Max results (default 10)" },
+      },
+    },
+  },
+  {
+    name: "list_pending_inquiries",
+    description: "CFA: read unclaimed financial inquiries from the queue",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Max results (default 10)" },
+      },
+    },
+  },
+  {
+    name: "respond_inquiry",
+    description: "CFA: respond to a financial inquiry",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Inquiry UUID" },
+        response: { type: "string", description: "The response to the employee" },
+        status: { type: "string", enum: ["completed", "failed"], description: "Outcome" },
+      },
+      required: ["id", "response", "status"],
+    },
+  },
 ];
 
 // ── News Helper: resolve slug to ID ──────────────────────────────────
@@ -933,6 +980,74 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       if (!data?.length) return [{ type: "text", text: "No milestones found." }];
       const out = data.map((m: any) => `${m.date} — [${m.category}] ${m.title} (${m.created_by || "unknown"})`).join("\n");
       return [{ type: "text", text: out }];
+    }
+
+    // ── Financial Inquiries ──────────────────────────────────────────
+    case "submit_inquiry": {
+      const sb = adminClient();
+      const type = args.type || "question";
+      const { data, error } = await sb.from("financial_inquiries").insert({
+        type,
+        content: args.content,
+        author_email: user.email,
+        author_name: user.email.split("@")[0],
+      }).select("id").single();
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      const label = type === "log_hours" ? "Sent to CFA. Will be logged shortly." : `Inquiry submitted (${data.id.slice(0, 8)}). CFA will respond.`;
+      return [{ type: "text", text: `✓ ${label}` }];
+    }
+
+    case "list_own_inquiries": {
+      const sb = adminClient();
+      let query = sb.from("financial_inquiries")
+        .select("*")
+        .eq("author_email", user.email)
+        .order("created_at", { ascending: false })
+        .limit(args.limit || 10);
+      if (args.status) query = query.eq("status", args.status);
+      const { data, error } = await query;
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      if (!data?.length) return [{ type: "text", text: "No inquiries found." }];
+      const out = data.map((i: any) => {
+        const resp = i.response ? `\n  → ${i.response}` : "";
+        return `[${i.status}] ${i.type}: ${i.content}${resp}`;
+      }).join("\n\n");
+      return [{ type: "text", text: out }];
+    }
+
+    case "list_pending_inquiries": {
+      const sb = adminClient();
+      // Reclaim stale locks
+      await sb.from("financial_inquiries")
+        .update({ status: "pending", locked_by: null, locked_at: null })
+        .eq("status", "processing")
+        .lt("locked_at", new Date(Date.now() - 5 * 60 * 1000).toISOString());
+
+      const { data, error } = await sb.from("financial_inquiries")
+        .select("*")
+        .eq("status", "pending")
+        .is("locked_by", null)
+        .order("created_at", { ascending: true })
+        .limit(args.limit || 10);
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      if (!data?.length) return [{ type: "text", text: "No pending inquiries." }];
+      return [{ type: "text", text: JSON.stringify(data, null, 2) }];
+    }
+
+    case "respond_inquiry": {
+      const sb = adminClient();
+      const { error } = await sb.from("financial_inquiries")
+        .update({
+          status: args.status,
+          response: args.response,
+          processed_by: user.email,
+          processed_at: new Date().toISOString(),
+          locked_by: null,
+          locked_at: null,
+        })
+        .eq("id", args.id);
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      return [{ type: "text", text: `✓ Inquiry ${args.id.slice(0, 8)} marked as ${args.status}.` }];
     }
 
     default:

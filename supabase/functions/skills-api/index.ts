@@ -441,6 +441,172 @@ app.post("/milestones", async (c) => {
   return c.json({ ok: true }, 200, corsHeaders);
 });
 
+// ── POST /inquiries — employee submits financial inquiry ─────────────
+app.post("/inquiries", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const body = await c.req.json();
+  if (!body.content) return c.json({ error: "content is required" }, 400, corsHeaders);
+
+  const type = body.type || "question";
+  if (!["log_hours", "question", "expense"].includes(type)) {
+    return c.json({ error: "type must be log_hours, question, or expense" }, 400, corsHeaders);
+  }
+
+  const sb = getSupabase();
+  const { data, error } = await sb.from("financial_inquiries").insert({
+    type,
+    content: body.content,
+    author_email: user.email,
+    author_name: user.name,
+    delivery_channel: body.delivery_channel || "cli",
+  }).select("id").single();
+
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+  await logEvent("inquiry.submit", {
+    userEmail: user.email,
+    userName: user.name,
+    metadata: { type, inquiry_id: data.id },
+  });
+
+  return c.json({ ok: true, id: data.id }, 200, corsHeaders);
+});
+
+// ── GET /inquiries — employee sees own inquiries ────────────────────
+app.get("/inquiries", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const status = c.req.query("status");
+  const sb = getSupabase();
+  let query = sb.from("financial_inquiries")
+    .select("*")
+    .eq("author_email", user.email)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  if (status) query = query.eq("status", status);
+
+  const { data, error } = await query;
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+  return c.json({ inquiries: data || [] }, 200, corsHeaders);
+});
+
+// ── GET /inquiries/health — observability ───────────────────────────
+app.get("/inquiries/health", async (c) => {
+  const sb = getSupabase();
+  const { data: pending } = await sb.from("financial_inquiries")
+    .select("created_at")
+    .eq("status", "pending")
+    .order("created_at", { ascending: true })
+    .limit(1);
+
+  const { data: lastDone } = await sb.from("financial_inquiries")
+    .select("processed_at")
+    .eq("status", "completed")
+    .order("processed_at", { ascending: false })
+    .limit(1);
+
+  const { count } = await sb.from("financial_inquiries")
+    .select("*", { count: "exact", head: true })
+    .eq("status", "pending");
+
+  const oldestAge = pending?.[0]?.created_at
+    ? Math.floor((Date.now() - new Date(pending[0].created_at).getTime()) / 1000)
+    : 0;
+
+  return c.json({
+    pending_count: count || 0,
+    oldest_pending_age_seconds: oldestAge,
+    last_completed_at: lastDone?.[0]?.processed_at || null,
+  }, 200, corsHeaders);
+});
+
+// ── GET /inquiries/pending — CFA reads unclaimed queue ──────────────
+app.get("/inquiries/pending", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const sb = getSupabase();
+
+  // Reclaim stale locks (> 5 min)
+  await sb.from("financial_inquiries")
+    .update({ status: "pending", locked_by: null, locked_at: null })
+    .eq("status", "processing")
+    .lt("locked_at", new Date(Date.now() - 5 * 60 * 1000).toISOString());
+
+  const { data, error } = await sb.from("financial_inquiries")
+    .select("*")
+    .eq("status", "pending")
+    .is("locked_by", null)
+    .order("created_at", { ascending: true })
+    .limit(10);
+
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+  return c.json({ inquiries: data || [] }, 200, corsHeaders);
+});
+
+// ── GET /inquiries/:id — poll single inquiry ────────────────────────
+app.get("/inquiries/:id", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const id = c.req.param("id");
+  const sb = getSupabase();
+  const { data, error } = await sb.from("financial_inquiries")
+    .select("*")
+    .eq("id", id)
+    .eq("author_email", user.email)
+    .single();
+
+  if (error || !data) return c.json({ error: "Not found" }, 404, corsHeaders);
+  return c.json({ inquiry: data }, 200, corsHeaders);
+});
+
+// ── PATCH /inquiries/:id — CFA claims or responds ──────────────────
+app.patch("/inquiries/:id", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const id = c.req.param("id");
+  const body = await c.req.json();
+  const sb = getSupabase();
+
+  if (body.status === "processing") {
+    const { error } = await sb.from("financial_inquiries")
+      .update({ status: "processing", locked_by: user.email, locked_at: new Date().toISOString() })
+      .eq("id", id)
+      .in("status", ["pending"]);
+    if (error) return c.json({ error: error.message }, 500, corsHeaders);
+    return c.json({ ok: true }, 200, corsHeaders);
+  }
+
+  if (body.status === "completed" || body.status === "failed") {
+    const { error } = await sb.from("financial_inquiries")
+      .update({
+        status: body.status,
+        response: body.response || null,
+        processed_by: user.email,
+        processed_at: new Date().toISOString(),
+        locked_by: null,
+        locked_at: null,
+      })
+      .eq("id", id);
+    if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+    await logEvent("inquiry.processed", {
+      userEmail: user.email,
+      userName: user.name,
+      metadata: { inquiry_id: id, status: body.status },
+    });
+
+    return c.json({ ok: true }, 200, corsHeaders);
+  }
+
+  return c.json({ error: "status must be processing, completed, or failed" }, 400, corsHeaders);
+});
+
 // ── Health ─────────────────────────────────────────────────────────────
 app.get("/", (c) => c.json({ status: "ok", service: "skills-api" }, 200, corsHeaders));
 

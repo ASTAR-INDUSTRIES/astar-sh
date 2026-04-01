@@ -49,6 +49,19 @@ export interface NewsFull extends NewsSummary {
   takeaway?: string;
 }
 
+export interface Inquiry {
+  id: string;
+  type: string;
+  content: string;
+  author_email: string;
+  author_name: string;
+  status: string;
+  response?: string;
+  processed_by?: string;
+  created_at: string;
+  processed_at?: string;
+}
+
 export interface Milestone {
   id: string;
   title: string;
@@ -189,5 +202,29 @@ export class AstarAPI {
       const body = await res.text();
       throw new Error(`API error ${res.status}: ${body}`);
     }
+  }
+
+  async submitInquiry(content: string, type: string = "question"): Promise<{ ok: boolean; id: string }> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/inquiries`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ content, type }),
+    });
+    if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+    return res.json();
+  }
+
+  async listOwnInquiries(status?: string): Promise<Inquiry[]> {
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    const qs = params.toString();
+    const data = await this.fetch<{ inquiries: Inquiry[] }>(`/inquiries${qs ? `?${qs}` : ""}`);
+    return data.inquiries;
+  }
+
+  async getInquiry(id: string): Promise<Inquiry> {
+    const data = await this.fetch<{ inquiry: Inquiry }>(`/inquiries/${id}`);
+    return data.inquiry;
   }
 }
