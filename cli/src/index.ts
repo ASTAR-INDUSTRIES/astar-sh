@@ -4,6 +4,7 @@ import { registerAuthCommands } from "./commands/auth";
 import { registerSkillCommands } from "./commands/skill";
 import { registerNewsCommands } from "./commands/news";
 import { registerFeedbackCommands } from "./commands/feedback";
+import { registerShippedCommands } from "./commands/shipped";
 import { registerUpdateCommand, checkForUpdates } from "./commands/update";
 
 const program = new Command()
@@ -15,6 +16,7 @@ registerAuthCommands(program);
 registerSkillCommands(program);
 registerNewsCommands(program);
 registerFeedbackCommands(program);
+registerShippedCommands(program);
 registerUpdateCommand(program);
 
 await checkForUpdates();

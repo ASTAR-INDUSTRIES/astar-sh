@@ -49,6 +49,15 @@ export interface NewsFull extends NewsSummary {
   takeaway?: string;
 }
 
+export interface Milestone {
+  id: string;
+  title: string;
+  date: string;
+  category: string;
+  created_by: string;
+  created_at: string;
+}
+
 export interface FeedbackItem {
   id: string;
   content: string;
@@ -151,6 +160,30 @@ export class AstarAPI {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(fb),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`API error ${res.status}: ${body}`);
+    }
+  }
+
+  async listMilestones(month?: string): Promise<Milestone[]> {
+    const params = new URLSearchParams();
+    if (month) params.set("month", month);
+    const qs = params.toString();
+    const data = await this.fetch<{ milestones: Milestone[] }>(`/milestones${qs ? `?${qs}` : ""}`);
+    return data.milestones;
+  }
+
+  async createMilestone(m: { title: string; category?: string; date?: string }): Promise<void> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/milestones`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(m),
     });
     if (!res.ok) {
       const body = await res.text();

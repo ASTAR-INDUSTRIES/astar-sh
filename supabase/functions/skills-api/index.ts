@@ -401,6 +401,46 @@ app.post("/feedback", async (c) => {
   return c.json({ ok: true }, 200, corsHeaders);
 });
 
+// ── GET /milestones — list milestones ────────────────────────────────
+app.get("/milestones", async (c) => {
+  const month = c.req.query("month");
+  const sb = getSupabase();
+  let query = sb.from("milestones").select("*").order("date", { ascending: false }).limit(50);
+  if (month) {
+    query = query.gte("date", `${month}-01`).lte("date", `${month}-31`);
+  }
+  const { data, error } = await query;
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+  return c.json({ milestones: data || [] }, 200, corsHeaders);
+});
+
+// ── POST /milestones — create milestone ─────────────────────────────
+app.post("/milestones", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const body = await c.req.json();
+  if (!body.title) return c.json({ error: "title is required" }, 400, corsHeaders);
+
+  const sb = getSupabase();
+  const { error } = await sb.from("milestones").insert({
+    title: body.title,
+    date: body.date || new Date().toISOString().split("T")[0],
+    category: body.category || "general",
+    created_by: user.name,
+  });
+
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+  await logEvent("milestone.create", {
+    userEmail: user.email,
+    userName: user.name,
+    metadata: { title: body.title },
+  });
+
+  return c.json({ ok: true }, 200, corsHeaders);
+});
+
 // ── Health ─────────────────────────────────────────────────────────────
 app.get("/", (c) => c.json({ status: "ok", service: "skills-api" }, 200, corsHeaders));
 

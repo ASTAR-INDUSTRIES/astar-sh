@@ -556,6 +556,31 @@ const TOOLS = [
       },
     },
   },
+  // ── Milestone Tools ─────────────────────────────────────────────────
+  {
+    name: "create_milestone",
+    description: "Log a shipped milestone on the Astar calendar",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "What was shipped?" },
+        category: { type: "string", enum: ["general", "contract", "technical", "product", "team"], description: "Category (default: general)" },
+        date: { type: "string", description: "Date (YYYY-MM-DD, default: today)" },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "list_milestones",
+    description: "List shipped milestones from the Astar calendar",
+    inputSchema: {
+      type: "object",
+      properties: {
+        month: { type: "string", description: "Filter by month (YYYY-MM)" },
+        limit: { type: "number", description: "Max results (default 20)" },
+      },
+    },
+  },
 ];
 
 // ── News Helper: resolve slug to ID ──────────────────────────────────
@@ -872,6 +897,32 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
       if (!data?.length) return [{ type: "text", text: "No feedback found." }];
       return [{ type: "text", text: JSON.stringify(data, null, 2) }];
+    }
+
+    // ── Milestones ──────────────────────────────────────────────────
+    case "create_milestone": {
+      const sb = adminClient();
+      const { error } = await sb.from("milestones").insert({
+        title: args.title,
+        date: args.date || new Date().toISOString().split("T")[0],
+        category: args.category || "general",
+        created_by: user.email.split("@")[0],
+      });
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      return [{ type: "text", text: `✓ Shipped: "${args.title}"` }];
+    }
+
+    case "list_milestones": {
+      const sb = adminClient();
+      let query = sb.from("milestones").select("*").order("date", { ascending: false }).limit(args.limit || 20);
+      if (args.month) {
+        query = query.gte("date", `${args.month}-01`).lte("date", `${args.month}-31`);
+      }
+      const { data, error } = await query;
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      if (!data?.length) return [{ type: "text", text: "No milestones found." }];
+      const out = data.map((m: any) => `${m.date} — [${m.category}] ${m.title} (${m.created_by || "unknown"})`).join("\n");
+      return [{ type: "text", text: out }];
     }
 
     default:
