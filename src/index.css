@@ -55,6 +55,20 @@
   }
 }
 
+@layer utilities {
+  .animate-clock-shimmer {
+    background-image: linear-gradient(
+      90deg,
+      hsl(var(--muted-foreground) / 0.4) 0%,
+      hsl(var(--accent)) 50%,
+      hsl(var(--muted-foreground) / 0.4) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+}
+
 @layer base {
   * {
     @apply border-border;

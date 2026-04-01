@@ -87,11 +87,17 @@ export default {
           "84%": { opacity: "0.01" },
           "86%": { opacity: "0" },
         },
+        "clock-shimmer": {
+          "0%, 93%": { backgroundPosition: "200% 0" },
+          "96.5%": { backgroundPosition: "-200% 0" },
+          "100%": { backgroundPosition: "200% 0" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "crt-flicker": "crt-flicker 4s infinite",
+        "clock-shimmer": "clock-shimmer 30s ease-in-out infinite",
       },
     },
   },
