@@ -517,6 +517,32 @@ const TOOLS = [
       },
     },
   },
+  // ── Feedback Tools ──────────────────────────────────────────────────
+  {
+    name: "submit_feedback",
+    description: "Submit feedback about astar.sh — bugs, feature requests, pain points, or praise",
+    inputSchema: {
+      type: "object",
+      properties: {
+        content: { type: "string", description: "What's the feedback?" },
+        type: { type: "string", enum: ["bug", "feature", "pain", "praise"], description: "Type of feedback" },
+        linked_skill: { type: "string", description: "Slug of related skill (if any)" },
+        linked_news: { type: "string", description: "Slug of related news post (if any)" },
+      },
+      required: ["content"],
+    },
+  },
+  {
+    name: "list_feedback",
+    description: "List feedback submitted to astar.sh",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: { type: "string", enum: ["new", "accepted", "rejected", "done"], description: "Filter by status" },
+        limit: { type: "number", description: "Max results (default 20)" },
+      },
+    },
+  },
 ];
 
 // ── News Helper: resolve slug to ID ──────────────────────────────────
@@ -796,6 +822,33 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const result = await sanityQuery(q, args.category ? { cat: args.category } : undefined);
       if (!result?.length) return [{ type: "text", text: "No news posts found." }];
       return [{ type: "text", text: JSON.stringify(result, null, 2) }];
+    }
+
+    // ── Feedback ──────────────────────────────────────────────────
+    case "submit_feedback": {
+      const sb = adminClient();
+      const { error } = await sb.from("feedback").insert({
+        content: args.content,
+        type: args.type || "feature",
+        source: "human",
+        author_email: user.email,
+        author_name: user.email.split("@")[0],
+        linked_skill: args.linked_skill || null,
+        linked_news: args.linked_news || null,
+        context: {},
+      });
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      return [{ type: "text", text: `✓ Feedback submitted.` }];
+    }
+
+    case "list_feedback": {
+      const sb = adminClient();
+      let query = sb.from("feedback").select("*").order("created_at", { ascending: false }).limit(args.limit || 20);
+      if (args.status) query = query.eq("status", args.status);
+      const { data, error } = await query;
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      if (!data?.length) return [{ type: "text", text: "No feedback found." }];
+      return [{ type: "text", text: JSON.stringify(data, null, 2) }];
     }
 
     default:

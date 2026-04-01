@@ -49,6 +49,19 @@ export interface NewsFull extends NewsSummary {
   takeaway?: string;
 }
 
+export interface FeedbackItem {
+  id: string;
+  content: string;
+  type: string;
+  source: string;
+  author_email: string;
+  author_name: string;
+  linked_skill?: string;
+  linked_news?: string;
+  status: string;
+  created_at: string;
+}
+
 export class AstarAPI {
   constructor(private token?: string) {}
 
@@ -113,5 +126,35 @@ export class AstarAPI {
   async getNews(slug: string): Promise<NewsFull> {
     const data = await this.fetch<{ article: NewsFull }>(`/news/${slug}`);
     return data.article;
+  }
+
+  async listFeedback(status?: string): Promise<FeedbackItem[]> {
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    const qs = params.toString();
+    const data = await this.fetch<{ feedback: FeedbackItem[] }>(`/feedback${qs ? `?${qs}` : ""}`);
+    return data.feedback;
+  }
+
+  async submitFeedback(fb: {
+    content: string;
+    type?: string;
+    linked_skill?: string;
+    linked_news?: string;
+    context?: Record<string, any>;
+  }): Promise<void> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/feedback`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(fb),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`API error ${res.status}: ${body}`);
+    }
   }
 }

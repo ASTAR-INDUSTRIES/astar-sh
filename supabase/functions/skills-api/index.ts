@@ -359,6 +359,48 @@ app.post("/news", async (c) => {
   return c.json({ ok: true, slug }, 200, corsHeaders);
 });
 
+// ── GET /feedback — list feedback ────────────────────────────────────
+app.get("/feedback", async (c) => {
+  const status = c.req.query("status");
+  const sb = getSupabase();
+  let query = sb.from("feedback").select("*").order("created_at", { ascending: false }).limit(50);
+  if (status) query = query.eq("status", status);
+  const { data, error } = await query;
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+  return c.json({ feedback: data || [] }, 200, corsHeaders);
+});
+
+// ── POST /feedback — submit feedback ────────────────────────────────
+app.post("/feedback", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const body = await c.req.json();
+  if (!body.content) return c.json({ error: "content is required" }, 400, corsHeaders);
+
+  const sb = getSupabase();
+  const { error } = await sb.from("feedback").insert({
+    content: body.content,
+    type: body.type || "feature",
+    source: body.source || "human",
+    author_email: user.email,
+    author_name: user.name,
+    linked_skill: body.linked_skill || null,
+    linked_news: body.linked_news || null,
+    context: body.context || {},
+  });
+
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+  await logEvent("feedback.submit", {
+    userEmail: user.email,
+    userName: user.name,
+    metadata: { type: body.type || "feature" },
+  });
+
+  return c.json({ ok: true }, 200, corsHeaders);
+});
+
 // ── Health ─────────────────────────────────────────────────────────────
 app.get("/", (c) => c.json({ status: "ok", service: "skills-api" }, 200, corsHeaders));
 
