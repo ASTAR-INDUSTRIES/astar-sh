@@ -4,6 +4,7 @@ import { login, logout, getAuthStatus } from "../lib/auth";
 import { getAuthCache } from "../lib/config";
 import { c } from "../lib/ui";
 import { VERSION } from "../index";
+import { isBaseSkillInstalled, isBaseSkillDeclined, promptBaseSkillInstall } from "../lib/base-skill";
 
 export function registerAuthCommands(program: Command) {
   program
@@ -13,6 +14,10 @@ export function registerAuthCommands(program: Command) {
       try {
         const result = await login();
         console.log(`\n${c.green}✓${c.reset} Signed in as ${c.white}${result.account.name}${c.reset} ${c.dim}(${result.account.username})${c.reset}`);
+
+        if (!await isBaseSkillInstalled() && !await isBaseSkillDeclined()) {
+          await promptBaseSkillInstall();
+        }
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} ${e.message}`);
         process.exit(1);

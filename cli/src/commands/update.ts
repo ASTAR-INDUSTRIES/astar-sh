@@ -3,6 +3,7 @@ import { execSync } from "child_process";
 import { homedir } from "os";
 import { join } from "path";
 import { c } from "../lib/ui";
+import { updateBaseSkillIfInstalled } from "../lib/base-skill";
 
 const INSTALL_DIR = join(homedir(), ".astar", "cli");
 
@@ -53,6 +54,10 @@ export function registerUpdateCommand(program: Command) {
 
         const localAfter = getLocalHash();
         console.log(`  ${c.green}✓${c.reset} Updated ${c.dim}${localBefore}${c.reset} → ${c.cyan}${localAfter}${c.reset}`);
+
+        if (await updateBaseSkillIfInstalled()) {
+          console.log(`  ${c.green}✓${c.reset} Updated ${c.cyan}astar-platform${c.reset} skill`);
+        }
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} Update failed. Reinstall with:`);
         console.error(`  curl -fsSL https://raw.githubusercontent.com/ASTAR-INDUSTRIES/astar-sh/main/cli/install.sh | bash`);

@@ -6,17 +6,18 @@ import { AstarAPI, type SkillFull, type SkillSummary } from "../lib/api";
 import { c, table, badge, tag } from "../lib/ui";
 import { writeManifest, readManifest, isOutdated, type SkillManifest } from "../lib/manifest";
 import { diffFiles, renderDiff, type FileDiff } from "../lib/diff";
+import { getGlobalSkillsDir } from "../lib/base-skill";
 
 function getSkillsDir(): string {
   return resolve(process.cwd(), ".claude", "skills");
 }
 
-async function writeSkillToDisk(skill: SkillFull) {
+async function writeSkillToDisk(skill: SkillFull, baseDir?: string) {
   if (!skill.skillMd) {
     throw new Error(`Skill "${skill.slug}" has no content`);
   }
 
-  const skillDir = join(getSkillsDir(), skill.slug);
+  const skillDir = join(baseDir || getSkillsDir(), skill.slug);
   const skillFile = join(skillDir, "SKILL.md");
 
   await Bun.write(skillFile, skill.skillMd);
@@ -335,15 +336,18 @@ ${description || ""}
   skill
     .command("install <slug>")
     .description("Install a skill into .claude/skills/<slug>/")
-    .action(async (slug: string) => {
+    .option("-g, --global", "Install to ~/.claude/skills/ (machine-wide)")
+    .action(async (slug: string, opts: { global?: boolean }) => {
       const token = await requireAuth();
       const api = new AstarAPI(token);
 
       try {
         const data = await api.getSkill(slug);
-        const dir = await writeSkillToDisk(data);
+        const baseDir = opts.global ? getGlobalSkillsDir() : getSkillsDir();
+        const dir = await writeSkillToDisk(data, baseDir);
         const refCount = data.referenceFiles?.length ?? 0;
-        console.log(`${c.green}✓${c.reset} Installed ${c.cyan}${data.title}${c.reset} → ${c.dim}${dir}${c.reset}`);
+        const scope = opts.global ? `${c.dim}(global)${c.reset} ` : "";
+        console.log(`${c.green}✓${c.reset} Installed ${c.cyan}${data.title}${c.reset} ${scope}→ ${c.dim}${dir}${c.reset}`);
         if (refCount) console.log(`  ${c.dim}${refCount} reference file(s) included${c.reset}`);
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} Failed to install "${slug}": ${e.message}`);
