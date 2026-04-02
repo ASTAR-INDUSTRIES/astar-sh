@@ -624,6 +624,14 @@ app.post("/tasks", async (c) => {
   if (!body.title) return c.json({ error: "title is required" }, 400, corsHeaders);
 
   const sb = getSupabase();
+
+  let parentId = null;
+  if (body.parent_task_number) {
+    const { data: parent } = await sb.from("tasks").select("id").eq("task_number", body.parent_task_number).single();
+    if (parent) parentId = parent.id;
+  }
+
+  const isAgent = body.source === "agent";
   const { data, error } = await sb.from("tasks").insert({
     title: body.title,
     description: body.description || null,
@@ -633,11 +641,22 @@ app.post("/tasks", async (c) => {
     due_date: body.due_date || null,
     source: body.source || "human",
     tags: body.tags || [],
+    parent_task_id: parentId,
+    confidence: body.confidence ?? null,
+    requires_triage: body.requires_triage ?? (isAgent ? true : false),
+    recurring: body.recurring || null,
+    estimated_hours: body.estimated_hours ?? null,
   }).select("task_number, id").single();
 
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
-  await logTaskActivity(data.id, user.email, "human", "created", { title: body.title });
+  if (body.links?.length) {
+    for (const link of body.links) {
+      await sb.from("task_links").insert({ task_id: data.id, link_type: link.type, link_ref: link.ref });
+    }
+  }
+
+  await logTaskActivity(data.id, user.email, isAgent ? "agent" : "human", "created", { title: body.title });
   await logEvent("task.create", { userEmail: user.email, userName: user.name, metadata: { task_number: data.task_number } });
 
   return c.json({ ok: true, task_number: data.task_number }, 200, corsHeaders);
@@ -653,13 +672,28 @@ app.get("/tasks", async (c) => {
   const assignedTo = c.req.query("assigned_to");
   const due = c.req.query("due");
   const search = c.req.query("search");
+  const triage = c.req.query("triage");
+  const parent = c.req.query("parent");
 
   const sb = getSupabase();
   let query = sb.from("tasks").select("*").is("archived_at", null).order("created_at", { ascending: false }).limit(50);
 
+  if (triage === "true") {
+    query = query.eq("requires_triage", true);
+  } else {
+    query = query.or("requires_triage.is.null,requires_triage.eq.false");
+  }
+
+  if (parent) {
+    const { data: parentTask } = await sb.from("tasks").select("id").eq("task_number", parseInt(parent)).single();
+    if (parentTask) query = query.eq("parent_task_id", parentTask.id);
+  } else {
+    query = query.is("parent_task_id", null);
+  }
+
   if (assignedTo && assignedTo !== "all") {
     query = query.eq("assigned_to", assignedTo);
-  } else if (!assignedTo) {
+  } else if (!assignedTo && !triage && !parent) {
     query = query.eq("assigned_to", user.email);
   }
 
@@ -702,8 +736,10 @@ app.get("/tasks/:number", async (c) => {
   if (error || !task) return c.json({ error: "Task not found" }, 404, corsHeaders);
 
   const { data: activity } = await sb.from("task_activity").select("*").eq("task_id", task.id).order("created_at", { ascending: false }).limit(20);
+  const { data: subtasks } = await sb.from("tasks").select("*").eq("parent_task_id", task.id).order("task_number", { ascending: true });
+  const { data: links } = await sb.from("task_links").select("*").eq("task_id", task.id).order("created_at", { ascending: true });
 
-  return c.json({ task, activity: activity || [] }, 200, corsHeaders);
+  return c.json({ task, activity: activity || [], subtasks: subtasks || [], links: links || [] }, 200, corsHeaders);
 });
 
 // ── PATCH /tasks/:number — update task ──────────────────────────────
@@ -733,6 +769,12 @@ app.patch("/tasks/:number", async (c) => {
   }
 
   if (body.status === "completed") {
+    if (!body.force) {
+      const { data: openSubs } = await sb.from("tasks").select("id").eq("parent_task_id", task.id).neq("status", "completed").neq("status", "cancelled");
+      if (openSubs?.length) {
+        return c.json({ error: `${openSubs.length} subtask(s) still open. Complete them first or pass force=true.` }, 400, corsHeaders);
+      }
+    }
     patch.completed_by = user.email;
     patch.completed_at = new Date().toISOString();
   }
@@ -745,7 +787,86 @@ app.patch("/tasks/:number", async (c) => {
   const action = body.status === "completed" ? "completed" : body.assigned_to ? "assigned" : "updated";
   await logTaskActivity(task.id, user.email, "human", action, changes);
 
+  if (body.status === "completed") {
+    const { data: taskLinks } = await sb.from("task_links").select("*").eq("task_id", task.id);
+    for (const link of (taskLinks || [])) {
+      try {
+        if (link.link_type === "feedback") {
+          await sb.from("feedback").update({ status: "done" }).eq("id", link.link_ref);
+        }
+        if (link.link_type === "milestone") {
+          await sb.from("milestones").insert({ title: task.title, date: new Date().toISOString().split("T")[0], category: "product", created_by: user.name });
+        }
+      } catch (e: any) {
+        await logTaskActivity(task.id, "system", "system", "link_effect_failed", { link_type: link.link_type, error: e.message });
+      }
+    }
+
+    if (task.recurring) {
+      try {
+        const interval = task.recurring.interval;
+        const dueDate = task.due_date ? new Date(task.due_date) : new Date();
+        if (interval === "weekly") dueDate.setDate(dueDate.getDate() + 7);
+        else if (interval === "monthly") dueDate.setMonth(dueDate.getMonth() + 1);
+        else if (interval === "quarterly") dueDate.setMonth(dueDate.getMonth() + 3);
+        const { data: nextTask } = await sb.from("tasks").insert({
+          title: task.title, description: task.description, priority: task.priority,
+          created_by: task.created_by, assigned_to: task.assigned_to,
+          due_date: dueDate.toISOString().split("T")[0],
+          source: "system", tags: task.tags, recurring: task.recurring,
+          parent_task_id: task.parent_task_id || task.id,
+        }).select("task_number, id").single();
+        if (nextTask) {
+          await logTaskActivity(nextTask.id, "system", "system", "recurring_created", { from_task: task.task_number });
+        }
+      } catch {}
+    }
+  }
+
   return c.json({ ok: true, task_number: num }, 200, corsHeaders);
+});
+
+// ── POST /tasks/:number/links — add link ────────────────────────────
+app.post("/tasks/:number/links", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const num = parseInt(c.req.param("number"));
+  const sb = getSupabase();
+  const { data: task } = await sb.from("tasks").select("id").eq("task_number", num).single();
+  if (!task) return c.json({ error: "Task not found" }, 404, corsHeaders);
+
+  const body = await c.req.json();
+  if (!body.link_type || !body.link_ref) return c.json({ error: "link_type and link_ref required" }, 400, corsHeaders);
+
+  await sb.from("task_links").insert({ task_id: task.id, link_type: body.link_type, link_ref: body.link_ref });
+  await logTaskActivity(task.id, user.email, "human", "linked", { link_type: body.link_type, link_ref: body.link_ref });
+
+  return c.json({ ok: true }, 200, corsHeaders);
+});
+
+// ── PATCH /tasks/:number/triage — accept or dismiss ─────────────────
+app.patch("/tasks/:number/triage", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const num = parseInt(c.req.param("number"));
+  const body = await c.req.json();
+  const sb = getSupabase();
+  const { data: task } = await sb.from("tasks").select("id").eq("task_number", num).single();
+  if (!task) return c.json({ error: "Task not found" }, 404, corsHeaders);
+
+  if (body.action === "accept") {
+    await sb.from("tasks").update({ requires_triage: false, updated_at: new Date().toISOString() }).eq("id", task.id);
+    await logTaskActivity(task.id, user.email, "human", "triage_accepted", {});
+  } else if (body.action === "dismiss") {
+    await sb.from("tasks").update({ status: "cancelled", archived_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", task.id);
+    await logTaskActivity(task.id, user.email, "human", "triage_dismissed", { reason: body.reason || "" });
+  } else {
+    return c.json({ error: "action must be accept or dismiss" }, 400, corsHeaders);
+  }
+
+  return c.json({ ok: true }, 200, corsHeaders);
 });
 
 // ── DELETE /tasks/:number — cancel task ─────────────────────────────

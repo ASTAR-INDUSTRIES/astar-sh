@@ -73,6 +73,10 @@ export function registerTodoCommands(program: Command) {
     .option("-a, --assign <email>", "Assign to (default: yourself)")
     .option("-t, --tag <tag>", "Add tag")
     .option("--description <text>", "Task description")
+    .option("--parent <number>", "Parent task number (creates subtask)")
+    .option("--skill <slug>", "Link to a skill")
+    .option("--estimate <hours>", "Estimated hours")
+    .option("--recurring <interval>", "Recurring: weekly, monthly, quarterly")
     .action(async (title: string | undefined, opts) => {
       if (!title) {
         await todo.commands.find((cmd) => cmd.name() === "mine")!.parseAsync([], { from: "user" });
@@ -83,14 +87,19 @@ export function registerTodoCommands(program: Command) {
       const api = new AstarAPI(token);
 
       try {
-        const result = await api.createTask({
+        const createPayload: any = {
           title,
           description: opts.description,
           priority: opts.priority,
           assigned_to: opts.assign,
           due_date: opts.due,
           tags: opts.tag ? [opts.tag] : undefined,
-        });
+          parent_task_number: opts.parent ? parseNum(opts.parent) : undefined,
+          estimated_hours: opts.estimate ? parseFloat(opts.estimate) : undefined,
+          recurring: opts.recurring ? { interval: opts.recurring } : undefined,
+          links: opts.skill ? [{ type: "skill", ref: opts.skill }] : undefined,
+        };
+        const result = await api.createTask(createPayload);
         const dueStr = opts.due ? ` ${c.dim}(due ${fmtDate(opts.due)})${c.reset}` : "";
         const assignStr = opts.assign ? ` → ${c.dim}${opts.assign}${c.reset}` : "";
         console.log(`${c.green}✓${c.reset} Task ${c.cyan}#${result.task_number}${c.reset} created${assignStr}${dueStr}`);
@@ -122,7 +131,7 @@ export function registerTodoCommands(program: Command) {
       const token = await requireAuth();
       const api = new AstarAPI(token);
       try {
-        const { task: t, activity } = await api.getTask(parseNum(num));
+        const { task: t, activity, subtasks, links } = await api.getTask(parseNum(num));
 
         console.log("");
         console.log(`  ${c.bold}${c.cyan}#${t.task_number}${c.reset} ${c.bold}${t.title}${c.reset}`);
@@ -130,7 +139,27 @@ export function registerTodoCommands(program: Command) {
         if (t.description) console.log(`  ${c.dim}${t.description}${c.reset}`);
         console.log(`  ${c.dim}Created by${c.reset} ${t.created_by.split("@")[0]} · ${c.dim}Assigned to${c.reset} ${t.assigned_to?.split("@")[0] || "unassigned"}`);
         if (t.due_date) console.log(`  ${c.dim}Due${c.reset} ${fmtDate(t.due_date)}`);
+        if (t.estimated_hours) console.log(`  ${c.dim}Estimate${c.reset} ${t.estimated_hours}h`);
+        if (t.recurring) console.log(`  ${c.dim}Recurring${c.reset} ${t.recurring.interval}`);
         if (t.tags?.length) console.log(`  ${c.dim}Tags${c.reset} ${t.tags.join(", ")}`);
+
+        if (subtasks.length) {
+          const done = subtasks.filter((s) => s.status === "completed").length;
+          console.log("");
+          console.log(`  ${c.bold}${c.white}Subtasks${c.reset} ${c.dim}(${done}/${subtasks.length} done)${c.reset}`);
+          for (const s of subtasks) {
+            const icon = s.status === "completed" ? `${c.green}✓${c.reset}` : ` `;
+            console.log(`  ${icon} ${c.cyan}#${s.task_number}${c.reset} ${s.title}`);
+          }
+        }
+
+        if (links.length) {
+          console.log("");
+          console.log(`  ${c.bold}${c.white}Links${c.reset}`);
+          for (const l of links) {
+            console.log(`  ${c.dim}${l.link_type}${c.reset}  ${l.link_ref}`);
+          }
+        }
 
         if (activity.length) {
           console.log("");
@@ -217,6 +246,95 @@ export function registerTodoCommands(program: Command) {
       try {
         const tasks = await api.listTasks({ status: opts.status, priority: opts.prio, due: opts.due, search: opts.search, assigned_to: "all" });
         renderTaskTable(tasks);
+      } catch (e: any) {
+        console.error(`${c.red}✗${c.reset} ${e.message}`);
+        process.exit(1);
+      }
+    });
+
+  todo
+    .command("triage")
+    .description("Review agent-created tasks")
+    .action(async () => {
+      const token = await requireAuth();
+      const api = new AstarAPI(token);
+      try {
+        const tasks = await api.triageTasks();
+        if (!tasks.length) {
+          console.log(`${c.dim}No tasks need triage.${c.reset}`);
+          return;
+        }
+        console.log("");
+        table(
+          ["#", "Source", "Confidence", "Title"],
+          tasks.map((t) => [
+            `${c.cyan}${t.task_number}${c.reset}`,
+            `${c.dim}${t.source}${c.reset}`,
+            t.confidence ? `${c.yellow}${(t.confidence * 100).toFixed(0)}%${c.reset}` : `${c.dim}—${c.reset}`,
+            truncate(t.title, 40),
+          ])
+        );
+        console.log("");
+        console.log(`  ${c.dim}Accept:${c.reset} ${c.cyan}astar todo accept <#>${c.reset}`);
+        console.log(`  ${c.dim}Dismiss:${c.reset} ${c.cyan}astar todo dismiss <#>${c.reset}`);
+        console.log("");
+      } catch (e: any) {
+        console.error(`${c.red}✗${c.reset} ${e.message}`);
+        process.exit(1);
+      }
+    });
+
+  todo
+    .command("accept <number>")
+    .description("Accept an agent task into the main list")
+    .action(async (num: string) => {
+      const token = await requireAuth();
+      const api = new AstarAPI(token);
+      try {
+        await api.triageAction(parseNum(num), "accept");
+        console.log(`${c.green}✓${c.reset} Task #${parseNum(num)} accepted`);
+      } catch (e: any) {
+        console.error(`${c.red}✗${c.reset} ${e.message}`);
+        process.exit(1);
+      }
+    });
+
+  todo
+    .command("dismiss <number>")
+    .description("Dismiss an agent task")
+    .option("-r, --reason <reason>", "Reason for dismissal")
+    .action(async (num: string, opts: { reason?: string }) => {
+      const token = await requireAuth();
+      const api = new AstarAPI(token);
+      try {
+        await api.triageAction(parseNum(num), "dismiss", opts.reason);
+        console.log(`${c.green}✓${c.reset} Task #${parseNum(num)} dismissed`);
+      } catch (e: any) {
+        console.error(`${c.red}✗${c.reset} ${e.message}`);
+        process.exit(1);
+      }
+    });
+
+  todo
+    .command("link <number>")
+    .description("Link a task to a skill, URL, or other entity")
+    .option("--skill <slug>", "Link to a skill")
+    .option("--url <url>", "Link to a URL")
+    .option("--news <slug>", "Link to a news post")
+    .option("--feedback <id>", "Link to feedback")
+    .action(async (num: string, opts: { skill?: string; url?: string; news?: string; feedback?: string }) => {
+      const token = await requireAuth();
+      const api = new AstarAPI(token);
+      try {
+        if (opts.skill) await api.linkTask(parseNum(num), "skill", opts.skill);
+        else if (opts.url) await api.linkTask(parseNum(num), "url", opts.url);
+        else if (opts.news) await api.linkTask(parseNum(num), "news", opts.news);
+        else if (opts.feedback) await api.linkTask(parseNum(num), "feedback", opts.feedback);
+        else {
+          console.error(`${c.red}✗${c.reset} Specify --skill, --url, --news, or --feedback`);
+          process.exit(1);
+        }
+        console.log(`${c.green}✓${c.reset} Link added to task #${parseNum(num)}`);
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} ${e.message}`);
         process.exit(1);

@@ -651,6 +651,10 @@ const TOOLS = [
         assigned_to: { type: "string", description: "Email of assignee (default: yourself)" },
         due_date: { type: "string", description: "Due date (YYYY-MM-DD)" },
         tags: { type: "array", items: { type: "string" }, description: "Tags" },
+        parent_task_number: { type: "number", description: "Parent task number (creates subtask)" },
+        estimated_hours: { type: "number", description: "Estimated hours" },
+        recurring: { type: "string", enum: ["weekly", "monthly", "quarterly"], description: "Recurring interval" },
+        links: { type: "array", items: { type: "object", properties: { type: { type: "string" }, ref: { type: "string" } }, required: ["type", "ref"] }, description: "Links to skills, news, URLs" },
       },
       required: ["title"],
     },
@@ -717,6 +721,45 @@ const TOOLS = [
         comment: { type: "string", description: "Comment text" },
       },
       required: ["task_number", "comment"],
+    },
+  },
+  {
+    name: "link_task",
+    description: "Link a task to a skill, news post, feedback, URL, or another task",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task_number: { type: "number", description: "Task number" },
+        link_type: { type: "string", enum: ["skill", "news", "feedback", "url", "milestone", "task"], description: "Link type" },
+        link_ref: { type: "string", description: "Slug, URL, or ID to link to" },
+      },
+      required: ["task_number", "link_type", "link_ref"],
+    },
+  },
+  {
+    name: "triage_tasks",
+    description: "List agent-created tasks that need triage (accept or dismiss)",
+    inputSchema: { type: "object", properties: { limit: { type: "number" } } },
+  },
+  {
+    name: "accept_task",
+    description: "Accept an agent-created task into the main task list",
+    inputSchema: {
+      type: "object",
+      properties: { task_number: { type: "number" } },
+      required: ["task_number"],
+    },
+  },
+  {
+    name: "dismiss_task",
+    description: "Dismiss an agent-created task",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task_number: { type: "number" },
+        reason: { type: "string", description: "Why dismissed" },
+      },
+      required: ["task_number"],
     },
   },
 ];
@@ -1134,6 +1177,11 @@ async function handleTool(name: string, args: any, user: { email: string; userId
     // ── Tasks ────────────────────────────────────────────────────────
     case "create_task": {
       const sb = adminClient();
+      let parentId = null;
+      if (args.parent_task_number) {
+        const { data: p } = await sb.from("tasks").select("id").eq("task_number", args.parent_task_number).single();
+        if (p) parentId = p.id;
+      }
       const { data, error } = await sb.from("tasks").insert({
         title: args.title,
         description: args.description || null,
@@ -1142,11 +1190,19 @@ async function handleTool(name: string, args: any, user: { email: string; userId
         assigned_to: args.assigned_to || user.email,
         due_date: args.due_date || null,
         tags: args.tags || [],
+        parent_task_id: parentId,
+        estimated_hours: args.estimated_hours ?? null,
+        recurring: args.recurring ? { interval: args.recurring } : null,
       }).select("task_number, id").single();
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      if (args.links?.length) {
+        for (const link of args.links) {
+          await sb.from("task_links").insert({ task_id: data.id, link_type: link.type, link_ref: link.ref });
+        }
+      }
       await sb.from("task_activity").insert({ task_id: data.id, actor: user.email, actor_type: "human", action: "created", details: { title: args.title } });
-      const assignee = args.assigned_to ? ` → ${args.assigned_to}` : "";
-      return [{ type: "text", text: `✓ Task #${data.task_number} created: "${args.title}"${assignee}` }];
+      const parts = [args.assigned_to ? ` → ${args.assigned_to}` : "", parentId ? ` (subtask of #${args.parent_task_number})` : ""];
+      return [{ type: "text", text: `✓ Task #${data.task_number} created: "${args.title}"${parts.join("")}` }];
     }
 
     case "update_task": {
@@ -1196,8 +1252,19 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const { data: task, error: fetchErr } = await sb.from("tasks").select("*").eq("task_number", args.task_number).single();
       if (fetchErr || !task) return [{ type: "text", text: "Error: Task not found." }];
       const { data: activity } = await sb.from("task_activity").select("*").eq("task_id", task.id).order("created_at", { ascending: false }).limit(10);
+      const { data: subtasks } = await sb.from("tasks").select("task_number, title, status").eq("parent_task_id", task.id).order("task_number");
+      const { data: links } = await sb.from("task_links").select("*").eq("task_id", task.id);
       const actLog = (activity || []).map((a: any) => `  ${a.created_at.slice(0, 16)} ${a.actor.split("@")[0]} ${a.action}`).join("\n");
-      return [{ type: "text", text: `#${task.task_number} — ${task.title}\nStatus: ${task.status} | Priority: ${task.priority}\nAssigned: ${task.assigned_to || "unassigned"} | Created by: ${task.created_by}\nDue: ${task.due_date || "none"} | Tags: ${task.tags?.join(", ") || "none"}\n${task.description ? `\n${task.description}\n` : ""}\nActivity:\n${actLog || "  (none)"}` }];
+      const subLog = (subtasks || []).map((s: any) => `  ${s.status === "completed" ? "✓" : " "} #${s.task_number} ${s.title}`).join("\n");
+      const linkLog = (links || []).map((l: any) => `  ${l.link_type}: ${l.link_ref}`).join("\n");
+      let out = `#${task.task_number} — ${task.title}\nStatus: ${task.status} | Priority: ${task.priority}\nAssigned: ${task.assigned_to || "unassigned"} | Created by: ${task.created_by}\nDue: ${task.due_date || "none"} | Tags: ${task.tags?.join(", ") || "none"}`;
+      if (task.estimated_hours) out += ` | Est: ${task.estimated_hours}h`;
+      if (task.recurring) out += ` | Recurring: ${task.recurring.interval}`;
+      if (task.description) out += `\n\n${task.description}`;
+      if (subLog) out += `\n\nSubtasks:\n${subLog}`;
+      if (linkLog) out += `\n\nLinks:\n${linkLog}`;
+      out += `\n\nActivity:\n${actLog || "  (none)"}`;
+      return [{ type: "text", text: out }];
     }
 
     case "comment_task": {
@@ -1206,6 +1273,42 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       if (fetchErr || !task) return [{ type: "text", text: "Error: Task not found." }];
       await sb.from("task_activity").insert({ task_id: task.id, actor: user.email, actor_type: "human", action: "commented", details: { comment: args.comment } });
       return [{ type: "text", text: `✓ Comment added to task #${args.task_number}.` }];
+    }
+
+    case "link_task": {
+      const sb = adminClient();
+      const { data: task } = await sb.from("tasks").select("id").eq("task_number", args.task_number).single();
+      if (!task) return [{ type: "text", text: "Error: Task not found." }];
+      await sb.from("task_links").insert({ task_id: task.id, link_type: args.link_type, link_ref: args.link_ref });
+      await sb.from("task_activity").insert({ task_id: task.id, actor: user.email, actor_type: "human", action: "linked", details: { link_type: args.link_type, link_ref: args.link_ref } });
+      return [{ type: "text", text: `✓ Linked ${args.link_type} "${args.link_ref}" to task #${args.task_number}.` }];
+    }
+
+    case "triage_tasks": {
+      const sb = adminClient();
+      const { data, error } = await sb.from("tasks").select("task_number, title, source, source_agent, confidence, created_at").eq("requires_triage", true).is("archived_at", null).order("created_at", { ascending: false }).limit(args.limit || 20);
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      if (!data?.length) return [{ type: "text", text: "No tasks need triage." }];
+      const out = data.map((t: any) => `#${t.task_number} [${t.source}${t.confidence ? ` ${(t.confidence * 100).toFixed(0)}%` : ""}] ${t.title}`).join("\n");
+      return [{ type: "text", text: `${data.length} task(s) need triage:\n${out}` }];
+    }
+
+    case "accept_task": {
+      const sb = adminClient();
+      const { data: task } = await sb.from("tasks").select("id").eq("task_number", args.task_number).single();
+      if (!task) return [{ type: "text", text: "Error: Task not found." }];
+      await sb.from("tasks").update({ requires_triage: false, updated_at: new Date().toISOString() }).eq("id", task.id);
+      await sb.from("task_activity").insert({ task_id: task.id, actor: user.email, actor_type: "human", action: "triage_accepted", details: {} });
+      return [{ type: "text", text: `✓ Task #${args.task_number} accepted into main list.` }];
+    }
+
+    case "dismiss_task": {
+      const sb = adminClient();
+      const { data: task } = await sb.from("tasks").select("id").eq("task_number", args.task_number).single();
+      if (!task) return [{ type: "text", text: "Error: Task not found." }];
+      await sb.from("tasks").update({ status: "cancelled", archived_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", task.id);
+      await sb.from("task_activity").insert({ task_id: task.id, actor: user.email, actor_type: "human", action: "triage_dismissed", details: { reason: args.reason || "" } });
+      return [{ type: "text", text: `✓ Task #${args.task_number} dismissed.` }];
     }
 
     default:

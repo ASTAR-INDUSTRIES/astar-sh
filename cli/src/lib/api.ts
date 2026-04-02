@@ -49,6 +49,13 @@ export interface NewsFull extends NewsSummary {
   takeaway?: string;
 }
 
+export interface TaskLink {
+  id: string;
+  link_type: string;
+  link_ref: string;
+  created_at: string;
+}
+
 export interface Task {
   id: string;
   task_number: number;
@@ -63,6 +70,11 @@ export interface Task {
   completed_at?: string;
   source: string;
   tags: string[];
+  parent_task_id?: string;
+  confidence?: number;
+  requires_triage?: boolean;
+  recurring?: { interval: string };
+  estimated_hours?: number;
   created_at: string;
   updated_at: string;
 }
@@ -279,7 +291,7 @@ export class AstarAPI {
     return res.json();
   }
 
-  async getTask(num: number): Promise<{ task: Task; activity: TaskActivity[] }> {
+  async getTask(num: number): Promise<{ task: Task; activity: TaskActivity[]; subtasks: Task[]; links: TaskLink[] }> {
     return this.fetch(`/tasks/${num}`);
   }
 
@@ -299,6 +311,33 @@ export class AstarAPI {
     const res = await fetch(`${config.apiUrl}/tasks/${num}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${this.token}` },
+    });
+    if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+    return res.json();
+  }
+
+  async triageTasks(): Promise<Task[]> {
+    const data = await this.fetch<{ tasks: Task[] }>("/tasks?triage=true&assigned_to=all");
+    return data.tasks;
+  }
+
+  async triageAction(num: number, action: "accept" | "dismiss", reason?: string): Promise<{ ok: boolean }> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/tasks/${num}/triage`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ action, reason }),
+    });
+    if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+    return res.json();
+  }
+
+  async linkTask(num: number, linkType: string, linkRef: string): Promise<{ ok: boolean }> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/tasks/${num}/links`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ link_type: linkType, link_ref: linkRef }),
     });
     if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
     return res.json();
