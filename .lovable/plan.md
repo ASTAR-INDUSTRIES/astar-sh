@@ -1,35 +1,58 @@
 
 
-## Emoji Reactions on Tweets (Thinking)
+## Dashboard Layout Redesign
 
-### What we're building
-Public visitors can react to any tweet/thought with emoji reactions (like 🔥 👏 🧠 💡 🎯). No login required — reactions are anonymous and stored in the database. Each tweet shows reaction counts inline.
+### New layout
 
-### Database
+```text
+┌────────┬──────────┬──────────┬──────────┬─────────┬──────────────┐
+│ 12:34  │ Skills   │ DL       │ Active   │ Hours   │   ASTAR ✦    │
+│ Thu 02 │   47     │  1,247   │   12     │ 187/wk  │   v0.0.7     │
+├────────┴──────────┴──────────┴──────────┴─────────┴──────────────┤
+│  ▓▓▓░░▓▓▓▓░░░▓▓▓░▓▓▓▓▓░░░░▓▓░░░░▓▓▓▓▓░▓▓░░▓▓▓░░▓▓▓▓░░░▓▓▓░   │
+│               Hours Heatmap (compact, 26 weeks)                  │
+├───────────────────────────────┬───────────────────────────────────┤
+│                               │                                   │
+│       Skills Table            │       Thinking Feed               │
+│                               │       (with reactions)            │
+│                               │                                   │
+├───────────────────────────────┼───────────────────────────────────┤
+│                               │                                   │
+│       Shipped Calendar        │       News Feed                   │
+│       (month view)            │       (clickable, auto-scroll)    │
+│                               │                                   │
+└───────────────────────────────┴───────────────────────────────────┘
+```
 
-**New table: `tweet_reactions`**
-- `id` (uuid, PK)
-- `tweet_id` (uuid, FK → tweets.id ON DELETE CASCADE)
-- `emoji` (text, not null) — the emoji character
-- `created_at` (timestamptz, default now())
+### Changes to `src/components/PublicDashboard.tsx`
 
-**RLS policies:**
-- SELECT: public (everyone can see counts)
-- INSERT: public (anonymous reactions allowed)
-- No UPDATE/DELETE (reactions are permanent)
+**1. Remove Research section** — delete the `articles` query, the Research JSX block (lines 435–468), and the `FlaskConical` import.
 
-**Realtime:** Enable `supabase_realtime` on `tweet_reactions` so counts update live.
+**2. Restructure top bar** into a single row with 6 cells separated by `gap-px`:
+- **Cell 1 — Clock**: shows time (HH:mm:ss.cc), date (Thu Apr 02), and "every second counts" shimmer underneath. Compact vertical stack.
+- **Cells 2–5 — Stats**: Skills count, Downloads count, Active Today count, and a new "Hours" stat (placeholder value or pulled from `financial_inquiries` if available — can default to `—` for now).
+- **Cell 6 — Brand**: "ASTAR ✦" with version number underneath, right-aligned.
 
-### UI Changes — `PublicDashboard.tsx`
+**3. Add Hours Heatmap row** — a new thin horizontal strip below the top bar, spanning full width. This is a compact GitHub-style contribution heatmap showing 26 weeks of CLI activity. Each cell is a small square colored by event density for that day (from `audit_events` timestamps). Use shades of accent color. Label: "Hours Heatmap" centered underneath in tiny mono text.
 
-Below each tweet, add a row of preset emoji buttons (🔥 👏 🧠 💡 🎯):
-- Show current count next to each emoji (only emojis with count > 0 shown, plus a "+" button to pick)
-- Clicking an emoji inserts a row into `tweet_reactions` — no auth needed
-- Use a realtime subscription to keep counts live
-- Subtle animation on click (scale bounce)
-- Style: small pill-shaped buttons matching the dark terminal aesthetic
+**4. Replace 3-column main grid with 2-column, 2-row grid**:
+- Top-left: Skills table (existing, with scroll)
+- Top-right: Thinking feed (existing tweets + reactions, with scroll)
+- Bottom-left: Shipped Calendar (existing component)
+- Bottom-right: News feed (existing posts list, with scroll, clickable for detail dialog)
+- Grid: `grid-cols-2 grid-rows-2`, each quadrant gets `flex-1` with `overflow-hidden`
 
-### Files touched
-1. **Migration** — create `tweet_reactions` table + RLS + realtime
-2. **`src/components/PublicDashboard.tsx`** — add reaction row beneath each tweet, fetch counts, subscribe to realtime, handle clicks
+**5. Move CLI Activity** — remove as a standalone section. The heatmap replaces the raw event list for the public view. (CLI activity data is still fetched for the heatmap and download counts.)
+
+### Technical details
+
+- Heatmap component: inline in PublicDashboard, iterates over last 182 days (26 weeks), counts `audit_events` per day, renders as a grid of small `div`s (4px squares) with opacity/color based on count thresholds.
+- Stats "Hours" cell: show `—` as placeholder (no hours tracking data yet).
+- Brand cell: static text, accent color diamond.
+- Keep all existing data fetches except `articles`.
+- Keep the news detail `Dialog` as-is.
+- Remove `FlaskConical` from imports.
+
+### Files changed
+1. `src/components/PublicDashboard.tsx` — full layout restructure as described above
 
