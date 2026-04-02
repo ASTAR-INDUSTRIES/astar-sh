@@ -328,18 +328,55 @@ export type Database = {
           },
         ]
       }
+      task_links: {
+        Row: {
+          created_at: string
+          id: string
+          link_ref: string
+          link_type: string
+          task_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          link_ref: string
+          link_type: string
+          task_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          link_ref?: string
+          link_type?: string
+          task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_links_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tasks: {
         Row: {
           archived_at: string | null
           assigned_to: string | null
           completed_at: string | null
           completed_by: string | null
+          confidence: number | null
           created_at: string
           created_by: string
           description: string | null
           due_date: string | null
+          estimated_hours: number | null
           id: string
+          parent_task_id: string | null
           priority: string
+          recurring: Json | null
+          requires_triage: boolean
           source: string
           status: string
           tags: string[]
@@ -352,12 +389,17 @@ export type Database = {
           assigned_to?: string | null
           completed_at?: string | null
           completed_by?: string | null
+          confidence?: number | null
           created_at?: string
           created_by: string
           description?: string | null
           due_date?: string | null
+          estimated_hours?: number | null
           id?: string
+          parent_task_id?: string | null
           priority?: string
+          recurring?: Json | null
+          requires_triage?: boolean
           source?: string
           status?: string
           tags?: string[]
@@ -370,12 +412,17 @@ export type Database = {
           assigned_to?: string | null
           completed_at?: string | null
           completed_by?: string | null
+          confidence?: number | null
           created_at?: string
           created_by?: string
           description?: string | null
           due_date?: string | null
+          estimated_hours?: number | null
           id?: string
+          parent_task_id?: string | null
           priority?: string
+          recurring?: Json | null
+          requires_triage?: boolean
           source?: string
           status?: string
           tags?: string[]
@@ -383,7 +430,15 @@ export type Database = {
           title?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "tasks_parent_task_id_fkey"
+            columns: ["parent_task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       tweet_reactions: {
         Row: {
