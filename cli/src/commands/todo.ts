@@ -340,4 +340,60 @@ export function registerTodoCommands(program: Command) {
         process.exit(1);
       }
     });
+
+  todo
+    .command("velocity")
+    .description("Task completion stats")
+    .option("--month", "Show monthly stats instead of weekly")
+    .action(async (opts: { month?: boolean }) => {
+      const token = await requireAuth();
+      const api = new AstarAPI(token);
+      const period = opts.month ? "month" : "week";
+      try {
+        const stats = await api.getVelocity(period);
+        console.log("");
+        console.log(`  ${c.bold}${c.white}Velocity${c.reset} ${c.dim}(${period})${c.reset}`);
+        console.log("");
+        console.log(`  ${c.green}${stats.completed}${c.reset} completed · ${c.cyan}${stats.created}${c.reset} created · ${c.dim}avg ${stats.avg_days_to_close} days to close${c.reset}`);
+        console.log(`  ${c.white}${stats.backlog}${c.reset} backlog ${stats.overdue > 0 ? `${c.red}(${stats.overdue} overdue)${c.reset}` : `${c.dim}(0 overdue)${c.reset}`}`);
+        console.log("");
+      } catch (e: any) {
+        console.error(`${c.red}✗${c.reset} ${e.message}`);
+        process.exit(1);
+      }
+    });
+
+  todo
+    .command("next")
+    .description("Suggest what to work on next")
+    .action(async () => {
+      const token = await requireAuth();
+      const api = new AstarAPI(token);
+      try {
+        const suggestions = await api.suggestNextTask();
+        if (!suggestions.length) {
+          console.log(`${c.dim}No open tasks. You're clear!${c.reset}`);
+          return;
+        }
+
+        console.log("");
+        const top = suggestions[0];
+        console.log(`  ${c.bold}${c.white}Suggested next:${c.reset}`);
+        console.log("");
+        console.log(`  ${c.cyan}#${top.task.task_number}${c.reset}  ${c.bold}${top.task.title}${c.reset}`);
+        console.log(`  ${c.dim}${top.reasons.join(" · ")}${c.reset} ${c.dim}(score: ${top.score})${c.reset}`);
+
+        if (suggestions.length > 1) {
+          console.log("");
+          console.log(`  ${c.dim}Also consider:${c.reset}`);
+          for (const s of suggestions.slice(1)) {
+            console.log(`  ${c.cyan}#${s.task.task_number}${c.reset}  ${s.task.title} ${c.dim}(${s.reasons.join(", ")})${c.reset}`);
+          }
+        }
+        console.log("");
+      } catch (e: any) {
+        console.error(`${c.red}✗${c.reset} ${e.message}`);
+        process.exit(1);
+      }
+    });
 }

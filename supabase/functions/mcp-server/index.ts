@@ -762,6 +762,25 @@ const TOOLS = [
       required: ["task_number"],
     },
   },
+  {
+    name: "get_velocity",
+    description: "Get task completion velocity stats — how productive is the team",
+    inputSchema: {
+      type: "object",
+      properties: {
+        period: { type: "string", enum: ["week", "month"], description: "Time period (default: week)" },
+        assigned_to: { type: "string", description: "Filter by assignee email" },
+      },
+    },
+  },
+  {
+    name: "suggest_next_task",
+    description: "Get the top priority task to work on next, with reasoning",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
 ];
 
 // ── News Helper: resolve slug to ID ──────────────────────────────────
@@ -1309,6 +1328,44 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       await sb.from("tasks").update({ status: "cancelled", archived_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", task.id);
       await sb.from("task_activity").insert({ task_id: task.id, actor: user.email, actor_type: "human", action: "triage_dismissed", details: { reason: args.reason || "" } });
       return [{ type: "text", text: `✓ Task #${args.task_number} dismissed.` }];
+    }
+
+    case "get_velocity": {
+      const sb = adminClient();
+      const days = args.period === "month" ? 30 : 7;
+      const since = new Date(Date.now() - days * 86400000).toISOString();
+      const today = new Date().toISOString().split("T")[0];
+
+      const { count: completed } = await sb.from("tasks").select("*", { count: "exact", head: true }).gte("completed_at", since).eq("status", "completed");
+      const { count: created } = await sb.from("tasks").select("*", { count: "exact", head: true }).gte("created_at", since);
+      const { count: backlog } = await sb.from("tasks").select("*", { count: "exact", head: true }).in("status", ["open", "in_progress", "blocked"]).is("archived_at", null);
+      const { count: overdue } = await sb.from("tasks").select("*", { count: "exact", head: true }).lt("due_date", today).not("status", "in", '("completed","cancelled")').is("archived_at", null);
+
+      return [{ type: "text", text: `Velocity (${args.period || "week"}):\n  Completed: ${completed || 0}\n  Created: ${created || 0}\n  Backlog: ${backlog || 0} open (${overdue || 0} overdue)` }];
+    }
+
+    case "suggest_next_task": {
+      const sb = adminClient();
+      const { data: tasks } = await sb.from("tasks").select("*").eq("assigned_to", user.email).in("status", ["open", "in_progress"]).is("archived_at", null).or("requires_triage.is.null,requires_triage.eq.false").is("parent_task_id", null);
+
+      if (!tasks?.length) return [{ type: "text", text: "No open tasks assigned to you." }];
+
+      const today = new Date();
+      const todayStr = today.toISOString().split("T")[0];
+      const scored = tasks.map((t: any) => {
+        let score = 0;
+        const reasons: string[] = [];
+        if (t.due_date && t.due_date < todayStr) { score += 100; reasons.push("overdue"); }
+        else if (t.due_date === todayStr) { score += 50; reasons.push("due today"); }
+        if (t.priority === "critical") { score += 40; reasons.push("critical"); }
+        else if (t.priority === "high") { score += 20; reasons.push("high priority"); }
+        const age = Math.floor((today.getTime() - new Date(t.created_at).getTime()) / 86400000);
+        score += Math.min(age, 30);
+        return { task: t, score, reasons };
+      }).sort((a: any, b: any) => b.score - a.score).slice(0, 3);
+
+      const out = scored.map((s: any, i: number) => `${i + 1}. #${s.task.task_number} ${s.task.title}\n   ${s.reasons.join(", ")} (score: ${s.score})`).join("\n\n");
+      return [{ type: "text", text: `Suggested tasks:\n\n${out}` }];
     }
 
     default:

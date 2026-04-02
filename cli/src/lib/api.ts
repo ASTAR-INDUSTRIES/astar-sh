@@ -79,6 +79,21 @@ export interface Task {
   updated_at: string;
 }
 
+export interface VelocityStats {
+  period: string;
+  completed: number;
+  created: number;
+  avg_days_to_close: number;
+  backlog: number;
+  overdue: number;
+}
+
+export interface TaskSuggestion {
+  task: Task;
+  score: number;
+  reasons: string[];
+}
+
 export interface TaskActivity {
   id: string;
   actor: string;
@@ -330,6 +345,19 @@ export class AstarAPI {
     });
     if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
     return res.json();
+  }
+
+  async getVelocity(period?: string, assigned_to?: string): Promise<VelocityStats> {
+    const params = new URLSearchParams();
+    if (period) params.set("period", period);
+    if (assigned_to) params.set("assigned_to", assigned_to);
+    const qs = params.toString();
+    return this.fetch(`/tasks/velocity${qs ? `?${qs}` : ""}`);
+  }
+
+  async suggestNextTask(): Promise<TaskSuggestion[]> {
+    const data = await this.fetch<{ suggestions: TaskSuggestion[] }>("/tasks/suggest");
+    return data.suggestions;
   }
 
   async linkTask(num: number, linkType: string, linkRef: string): Promise<{ ok: boolean }> {
