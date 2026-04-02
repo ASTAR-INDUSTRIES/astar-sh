@@ -110,7 +110,7 @@ const PublicDashboard = () => {
   const { data: cliEvents = [], refetch: refetchEvents } = useQuery({
     queryKey: ["audit-events"],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from("audit_events")
         .select("*")
         .order("timestamp", { ascending: false })
@@ -170,14 +170,14 @@ const PublicDashboard = () => {
     setTimeout(() => setReactingId(null), 300);
   }, []);
 
-  const downloadCounts = cliEvents.reduce<Record<string, number>>((acc, ev: any) => {
+  const downloadCounts = (cliEvents as any[]).reduce<Record<string, number>>((acc, ev: any) => {
     if (ev.entity_type === "skill" && ev.action === "downloaded" && ev.entity_id) {
       acc[ev.entity_id] = (acc[ev.entity_id] || 0) + 1;
     }
     return acc;
   }, {});
 
-  const totalDownloads = Object.values(downloadCounts).reduce((a, b) => a + b, 0);
+  const totalDownloads = Object.values(downloadCounts).reduce((a: number, b: number) => a + b, 0);
   const todayEvents = cliEvents.filter((ev: any) => {
     const d = new Date(ev.timestamp || ev.created_at);
     return d.toDateString() === now.toDateString();

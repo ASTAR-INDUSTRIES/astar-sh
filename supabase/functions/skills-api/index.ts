@@ -804,8 +804,10 @@ app.post("/tasks/archive", async (c) => {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
   const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
 
-  const { count: c1 } = await sb.from("tasks").update({ archived_at: now }).eq("status", "completed").lt("completed_at", thirtyDaysAgo).is("archived_at", null).select("*", { count: "exact" });
-  const { count: c2 } = await sb.from("tasks").update({ archived_at: now }).eq("status", "cancelled").lt("updated_at", sevenDaysAgo).is("archived_at", null).select("*", { count: "exact" });
+  const { data: d1 } = await sb.from("tasks").update({ archived_at: now }).eq("status", "completed").lt("completed_at", thirtyDaysAgo).is("archived_at", null).select("id");
+  const { data: d2 } = await sb.from("tasks").update({ archived_at: now }).eq("status", "cancelled").lt("updated_at", sevenDaysAgo).is("archived_at", null).select("id");
+  const c1 = d1?.length || 0;
+  const c2 = d2?.length || 0;
 
   return c.json({ ok: true, archived: (c1 || 0) + (c2 || 0) }, 200, corsHeaders);
 });
