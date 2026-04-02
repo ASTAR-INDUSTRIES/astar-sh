@@ -638,6 +638,87 @@ const TOOLS = [
       required: ["id", "response", "status"],
     },
   },
+  // ── Task Tools ──────────────────────────────────────────────────────
+  {
+    name: "create_task",
+    description: "Create a task for yourself or a colleague",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Task title" },
+        description: { type: "string", description: "Details" },
+        priority: { type: "string", enum: ["low", "medium", "high", "critical"], description: "Priority (default: medium)" },
+        assigned_to: { type: "string", description: "Email of assignee (default: yourself)" },
+        due_date: { type: "string", description: "Due date (YYYY-MM-DD)" },
+        tags: { type: "array", items: { type: "string" }, description: "Tags" },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "update_task",
+    description: "Update a task's status, priority, assignee, or details",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task_number: { type: "number", description: "Task number (e.g. 1, 2, 3)" },
+        status: { type: "string", enum: ["open", "in_progress", "completed", "blocked", "cancelled"] },
+        priority: { type: "string", enum: ["low", "medium", "high", "critical"] },
+        assigned_to: { type: "string", description: "Email of new assignee" },
+        due_date: { type: "string", description: "New due date (YYYY-MM-DD)" },
+        description: { type: "string" },
+      },
+      required: ["task_number"],
+    },
+  },
+  {
+    name: "complete_task",
+    description: "Mark a task as completed — confirm with the user before calling this",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task_number: { type: "number", description: "Task number" },
+      },
+      required: ["task_number"],
+    },
+  },
+  {
+    name: "list_tasks",
+    description: "List tasks with optional filters",
+    inputSchema: {
+      type: "object",
+      properties: {
+        assigned_to: { type: "string", description: "Email filter, or 'all' for everyone" },
+        status: { type: "string", enum: ["open", "in_progress", "completed", "blocked", "cancelled"] },
+        priority: { type: "string", enum: ["low", "medium", "high", "critical"] },
+        search: { type: "string", description: "Search title/description" },
+        limit: { type: "number", description: "Max results (default 20)" },
+      },
+    },
+  },
+  {
+    name: "get_task",
+    description: "Get full task details and activity log",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task_number: { type: "number", description: "Task number" },
+      },
+      required: ["task_number"],
+    },
+  },
+  {
+    name: "comment_task",
+    description: "Add a comment or note to a task",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task_number: { type: "number", description: "Task number" },
+        comment: { type: "string", description: "Comment text" },
+      },
+      required: ["task_number", "comment"],
+    },
+  },
 ];
 
 // ── News Helper: resolve slug to ID ──────────────────────────────────
@@ -1048,6 +1129,83 @@ async function handleTool(name: string, args: any, user: { email: string; userId
         .eq("id", args.id);
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
       return [{ type: "text", text: `✓ Inquiry ${args.id.slice(0, 8)} marked as ${args.status}.` }];
+    }
+
+    // ── Tasks ────────────────────────────────────────────────────────
+    case "create_task": {
+      const sb = adminClient();
+      const { data, error } = await sb.from("tasks").insert({
+        title: args.title,
+        description: args.description || null,
+        priority: args.priority || "medium",
+        created_by: user.email,
+        assigned_to: args.assigned_to || user.email,
+        due_date: args.due_date || null,
+        tags: args.tags || [],
+      }).select("task_number, id").single();
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      await sb.from("task_activity").insert({ task_id: data.id, actor: user.email, actor_type: "human", action: "created", details: { title: args.title } });
+      const assignee = args.assigned_to ? ` → ${args.assigned_to}` : "";
+      return [{ type: "text", text: `✓ Task #${data.task_number} created: "${args.title}"${assignee}` }];
+    }
+
+    case "update_task": {
+      const sb = adminClient();
+      const { data: task, error: fetchErr } = await sb.from("tasks").select("id, task_number").eq("task_number", args.task_number).single();
+      if (fetchErr || !task) return [{ type: "text", text: "Error: Task not found." }];
+      const patch: any = { updated_at: new Date().toISOString() };
+      const changes: any = {};
+      for (const f of ["status", "priority", "assigned_to", "due_date", "description"]) {
+        if ((args as any)[f] !== undefined) { patch[f] = (args as any)[f]; changes[f] = (args as any)[f]; }
+      }
+      if (args.status === "completed") { patch.completed_by = user.email; patch.completed_at = new Date().toISOString(); }
+      const { error } = await sb.from("tasks").update(patch).eq("id", task.id);
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      await sb.from("task_activity").insert({ task_id: task.id, actor: user.email, actor_type: "human", action: args.status === "completed" ? "completed" : "updated", details: changes });
+      return [{ type: "text", text: `✓ Task #${args.task_number} updated.` }];
+    }
+
+    case "complete_task": {
+      const sb = adminClient();
+      const { data: task, error: fetchErr } = await sb.from("tasks").select("id, title, status").eq("task_number", args.task_number).single();
+      if (fetchErr || !task) return [{ type: "text", text: "Error: Task not found." }];
+      if (task.status === "completed") return [{ type: "text", text: `Task #${args.task_number} is already completed.` }];
+      const { error } = await sb.from("tasks").update({ status: "completed", completed_by: user.email, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", task.id);
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      await sb.from("task_activity").insert({ task_id: task.id, actor: user.email, actor_type: "human", action: "completed", details: {} });
+      return [{ type: "text", text: `✓ Task #${args.task_number} completed: "${task.title}"` }];
+    }
+
+    case "list_tasks": {
+      const sb = adminClient();
+      let query = sb.from("tasks").select("task_number, title, status, priority, assigned_to, due_date, created_at").is("archived_at", null).not("status", "eq", "cancelled").order("created_at", { ascending: false }).limit(args.limit || 20);
+      if (args.assigned_to && args.assigned_to !== "all") query = query.eq("assigned_to", args.assigned_to);
+      else if (!args.assigned_to) query = query.eq("assigned_to", user.email);
+      if (args.status) query = query.eq("status", args.status);
+      if (args.priority) query = query.eq("priority", args.priority);
+      if (args.search) query = query.or(`title.ilike.%${args.search}%,description.ilike.%${args.search}%`);
+      const { data, error } = await query;
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      if (!data?.length) return [{ type: "text", text: "No tasks found." }];
+      const out = data.map((t: any) => `#${t.task_number} [${t.status}] ${t.priority} — ${t.title} (${t.assigned_to?.split("@")[0] || "unassigned"}${t.due_date ? `, due ${t.due_date}` : ""})`).join("\n");
+      return [{ type: "text", text: out }];
+    }
+
+    case "get_task": {
+      const sb = adminClient();
+      const { data: task, error: fetchErr } = await sb.from("tasks").select("*").eq("task_number", args.task_number).single();
+      if (fetchErr || !task) return [{ type: "text", text: "Error: Task not found." }];
+      const { data: activity } = await sb.from("task_activity").select("*").eq("task_id", task.id).order("created_at", { ascending: false }).limit(10);
+      const actLog = (activity || []).map((a: any) => `  ${a.created_at.slice(0, 16)} ${a.actor.split("@")[0]} ${a.action}`).join("\n");
+      return [{ type: "text", text: `#${task.task_number} — ${task.title}\nStatus: ${task.status} | Priority: ${task.priority}\nAssigned: ${task.assigned_to || "unassigned"} | Created by: ${task.created_by}\nDue: ${task.due_date || "none"} | Tags: ${task.tags?.join(", ") || "none"}\n${task.description ? `\n${task.description}\n` : ""}\nActivity:\n${actLog || "  (none)"}` }];
+    }
+
+    case "comment_task": {
+      const sb = adminClient();
+      const { data: task, error: fetchErr } = await sb.from("tasks").select("id").eq("task_number", args.task_number).single();
+      if (fetchErr || !task) return [{ type: "text", text: "Error: Task not found." }];
+      await sb.from("task_activity").insert({ task_id: task.id, actor: user.email, actor_type: "human", action: "commented", details: { comment: args.comment } });
+      return [{ type: "text", text: `✓ Comment added to task #${args.task_number}.` }];
     }
 
     default:

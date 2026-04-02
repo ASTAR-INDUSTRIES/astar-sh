@@ -49,6 +49,33 @@ export interface NewsFull extends NewsSummary {
   takeaway?: string;
 }
 
+export interface Task {
+  id: string;
+  task_number: number;
+  title: string;
+  description?: string;
+  status: string;
+  priority: string;
+  created_by: string;
+  assigned_to?: string;
+  completed_by?: string;
+  due_date?: string;
+  completed_at?: string;
+  source: string;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskActivity {
+  id: string;
+  actor: string;
+  actor_type: string;
+  action: string;
+  details: Record<string, any>;
+  created_at: string;
+}
+
 export interface Inquiry {
   id: string;
   type: string;
@@ -227,5 +254,53 @@ export class AstarAPI {
   async getInquiry(id: string): Promise<Inquiry> {
     const data = await this.fetch<{ inquiry: Inquiry }>(`/inquiries/${id}`);
     return data.inquiry;
+  }
+
+  async listTasks(filters?: { status?: string; priority?: string; assigned_to?: string; due?: string; search?: string }): Promise<Task[]> {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.priority) params.set("priority", filters.priority);
+    if (filters?.assigned_to) params.set("assigned_to", filters.assigned_to);
+    if (filters?.due) params.set("due", filters.due);
+    if (filters?.search) params.set("search", filters.search);
+    const qs = params.toString();
+    const data = await this.fetch<{ tasks: Task[] }>(`/tasks${qs ? `?${qs}` : ""}`);
+    return data.tasks;
+  }
+
+  async createTask(task: { title: string; description?: string; priority?: string; assigned_to?: string; due_date?: string; tags?: string[] }): Promise<{ ok: boolean; task_number: number }> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/tasks`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(task),
+    });
+    if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+    return res.json();
+  }
+
+  async getTask(num: number): Promise<{ task: Task; activity: TaskActivity[] }> {
+    return this.fetch(`/tasks/${num}`);
+  }
+
+  async updateTask(num: number, updates: Record<string, any>): Promise<{ ok: boolean }> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/tasks/${num}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+    return res.json();
+  }
+
+  async cancelTask(num: number): Promise<{ ok: boolean }> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/tasks/${num}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+    return res.json();
   }
 }

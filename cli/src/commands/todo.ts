@@ -1,0 +1,225 @@
+import type { Command } from "commander";
+import { AstarAPI, type Task } from "../lib/api";
+import { c, table } from "../lib/ui";
+import { getToken } from "../lib/auth";
+
+async function requireAuth(): Promise<string> {
+  try {
+    return await getToken();
+  } catch {
+    console.error(`${c.red}✗${c.reset} Not authenticated. Run ${c.cyan}astar login${c.reset} first.`);
+    process.exit(1);
+  }
+}
+
+function fmtDate(d: string): string {
+  if (!d) return "";
+  if (d.length === 10) return new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function truncate(s: string, max: number): string {
+  if (!s) return "";
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
+}
+
+function parseNum(s: string): number {
+  return parseInt(s.replace("#", ""));
+}
+
+const statusColors: Record<string, string> = {
+  open: c.white,
+  in_progress: c.yellow,
+  completed: c.green,
+  blocked: c.red,
+  cancelled: c.dim,
+};
+
+const priorityColors: Record<string, string> = {
+  low: c.dim,
+  medium: c.white,
+  high: c.yellow,
+  critical: c.red,
+};
+
+function renderTaskTable(tasks: Task[]) {
+  if (!tasks.length) {
+    console.log(`${c.dim}No tasks found.${c.reset}`);
+    return;
+  }
+  console.log("");
+  table(
+    ["#", "Title", "Status", "Priority", "Assigned", "Due"],
+    tasks.map((t) => [
+      `${c.cyan}${t.task_number}${c.reset}`,
+      truncate(t.title, 35),
+      `${statusColors[t.status] || c.dim}${t.status}${c.reset}`,
+      `${priorityColors[t.priority] || c.dim}${t.priority}${c.reset}`,
+      `${c.dim}${t.assigned_to?.split("@")[0] || "—"}${c.reset}`,
+      t.due_date ? `${c.dim}${fmtDate(t.due_date)}${c.reset}` : `${c.dim}—${c.reset}`,
+    ])
+  );
+  console.log("");
+  console.log(`  ${c.dim}${tasks.length} task(s)${c.reset}`);
+  console.log("");
+}
+
+export function registerTodoCommands(program: Command) {
+  const todo = program
+    .command("todo [title]")
+    .description("Manage tasks — create, complete, and track work")
+    .option("-p, --priority <priority>", "Priority: low, medium, high, critical", "medium")
+    .option("-d, --due <date>", "Due date (YYYY-MM-DD)")
+    .option("-a, --assign <email>", "Assign to (default: yourself)")
+    .option("-t, --tag <tag>", "Add tag")
+    .option("--description <text>", "Task description")
+    .action(async (title: string | undefined, opts) => {
+      if (!title) {
+        await todo.commands.find((cmd) => cmd.name() === "mine")!.parseAsync([], { from: "user" });
+        return;
+      }
+
+      const token = await requireAuth();
+      const api = new AstarAPI(token);
+
+      try {
+        const result = await api.createTask({
+          title,
+          description: opts.description,
+          priority: opts.priority,
+          assigned_to: opts.assign,
+          due_date: opts.due,
+          tags: opts.tag ? [opts.tag] : undefined,
+        });
+        const dueStr = opts.due ? ` ${c.dim}(due ${fmtDate(opts.due)})${c.reset}` : "";
+        const assignStr = opts.assign ? ` → ${c.dim}${opts.assign}${c.reset}` : "";
+        console.log(`${c.green}✓${c.reset} Task ${c.cyan}#${result.task_number}${c.reset} created${assignStr}${dueStr}`);
+      } catch (e: any) {
+        console.error(`${c.red}✗${c.reset} ${e.message}`);
+        process.exit(1);
+      }
+    });
+
+  todo
+    .command("done <number>")
+    .description("Mark a task as completed")
+    .action(async (num: string) => {
+      const token = await requireAuth();
+      const api = new AstarAPI(token);
+      try {
+        await api.updateTask(parseNum(num), { status: "completed" });
+        console.log(`${c.green}✓${c.reset} Task ${c.cyan}#${parseNum(num)}${c.reset} completed`);
+      } catch (e: any) {
+        console.error(`${c.red}✗${c.reset} ${e.message}`);
+        process.exit(1);
+      }
+    });
+
+  todo
+    .command("info <number>")
+    .description("Show task details and activity log")
+    .action(async (num: string) => {
+      const token = await requireAuth();
+      const api = new AstarAPI(token);
+      try {
+        const { task: t, activity } = await api.getTask(parseNum(num));
+
+        console.log("");
+        console.log(`  ${c.bold}${c.cyan}#${t.task_number}${c.reset} ${c.bold}${t.title}${c.reset}`);
+        console.log(`  ${statusColors[t.status]}${t.status}${c.reset} · ${priorityColors[t.priority]}${t.priority}${c.reset}`);
+        if (t.description) console.log(`  ${c.dim}${t.description}${c.reset}`);
+        console.log(`  ${c.dim}Created by${c.reset} ${t.created_by.split("@")[0]} · ${c.dim}Assigned to${c.reset} ${t.assigned_to?.split("@")[0] || "unassigned"}`);
+        if (t.due_date) console.log(`  ${c.dim}Due${c.reset} ${fmtDate(t.due_date)}`);
+        if (t.tags?.length) console.log(`  ${c.dim}Tags${c.reset} ${t.tags.join(", ")}`);
+
+        if (activity.length) {
+          console.log("");
+          console.log(`  ${c.bold}${c.white}Activity${c.reset}`);
+          for (const a of activity) {
+            const detail = a.action === "commented" ? `: ${a.details?.comment || ""}` : "";
+            console.log(`  ${c.dim}${fmtDate(a.created_at)}${c.reset} ${a.actor.split("@")[0]} ${c.dim}${a.action}${detail}${c.reset}`);
+          }
+        }
+        console.log("");
+      } catch (e: any) {
+        console.error(`${c.red}✗${c.reset} ${e.message}`);
+        process.exit(1);
+      }
+    });
+
+  todo
+    .command("assign <number> <email>")
+    .description("Reassign a task")
+    .action(async (num: string, email: string) => {
+      const token = await requireAuth();
+      const api = new AstarAPI(token);
+      try {
+        await api.updateTask(parseNum(num), { assigned_to: email });
+        console.log(`${c.green}✓${c.reset} Task #${parseNum(num)} assigned to ${c.cyan}${email}${c.reset}`);
+      } catch (e: any) {
+        console.error(`${c.red}✗${c.reset} ${e.message}`);
+        process.exit(1);
+      }
+    });
+
+  todo
+    .command("mine")
+    .description("List your open tasks")
+    .action(async () => {
+      const token = await requireAuth();
+      const api = new AstarAPI(token);
+      try {
+        const tasks = await api.listTasks({ status: "open" });
+        renderTaskTable(tasks);
+      } catch (e: any) {
+        console.error(`${c.red}✗${c.reset} ${e.message}`);
+        process.exit(1);
+      }
+    });
+
+  todo
+    .command("team")
+    .description("All tasks grouped by assignee")
+    .action(async () => {
+      const token = await requireAuth();
+      const api = new AstarAPI(token);
+      try {
+        const tasks = await api.listTasks({ assigned_to: "all" });
+        if (!tasks.length) {
+          console.log(`${c.dim}No tasks found.${c.reset}`);
+          return;
+        }
+        const grouped: Record<string, Task[]> = {};
+        for (const t of tasks) {
+          const key = t.assigned_to?.split("@")[0] || "unassigned";
+          (grouped[key] ||= []).push(t);
+        }
+        for (const [assignee, items] of Object.entries(grouped)) {
+          console.log(`\n  ${c.bold}${c.white}${assignee}${c.reset}`);
+          renderTaskTable(items);
+        }
+      } catch (e: any) {
+        console.error(`${c.red}✗${c.reset} ${e.message}`);
+        process.exit(1);
+      }
+    });
+
+  todo
+    .command("list")
+    .description("List tasks with filters")
+    .option("-s, --status <status>", "Filter: open, in_progress, completed, blocked, cancelled")
+    .option("-p, --priority <priority>", "Filter: low, medium, high, critical")
+    .option("-d, --due <due>", "Filter: today, overdue, week")
+    .option("-q, --search <text>", "Search title/description")
+    .action(async (opts) => {
+      const token = await requireAuth();
+      const api = new AstarAPI(token);
+      try {
+        const tasks = await api.listTasks({ ...opts, assigned_to: "all" });
+        renderTaskTable(tasks);
+      } catch (e: any) {
+        console.error(`${c.red}✗${c.reset} ${e.message}`);
+        process.exit(1);
+      }
+    });
+}

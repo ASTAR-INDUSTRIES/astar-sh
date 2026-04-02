@@ -607,6 +607,168 @@ app.patch("/inquiries/:id", async (c) => {
   return c.json({ error: "status must be processing, completed, or failed" }, 400, corsHeaders);
 });
 
+// ── Task helper ─────────────────────────────────────────────────────
+async function logTaskActivity(taskId: string, actor: string, actorType: string, action: string, details: Record<string, any> = {}) {
+  try {
+    const sb = getSupabase();
+    await sb.from("task_activity").insert({ task_id: taskId, actor, actor_type: actorType, action, details });
+  } catch {}
+}
+
+// ── POST /tasks — create task ───────────────────────────────────────
+app.post("/tasks", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const body = await c.req.json();
+  if (!body.title) return c.json({ error: "title is required" }, 400, corsHeaders);
+
+  const sb = getSupabase();
+  const { data, error } = await sb.from("tasks").insert({
+    title: body.title,
+    description: body.description || null,
+    priority: body.priority || "medium",
+    created_by: user.email,
+    assigned_to: body.assigned_to || user.email,
+    due_date: body.due_date || null,
+    source: body.source || "human",
+    tags: body.tags || [],
+  }).select("task_number, id").single();
+
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+  await logTaskActivity(data.id, user.email, "human", "created", { title: body.title });
+  await logEvent("task.create", { userEmail: user.email, userName: user.name, metadata: { task_number: data.task_number } });
+
+  return c.json({ ok: true, task_number: data.task_number }, 200, corsHeaders);
+});
+
+// ── GET /tasks — list tasks with filters ────────────────────────────
+app.get("/tasks", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const status = c.req.query("status");
+  const priority = c.req.query("priority");
+  const assignedTo = c.req.query("assigned_to");
+  const due = c.req.query("due");
+  const search = c.req.query("search");
+
+  const sb = getSupabase();
+  let query = sb.from("tasks").select("*").is("archived_at", null).order("created_at", { ascending: false }).limit(50);
+
+  if (assignedTo && assignedTo !== "all") {
+    query = query.eq("assigned_to", assignedTo);
+  } else if (!assignedTo) {
+    query = query.eq("assigned_to", user.email);
+  }
+
+  if (status) {
+    query = query.eq("status", status);
+  } else {
+    query = query.not("status", "in", '("cancelled")');
+  }
+
+  if (priority) query = query.eq("priority", priority);
+
+  if (due) {
+    const today = new Date().toISOString().split("T")[0];
+    if (due === "today") query = query.eq("due_date", today);
+    else if (due === "overdue") query = query.lt("due_date", today).neq("status", "completed").neq("status", "cancelled");
+    else if (due === "week") {
+      const week = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
+      query = query.gte("due_date", today).lte("due_date", week);
+    }
+  }
+
+  if (search) {
+    query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%`);
+  }
+
+  const { data, error } = await query;
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+  return c.json({ tasks: data || [] }, 200, corsHeaders);
+});
+
+// ── GET /tasks/:number — single task ────────────────────────────────
+app.get("/tasks/:number", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const num = parseInt(c.req.param("number"));
+  const sb = getSupabase();
+
+  const { data: task, error } = await sb.from("tasks").select("*").eq("task_number", num).single();
+  if (error || !task) return c.json({ error: "Task not found" }, 404, corsHeaders);
+
+  const { data: activity } = await sb.from("task_activity").select("*").eq("task_id", task.id).order("created_at", { ascending: false }).limit(20);
+
+  return c.json({ task, activity: activity || [] }, 200, corsHeaders);
+});
+
+// ── PATCH /tasks/:number — update task ──────────────────────────────
+app.patch("/tasks/:number", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const num = parseInt(c.req.param("number"));
+  const sb = getSupabase();
+
+  const { data: task, error: fetchErr } = await sb.from("tasks").select("*").eq("task_number", num).single();
+  if (fetchErr || !task) return c.json({ error: "Task not found" }, 404, corsHeaders);
+
+  if (user.email !== task.created_by && user.email !== task.assigned_to) {
+    return c.json({ error: "Only the creator or assignee can modify this task" }, 403, corsHeaders);
+  }
+
+  const body = await c.req.json();
+  const patch: any = { updated_at: new Date().toISOString() };
+  const changes: Record<string, any> = {};
+
+  for (const field of ["status", "priority", "assigned_to", "due_date", "description", "tags"]) {
+    if (body[field] !== undefined) {
+      changes[field] = { from: task[field], to: body[field] };
+      patch[field] = body[field];
+    }
+  }
+
+  if (body.status === "completed") {
+    patch.completed_by = user.email;
+    patch.completed_at = new Date().toISOString();
+  }
+
+  if (Object.keys(changes).length === 0) return c.json({ error: "No fields to update" }, 400, corsHeaders);
+
+  const { error } = await sb.from("tasks").update(patch).eq("id", task.id);
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+  const action = body.status === "completed" ? "completed" : body.assigned_to ? "assigned" : "updated";
+  await logTaskActivity(task.id, user.email, "human", action, changes);
+
+  return c.json({ ok: true, task_number: num }, 200, corsHeaders);
+});
+
+// ── DELETE /tasks/:number — cancel task ─────────────────────────────
+app.delete("/tasks/:number", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const num = parseInt(c.req.param("number"));
+  const sb = getSupabase();
+
+  const { data: task, error: fetchErr } = await sb.from("tasks").select("id, created_by").eq("task_number", num).single();
+  if (fetchErr || !task) return c.json({ error: "Task not found" }, 404, corsHeaders);
+
+  if (user.email !== task.created_by) {
+    return c.json({ error: "Only the creator can cancel this task" }, 403, corsHeaders);
+  }
+
+  await sb.from("tasks").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", task.id);
+  await logTaskActivity(task.id, user.email, "human", "cancelled", {});
+
+  return c.json({ ok: true }, 200, corsHeaders);
+});
+
 // ── Health ─────────────────────────────────────────────────────────────
 app.get("/", (c) => c.json({ status: "ok", service: "skills-api" }, 200, corsHeaders));
 

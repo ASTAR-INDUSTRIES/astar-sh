@@ -6,13 +6,14 @@ import { registerNewsCommands } from "./commands/news";
 import { registerFeedbackCommands } from "./commands/feedback";
 import { registerShippedCommands } from "./commands/shipped";
 import { registerHoursCommands } from "./commands/hours";
+import { registerTodoCommands } from "./commands/todo";
 import { registerUpdateCommand, checkForUpdates } from "./commands/update";
 import { getAuthStatus } from "./lib/auth";
 import { AstarAPI } from "./lib/api";
 import { c } from "./lib/ui";
 import { resolve } from "path";
 
-export const VERSION = "0.0.1";
+export const VERSION = "0.0.2";
 
 async function showDashboard() {
   const status = await getAuthStatus();
@@ -53,11 +54,20 @@ async function showDashboard() {
     feedbackCount = newCount > 0 ? `${fb.length} ${c.yellow}(${newCount} new)${c.reset}` : String(fb.length);
   } catch {}
 
+  let taskCount = "—";
+  try {
+    const api = new AstarAPI();
+    const tasks = await api.listTasks().catch(() => []);
+    const open = tasks.filter((t) => t.status === "open" || t.status === "in_progress").length;
+    taskCount = open > 0 ? `${c.white}${open}${c.reset} open` : "0";
+  } catch {}
+
   console.log(`  ${c.dim}Skills:${c.reset}    ${c.white}${skillCount}${c.reset} available, ${c.cyan}${installedCount}${c.reset} installed`);
   console.log(`  ${c.dim}News:${c.reset}      ${c.white}${newsCount}${c.reset} briefings`);
+  console.log(`  ${c.dim}Tasks:${c.reset}     ${taskCount}`);
   console.log(`  ${c.dim}Feedback:${c.reset}  ${feedbackCount}`);
   console.log("");
-  console.log(`  ${c.dim}skill · news · feedback · shipped · hours · update${c.reset}`);
+  console.log(`  ${c.dim}skill · news · todo · feedback · shipped · hours · update${c.reset}`);
   console.log("");
 }
 
@@ -77,6 +87,7 @@ registerNewsCommands(program);
 registerFeedbackCommands(program);
 registerShippedCommands(program);
 registerHoursCommands(program);
+registerTodoCommands(program);
 registerUpdateCommand(program);
 
 await checkForUpdates();
