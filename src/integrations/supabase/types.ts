@@ -290,6 +290,101 @@ export type Database = {
         }
         Relationships: []
       }
+      task_activity: {
+        Row: {
+          action: string
+          actor: string
+          actor_type: string
+          created_at: string
+          details: Json
+          id: string
+          task_id: string
+        }
+        Insert: {
+          action: string
+          actor: string
+          actor_type?: string
+          created_at?: string
+          details?: Json
+          id?: string
+          task_id: string
+        }
+        Update: {
+          action?: string
+          actor?: string
+          actor_type?: string
+          created_at?: string
+          details?: Json
+          id?: string
+          task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_activity_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tasks: {
+        Row: {
+          archived_at: string | null
+          assigned_to: string | null
+          completed_at: string | null
+          completed_by: string | null
+          created_at: string
+          created_by: string
+          description: string | null
+          due_date: string | null
+          id: string
+          priority: string
+          source: string
+          status: string
+          tags: string[]
+          task_number: number
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          archived_at?: string | null
+          assigned_to?: string | null
+          completed_at?: string | null
+          completed_by?: string | null
+          created_at?: string
+          created_by: string
+          description?: string | null
+          due_date?: string | null
+          id?: string
+          priority?: string
+          source?: string
+          status?: string
+          tags?: string[]
+          task_number?: number
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          archived_at?: string | null
+          assigned_to?: string | null
+          completed_at?: string | null
+          completed_by?: string | null
+          created_at?: string
+          created_by?: string
+          description?: string | null
+          due_date?: string | null
+          id?: string
+          priority?: string
+          source?: string
+          status?: string
+          tags?: string[]
+          task_number?: number
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       tweet_reactions: {
         Row: {
           created_at: string
