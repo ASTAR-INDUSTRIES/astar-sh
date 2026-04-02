@@ -110,7 +110,7 @@ const PublicDashboard = () => {
   const { data: cliEvents = [], refetch: refetchEvents } = useQuery({
     queryKey: ["audit-events"],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from("audit_events")
         .select("*")
         .order("timestamp", { ascending: false })
