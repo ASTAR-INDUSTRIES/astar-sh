@@ -22,20 +22,24 @@ function getSupabase() {
   );
 }
 
-async function logEvent(eventType: string, opts?: { skillSlug?: string; skillTitle?: string; userEmail?: string; userName?: string; metadata?: Record<string, any> }) {
+async function logAudit(opts: {
+  actor_email?: string;
+  actor_name?: string;
+  actor_type?: string;
+  actor_agent_id?: string;
+  entity_type: string;
+  entity_id?: string;
+  action: string;
+  state_before?: any;
+  state_after?: any;
+  channel?: string;
+  raw_input?: any;
+  context?: any;
+}) {
   try {
     const sb = getSupabase();
-    await sb.from("cli_events").insert({
-      event_type: eventType,
-      skill_slug: opts?.skillSlug,
-      skill_title: opts?.skillTitle,
-      user_email: opts?.userEmail,
-      user_name: opts?.userName,
-      metadata: opts?.metadata ?? {},
-    });
-  } catch {
-    // non-blocking
-  }
+    await sb.from("audit_events").insert(opts);
+  } catch {}
 }
 
 // ── Sanity mutate helper ─────────────────────────────────────────────
@@ -138,15 +142,16 @@ app.get("/skills", async (c) => {
 
   const sb = getSupabase();
   const { data: events } = await sb
-    .from("cli_events")
-    .select("skill_slug")
-    .eq("event_type", "skill.download")
-    .not("skill_slug", "is", null);
+    .from("audit_events")
+    .select("entity_id")
+    .eq("entity_type", "skill")
+    .eq("action", "downloaded")
+    .not("entity_id", "is", null);
 
   const dlCounts: Record<string, number> = {};
   if (events) {
     for (const ev of events) {
-      if (ev.skill_slug) dlCounts[ev.skill_slug] = (dlCounts[ev.skill_slug] || 0) + 1;
+      if (ev.entity_id) dlCounts[ev.entity_id] = (dlCounts[ev.entity_id] || 0) + 1;
     }
   }
 
@@ -155,7 +160,7 @@ app.get("/skills", async (c) => {
     downloadCount: dlCounts[s.slug] || 0,
   }));
 
-  await logEvent("skill.list", { metadata: { count: skills?.length ?? 0, query: query || undefined } });
+  await logAudit({ entity_type: "skill", action: "listed", channel: "api", state_after: { count: skills?.length ?? 0, query: query || undefined } });
   return c.json({ skills: enriched }, 200, corsHeaders);
 });
 
@@ -187,7 +192,7 @@ app.get("/skills/:slug", async (c) => {
     return c.json({ error: "Skill not found" }, 404, corsHeaders);
   }
 
-  await logEvent("skill.download", { skillSlug: slug, skillTitle: skill.title });
+  await logAudit({ entity_type: "skill", entity_id: slug, action: "downloaded", channel: "api", state_after: { title: skill.title } });
   return c.json({ skill }, 200, corsHeaders);
 });
 
@@ -231,12 +236,7 @@ app.post("/skills", async (c) => {
 
   await sanityMutate([{ createOrReplace: doc }]);
 
-  await logEvent("skill.push", {
-    skillSlug,
-    skillTitle: title,
-    userEmail: user.email,
-    userName: user.name,
-  });
+  await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "skill", entity_id: skillSlug, action: "pushed", channel: "api", state_after: { title } });
 
   return c.json({ ok: true, slug: skillSlug }, 200, corsHeaders);
 });
@@ -349,12 +349,7 @@ app.post("/news", async (c) => {
 
   await sanityMutate([{ createOrReplace: doc }]);
 
-  await logEvent("news.publish", {
-    skillSlug: slug,
-    skillTitle: title,
-    userEmail: user.email,
-    userName: user.name,
-  });
+  await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "news", entity_id: slug, action: "published", channel: "api", state_after: { title } });
 
   return c.json({ ok: true, slug }, 200, corsHeaders);
 });
@@ -392,11 +387,7 @@ app.post("/feedback", async (c) => {
 
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
-  await logEvent("feedback.submit", {
-    userEmail: user.email,
-    userName: user.name,
-    metadata: { type: body.type || "feature" },
-  });
+  await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "feedback", action: "submitted", channel: "api", state_after: { type: body.type || "feature", content: body.content } });
 
   return c.json({ ok: true }, 200, corsHeaders);
 });
@@ -432,11 +423,7 @@ app.post("/milestones", async (c) => {
 
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
-  await logEvent("milestone.create", {
-    userEmail: user.email,
-    userName: user.name,
-    metadata: { title: body.title },
-  });
+  await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "milestone", action: "created", channel: "api", state_after: { title: body.title } });
 
   return c.json({ ok: true }, 200, corsHeaders);
 });
@@ -465,11 +452,7 @@ app.post("/inquiries", async (c) => {
 
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
-  await logEvent("inquiry.submit", {
-    userEmail: user.email,
-    userName: user.name,
-    metadata: { type, inquiry_id: data.id },
-  });
+  await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "inquiry", entity_id: data.id, action: "submitted", channel: "api", state_after: { type } });
 
   return c.json({ ok: true, id: data.id }, 200, corsHeaders);
 });
@@ -595,11 +578,7 @@ app.patch("/inquiries/:id", async (c) => {
       .eq("id", id);
     if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
-    await logEvent("inquiry.processed", {
-      userEmail: user.email,
-      userName: user.name,
-      metadata: { inquiry_id: id, status: body.status },
-    });
+    await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "inquiry", entity_id: id, action: "processed", channel: "api", state_after: { status: body.status, response: body.response } });
 
     return c.json({ ok: true }, 200, corsHeaders);
   }
@@ -607,12 +586,19 @@ app.patch("/inquiries/:id", async (c) => {
   return c.json({ error: "status must be processing, completed, or failed" }, 400, corsHeaders);
 });
 
-// ── Task helper ─────────────────────────────────────────────────────
-async function logTaskActivity(taskId: string, actor: string, actorType: string, action: string, details: Record<string, any> = {}) {
-  try {
-    const sb = getSupabase();
-    await sb.from("task_activity").insert({ task_id: taskId, actor, actor_type: actorType, action, details });
-  } catch {}
+// ── Task audit helper ────────────────────────────────────────────────
+async function logTaskAudit(taskId: string, taskNumber: string | number, actor: string, actorType: string, action: string, opts: { state_before?: any; state_after?: any; channel?: string } = {}) {
+  await logAudit({
+    actor_email: actor,
+    actor_type: actorType,
+    entity_type: "task",
+    entity_id: String(taskNumber),
+    action,
+    state_before: opts.state_before,
+    state_after: opts.state_after,
+    channel: opts.channel || "api",
+    context: { task_uuid: taskId },
+  });
 }
 
 // ── POST /tasks — create task ───────────────────────────────────────
@@ -656,8 +642,7 @@ app.post("/tasks", async (c) => {
     }
   }
 
-  await logTaskActivity(data.id, user.email, isAgent ? "agent" : "human", "created", { title: body.title });
-  await logEvent("task.create", { userEmail: user.email, userName: user.name, metadata: { task_number: data.task_number } });
+  await logTaskAudit(data.id, data.task_number, user.email, isAgent ? "agent" : "human", "created", { state_after: { title: body.title, priority: body.priority || "medium", assigned_to: body.assigned_to || user.email } });
 
   return c.json({ ok: true, task_number: data.task_number }, 200, corsHeaders);
 });
@@ -836,7 +821,7 @@ app.get("/tasks/:number", async (c) => {
   const { data: task, error } = await sb.from("tasks").select("*").eq("task_number", num).single();
   if (error || !task) return c.json({ error: "Task not found" }, 404, corsHeaders);
 
-  const { data: activity } = await sb.from("task_activity").select("*").eq("task_id", task.id).order("created_at", { ascending: false }).limit(20);
+  const { data: activity } = await sb.from("audit_events").select("*").eq("entity_type", "task").eq("entity_id", String(task.task_number)).order("timestamp", { ascending: false }).limit(20);
   const { data: subtasks } = await sb.from("tasks").select("*").eq("parent_task_id", task.id).order("task_number", { ascending: true });
   const { data: links } = await sb.from("task_links").select("*").eq("task_id", task.id).order("created_at", { ascending: true });
 
@@ -886,7 +871,7 @@ app.patch("/tasks/:number", async (c) => {
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
   const action = body.status === "completed" ? "completed" : body.assigned_to ? "assigned" : "updated";
-  await logTaskActivity(task.id, user.email, "human", action, changes);
+  await logTaskAudit(task.id, num, user.email, "human", action, { state_before: Object.fromEntries(Object.entries(changes).map(([k, v]: any) => [k, v.from])), state_after: Object.fromEntries(Object.entries(changes).map(([k, v]: any) => [k, v.to])) });
 
   if (body.status === "completed") {
     const { data: taskLinks } = await sb.from("task_links").select("*").eq("task_id", task.id);
@@ -899,7 +884,7 @@ app.patch("/tasks/:number", async (c) => {
           await sb.from("milestones").insert({ title: task.title, date: new Date().toISOString().split("T")[0], category: "product", created_by: user.name });
         }
       } catch (e: any) {
-        await logTaskActivity(task.id, "system", "system", "link_effect_failed", { link_type: link.link_type, error: e.message });
+        await logTaskAudit(task.id, num, "system", "system", "link_effect_failed", { state_after: { link_type: link.link_type, error: e.message } });
       }
     }
 
@@ -918,7 +903,7 @@ app.patch("/tasks/:number", async (c) => {
           parent_task_id: task.parent_task_id || task.id,
         }).select("task_number, id").single();
         if (nextTask) {
-          await logTaskActivity(nextTask.id, "system", "system", "recurring_created", { from_task: task.task_number });
+          await logTaskAudit(nextTask.id, nextTask.task_number, "system", "system", "recurring_created", { state_after: { from_task: task.task_number }, channel: "system" });
         }
       } catch {}
     }
@@ -941,7 +926,7 @@ app.post("/tasks/:number/links", async (c) => {
   if (!body.link_type || !body.link_ref) return c.json({ error: "link_type and link_ref required" }, 400, corsHeaders);
 
   await sb.from("task_links").insert({ task_id: task.id, link_type: body.link_type, link_ref: body.link_ref });
-  await logTaskActivity(task.id, user.email, "human", "linked", { link_type: body.link_type, link_ref: body.link_ref });
+  await logTaskAudit(task.id, num, user.email, "human", "linked", { state_after: { link_type: body.link_type, link_ref: body.link_ref } });
 
   return c.json({ ok: true }, 200, corsHeaders);
 });
@@ -959,10 +944,10 @@ app.patch("/tasks/:number/triage", async (c) => {
 
   if (body.action === "accept") {
     await sb.from("tasks").update({ requires_triage: false, updated_at: new Date().toISOString() }).eq("id", task.id);
-    await logTaskActivity(task.id, user.email, "human", "triage_accepted", {});
+    await logTaskAudit(task.id, num, user.email, "human", "triage_accepted", {});
   } else if (body.action === "dismiss") {
     await sb.from("tasks").update({ status: "cancelled", archived_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", task.id);
-    await logTaskActivity(task.id, user.email, "human", "triage_dismissed", { reason: body.reason || "" });
+    await logTaskAudit(task.id, num, user.email, "human", "triage_dismissed", { state_after: { reason: body.reason || "" } });
   } else {
     return c.json({ error: "action must be accept or dismiss" }, 400, corsHeaders);
   }
@@ -986,11 +971,38 @@ app.delete("/tasks/:number", async (c) => {
   }
 
   await sb.from("tasks").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", task.id);
-  await logTaskActivity(task.id, user.email, "human", "cancelled", {});
+  await logTaskAudit(task.id, num, user.email, "human", "cancelled", { state_before: { status: "open" }, state_after: { status: "cancelled" } });
 
   return c.json({ ok: true }, 200, corsHeaders);
 });
 
+
+// ── GET /audit — query audit events ─────────────────────────────────
+app.get("/audit", async (c) => {
+  const entityType = c.req.query("entity_type");
+  const entityId = c.req.query("entity_id");
+  const actor = c.req.query("actor");
+  const actorAgentId = c.req.query("actor_agent_id");
+  const channel = c.req.query("channel");
+  const action = c.req.query("action");
+  const since = c.req.query("since");
+  const limit = parseInt(c.req.query("limit") || "30");
+
+  const sb = getSupabase();
+  let query = sb.from("audit_events").select("*").order("timestamp", { ascending: false }).limit(Math.min(limit, 100));
+
+  if (entityType) query = query.eq("entity_type", entityType);
+  if (entityId) query = query.eq("entity_id", entityId);
+  if (actor) query = query.eq("actor_email", actor);
+  if (actorAgentId) query = query.eq("actor_agent_id", actorAgentId);
+  if (channel) query = query.eq("channel", channel);
+  if (action) query = query.eq("action", action);
+  if (since) query = query.gte("timestamp", since);
+
+  const { data, error } = await query;
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+  return c.json({ events: data || [] }, 200, corsHeaders);
+});
 
 // ── Health ─────────────────────────────────────────────────────────────
 app.get("/", (c) => c.json({ status: "ok", service: "skills-api" }, 200, corsHeaders));
