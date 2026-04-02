@@ -377,6 +377,7 @@ export type Database = {
           priority: string
           recurring: Json | null
           requires_triage: boolean
+          search_vector: unknown
           source: string
           status: string
           tags: string[]
@@ -400,6 +401,7 @@ export type Database = {
           priority?: string
           recurring?: Json | null
           requires_triage?: boolean
+          search_vector?: unknown
           source?: string
           status?: string
           tags?: string[]
@@ -423,6 +425,7 @@ export type Database = {
           priority?: string
           recurring?: Json | null
           requires_triage?: boolean
+          search_vector?: unknown
           source?: string
           status?: string
           tags?: string[]
