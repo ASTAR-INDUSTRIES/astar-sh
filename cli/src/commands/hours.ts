@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import { AstarAPI } from "../lib/api";
 import { c, table } from "../lib/ui";
 import { getToken } from "../lib/auth";
+import { getConfig } from "../lib/config";
 
 async function requireAuth(): Promise<string> {
   try {
@@ -28,9 +29,26 @@ const statusColors: Record<string, string> = {
   failed: c.red,
 };
 
-async function pollForResponse(api: AstarAPI, id: string, timeoutMs: number = 120000) {
+async function checkCfaHealth(): Promise<{ online: boolean; pending: number }> {
+  try {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/inquiries/health`);
+    if (!res.ok) return { online: false, pending: 0 };
+    const data = await res.json();
+    const hasActivity = data.last_completed_at !== null;
+    const stale = data.oldest_pending_age_seconds > 300;
+    return {
+      online: hasActivity || !stale,
+      pending: data.pending_count,
+    };
+  } catch {
+    return { online: false, pending: 0 };
+  }
+}
+
+async function pollForResponse(api: AstarAPI, id: string, timeoutMs: number = 30000) {
   const start = Date.now();
-  const interval = 5000;
+  const interval = 3000;
 
   process.stdout.write(`  ${c.yellow}⏳${c.reset} Asking CFA...`);
 
@@ -52,7 +70,7 @@ async function pollForResponse(api: AstarAPI, id: string, timeoutMs: number = 12
   }
 
   process.stdout.write(`\r${" ".repeat(40)}\r`);
-  console.log(`  ${c.dim}CFA is still working. Check with:${c.reset} ${c.cyan}astar hours check${c.reset}`);
+  console.log(`  ${c.dim}CFA hasn't responded yet. Check later with:${c.reset} ${c.cyan}astar hours check${c.reset}`);
 }
 
 export function registerHoursCommands(program: Command) {
@@ -68,9 +86,20 @@ export function registerHoursCommands(program: Command) {
       const token = await requireAuth();
       const api = new AstarAPI(token);
 
+      const health = await checkCfaHealth();
+      if (!health.online) {
+        console.log(`  ${c.yellow}⚠${c.reset}  CFA appears to be offline${health.pending ? ` (${health.pending} inquiries pending)` : ""}`);
+        console.log(`  ${c.dim}Your question will be queued and answered when CFA comes back.${c.reset}`);
+        console.log("");
+      }
+
       try {
         const { id } = await api.submitInquiry(question, "question");
-        await pollForResponse(api, id);
+        if (health.online) {
+          await pollForResponse(api, id);
+        } else {
+          console.log(`  ${c.green}✓${c.reset} Queued. Check later with: ${c.cyan}astar hours check${c.reset}`);
+        }
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} ${e.message}`);
         process.exit(1);
@@ -87,6 +116,11 @@ export function registerHoursCommands(program: Command) {
       try {
         await api.submitInquiry(description, "log_hours");
         console.log(`${c.green}✓${c.reset} Sent to CFA. Will be logged shortly.`);
+
+        const health = await checkCfaHealth();
+        if (!health.online) {
+          console.log(`  ${c.yellow}⚠${c.reset}  ${c.dim}CFA appears offline — will process when back.${c.reset}`);
+        }
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} ${e.message}`);
         process.exit(1);
@@ -102,7 +136,10 @@ export function registerHoursCommands(program: Command) {
       const api = new AstarAPI(token);
 
       try {
-        const items = await api.listOwnInquiries(opts.status);
+        const [items, health] = await Promise.all([
+          api.listOwnInquiries(opts.status),
+          checkCfaHealth(),
+        ]);
 
         if (!items.length) {
           console.log(`${c.dim}No inquiries.${c.reset}`);
@@ -111,6 +148,12 @@ export function registerHoursCommands(program: Command) {
         }
 
         console.log("");
+
+        if (!health.online && health.pending > 0) {
+          console.log(`  ${c.yellow}⚠${c.reset}  CFA offline — ${health.pending} inquiry(s) queued`);
+          console.log("");
+        }
+
         table(
           ["#", "Type", "Inquiry", "Status", "Response", "Date"],
           items.map((inq, i) => {
@@ -140,9 +183,20 @@ export function registerHoursCommands(program: Command) {
       const api = new AstarAPI(token);
       const month = new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
+      const health = await checkCfaHealth();
+      if (!health.online) {
+        console.log(`  ${c.yellow}⚠${c.reset}  CFA appears to be offline`);
+        console.log(`  ${c.dim}Your question will be queued and answered when CFA comes back.${c.reset}`);
+        console.log("");
+      }
+
       try {
         const { id } = await api.submitInquiry(`Give me my full monthly hour summary for ${month}`, "question");
-        await pollForResponse(api, id);
+        if (health.online) {
+          await pollForResponse(api, id);
+        } else {
+          console.log(`  ${c.green}✓${c.reset} Queued. Check later with: ${c.cyan}astar hours check${c.reset}`);
+        }
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} ${e.message}`);
         process.exit(1);
