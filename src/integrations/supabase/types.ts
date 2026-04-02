@@ -14,6 +14,54 @@ export type Database = {
   }
   public: {
     Tables: {
+      audit_events: {
+        Row: {
+          action: string
+          actor_agent_id: string | null
+          actor_email: string | null
+          actor_name: string | null
+          actor_type: string
+          channel: string | null
+          context: Json | null
+          entity_id: string | null
+          entity_type: string
+          id: string
+          state_after: Json | null
+          state_before: Json | null
+          timestamp: string
+        }
+        Insert: {
+          action: string
+          actor_agent_id?: string | null
+          actor_email?: string | null
+          actor_name?: string | null
+          actor_type?: string
+          channel?: string | null
+          context?: Json | null
+          entity_id?: string | null
+          entity_type: string
+          id?: string
+          state_after?: Json | null
+          state_before?: Json | null
+          timestamp?: string
+        }
+        Update: {
+          action?: string
+          actor_agent_id?: string | null
+          actor_email?: string | null
+          actor_name?: string | null
+          actor_type?: string
+          channel?: string | null
+          context?: Json | null
+          entity_id?: string | null
+          entity_type?: string
+          id?: string
+          state_after?: Json | null
+          state_before?: Json | null
+          timestamp?: string
+        }
+        Relationships: []
+      }
       cli_events: {
         Row: {
           created_at: string
