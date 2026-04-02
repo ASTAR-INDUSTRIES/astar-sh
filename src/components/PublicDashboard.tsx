@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { sanityClient } from "@/lib/sanity";
-import { format, formatDistanceToNow, subDays, startOfDay } from "date-fns";
+import { format, subDays, startOfDay, startOfWeek, addDays } from "date-fns";
 import {
   FileText, MessageCircle,
-  BookOpen, Download, Zap, ExternalLink,
+  BookOpen, Download, ExternalLink,
 } from "lucide-react";
 
 const REACTION_EMOJIS = ["🔥", "👏", "🧠", "💡", "🎯"];
@@ -14,18 +14,6 @@ import ShippedCalendar from "@/components/ShippedCalendar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-
-const eventLabels: Record<string, string> = {
-  downloaded: "downloaded",
-  listed: "listed",
-  pushed: "pushed",
-  published: "published",
-  submitted: "submitted",
-  created: "created",
-  completed: "completed",
-  assigned: "assigned",
-  processed: "processed",
-};
 
 const ASTAR_VERSION = "0.0.7";
 
@@ -37,8 +25,8 @@ const regionColors: Record<string, string> = {
   Intl: "text-emerald-400 bg-emerald-400/10",
 };
 
-const HEATMAP_WEEKS = 26;
-const HEATMAP_DAYS = HEATMAP_WEEKS * 7;
+const HEATMAP_DAYS = 14;
+const DAY_LABELS = ["Ma", "Ti", "On", "To", "Fr", "Lø", "Sø"];
 
 const PublicDashboard = () => {
   const [now, setNow] = useState(new Date());
@@ -112,20 +100,20 @@ const PublicDashboard = () => {
     },
   });
 
-  // Fetch extended audit events for heatmap (last 26 weeks)
+  // Fetch audit events for 14-day heatmap
   const { data: heatmapEvents = [] } = useQuery({
-    queryKey: ["heatmap-events"],
+    queryKey: ["heatmap-events-14d"],
     queryFn: async () => {
       const since = subDays(new Date(), HEATMAP_DAYS).toISOString();
       const { data, error } = await (supabase as any)
         .from("audit_events")
-        .select("timestamp")
+        .select("timestamp, actor_email")
         .gte("timestamp", since)
         .order("timestamp", { ascending: false });
       if (error) throw error;
       return data;
     },
-    refetchInterval: 120000,
+    refetchInterval: 60000,
   });
 
   useEffect(() => {
@@ -191,39 +179,46 @@ const PublicDashboard = () => {
     return d.toDateString() === now.toDateString();
   });
 
-  // Heatmap data: count events per day for last 26 weeks
-  const heatmapData = useMemo(() => {
+  // 14-day heatmap: per-user rows, Mon-Sun columns for 2 weeks
+  const heatmapGrid = useMemo(() => {
     const today = startOfDay(new Date());
-    const counts: Record<string, number> = {};
+    // Find the Monday 2 weeks ago
+    const thisMonday = startOfWeek(today, { weekStartsOn: 1 });
+    const gridStart = subDays(thisMonday, 7); // Monday of previous week
+
+    // Group by user
+    const userDays: Record<string, Record<string, number>> = {};
     (heatmapEvents as any[]).forEach((ev: any) => {
+      const user = ev.actor_email?.split("@")[0] || "system";
       const day = format(new Date(ev.timestamp), "yyyy-MM-dd");
-      counts[day] = (counts[day] || 0) + 1;
+      if (!userDays[user]) userDays[user] = {};
+      userDays[user][day] = (userDays[user][day] || 0) + 1;
     });
 
-    // Build array of days, starting from (today - HEATMAP_DAYS + 1) to today
-    const days: { date: string; count: number }[] = [];
-    for (let i = HEATMAP_DAYS - 1; i >= 0; i--) {
-      const d = subDays(today, i);
-      const key = format(d, "yyyy-MM-dd");
-      days.push({ date: key, count: counts[key] || 0 });
+    // Build 14 day keys
+    const dayKeys: string[] = [];
+    for (let i = 0; i < 14; i++) {
+      dayKeys.push(format(addDays(gridStart, i), "yyyy-MM-dd"));
     }
-    return days;
+
+    const users = Object.keys(userDays).sort();
+    const maxCount = Math.max(1, ...Object.values(userDays).flatMap(d => Object.values(d)));
+
+    return { users, dayKeys, userDays, maxCount, gridStart };
   }, [heatmapEvents]);
 
-  const maxHeatmapCount = useMemo(() => Math.max(1, ...heatmapData.map(d => d.count)), [heatmapData]);
-
-  const getHeatmapColor = (count: number) => {
+  const getHeatColor = (count: number, max: number) => {
     if (count === 0) return "bg-accent/5";
-    const ratio = count / maxHeatmapCount;
-    if (ratio < 0.25) return "bg-accent/20";
-    if (ratio < 0.5) return "bg-accent/40";
-    if (ratio < 0.75) return "bg-accent/60";
+    const r = count / max;
+    if (r < 0.25) return "bg-accent/20";
+    if (r < 0.5) return "bg-accent/40";
+    if (r < 0.75) return "bg-accent/60";
     return "bg-accent/90";
   };
 
   const stats = [
     { label: "Skills", value: skills.length },
-    { label: "Downloads", value: totalDownloads },
+    { label: "DL", value: totalDownloads },
     { label: "Active", value: todayEvents.length },
     { label: "Hours", value: "—" },
   ];
@@ -232,141 +227,161 @@ const PublicDashboard = () => {
     <div className="flex flex-col h-full overflow-hidden bg-background">
 
       {/* Top bar: Clock | Stats x4 | Brand */}
-      <div className="flex-shrink-0 grid grid-cols-[minmax(160px,1fr)_repeat(4,minmax(80px,1fr))_minmax(120px,1fr)] gap-px border-b border-border bg-border">
+      <div className="flex-shrink-0 grid grid-cols-[minmax(140px,1fr)_repeat(4,minmax(70px,1fr))_minmax(110px,1fr)] gap-px border-b border-border bg-border">
         {/* Clock cell */}
-        <div className="bg-background px-4 py-3 flex flex-col justify-center">
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-mono font-bold text-foreground tabular-nums leading-none">
-              {format(now, "HH:mm:ss")}
-              <span className="text-lg text-muted-foreground/70">.{String(now.getMilliseconds()).padStart(3, "0").slice(0, 2)}</span>
+        <div className="bg-background px-3 py-2 flex flex-col justify-center">
+          <div className="flex items-baseline gap-1">
+            <span className="text-xl font-mono font-bold text-foreground tabular-nums leading-none">
+              {format(now, "HH:mm")}
+            </span>
+            <span className="text-sm font-mono text-muted-foreground/50 tabular-nums">
+              {format(now, "ss")}
             </span>
           </div>
-          <span className="text-[10px] font-mono text-muted-foreground/50 mt-0.5">
-            {format(now, "EEE MMM d")}
+          <span className="text-[10px] font-mono text-muted-foreground/40 mt-0.5">
+            {format(now, "EEE dd")}
           </span>
-          <span className="w-full text-[8px] font-mono text-muted-foreground/40 tracking-[0.25em] uppercase animate-clock-shimmer bg-clip-text mt-0.5" style={{ backgroundSize: '200% 100%' }}>
+          <span className="w-full text-[7px] font-mono text-muted-foreground/30 tracking-[0.2em] uppercase animate-clock-shimmer bg-clip-text mt-0.5" style={{ backgroundSize: '200% 100%' }}>
             every second counts
           </span>
         </div>
 
         {/* Stats cells */}
         {stats.map((stat) => (
-          <div key={stat.label} className="bg-background px-4 py-3 flex flex-col justify-center items-center">
-            <div className="text-2xl font-mono font-bold text-foreground leading-none tabular-nums">
+          <div key={stat.label} className="bg-background px-3 py-2 flex flex-col justify-center items-center">
+            <div className="text-xl font-mono font-bold text-foreground leading-none tabular-nums">
               {stat.value}
             </div>
-            <div className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground mt-1">
+            <div className="text-[8px] font-mono uppercase tracking-widest text-muted-foreground mt-0.5">
               {stat.label}
             </div>
           </div>
         ))}
 
         {/* Brand cell */}
-        <div className="bg-background px-4 py-3 flex flex-col justify-center items-end">
-          <span className="text-sm font-mono font-bold text-foreground tracking-wider flex items-center gap-1.5">
+        <div className="bg-background px-3 py-2 flex flex-col justify-center items-end">
+          <span className="text-xs font-mono font-bold text-foreground tracking-wider flex items-center gap-1">
             ASTAR <span className="text-accent">✦</span>
           </span>
-          <span className="text-[10px] font-mono text-muted-foreground/40 mt-0.5">
+          <span className="text-[9px] font-mono text-muted-foreground/30 mt-0.5">
             v{ASTAR_VERSION}
           </span>
         </div>
       </div>
 
-      {/* Heatmap row */}
-      <div className="flex-shrink-0 border-b border-border bg-background px-4 py-2">
-        <div className="flex gap-[2px] flex-wrap" style={{ display: 'grid', gridTemplateRows: 'repeat(7, 1fr)', gridAutoFlow: 'column', gridAutoColumns: '1fr', gap: '2px' }}>
-          {heatmapData.map((day) => (
-            <div
-              key={day.date}
-              className={`w-[10px] h-[10px] rounded-[2px] ${getHeatmapColor(day.count)}`}
-              title={`${day.date}: ${day.count} events`}
-            />
-          ))}
-        </div>
-        <p className="text-[9px] font-mono text-muted-foreground/30 text-center mt-1 tracking-wider uppercase">
-          Activity · {HEATMAP_WEEKS} weeks
-        </p>
-      </div>
+      {/* Main grid: left column (heatmap + skills + shipped) | right column (thinking + news) */}
+      <div className="flex-1 grid grid-cols-[1fr_1fr_1fr] gap-px bg-border overflow-hidden">
 
-      {/* Main 2x2 grid */}
-      <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-px bg-border overflow-hidden">
-
-        {/* Top-left: Skills */}
+        {/* Left column */}
         <div className="bg-background flex flex-col overflow-hidden">
-          <div className="flex-shrink-0 flex items-center justify-between px-6 py-3 border-b border-border">
-            <div className="flex items-center gap-3">
-              <BookOpen className="h-4 w-4 text-accent" />
-              <span className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Skills & Knowledge</span>
-            </div>
-            <span className="text-xs font-mono text-muted-foreground/40">{skills.length} published</span>
-          </div>
-          <ScrollArea className="flex-1">
-            <div className="divide-y divide-border">
-              {skills.map((skill: any, i: number) => {
-                const slug = skill.slug || skill.title?.toLowerCase().replace(/\s+/g, "-");
-                const count = downloadCounts[slug] || 0;
-                return (
-                  <div key={skill._id} className="px-6 py-2.5 flex items-start gap-4">
-                    <span className="text-sm font-mono text-muted-foreground/30 w-5 shrink-0 pt-0.5">{i + 1}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline gap-3 mb-0.5">
-                        <span className="font-mono text-sm font-medium text-foreground">{skill.title}</span>
-                        {skill.project && skill.project !== "general" && (
-                          <span className="text-[10px] font-mono text-accent/60 uppercase tracking-wider">{skill.project}</span>
-                        )}
-                      </div>
-                      {skill.tags?.length > 0 && (
-                        <div className="flex gap-1 mt-1 flex-wrap">
-                          {skill.tags.slice(0, 4).map((tag: string) => (
-                            <span key={tag} className="text-[9px] font-mono uppercase tracking-wider text-accent bg-accent/10 px-1 py-0.5 rounded">{tag}</span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="shrink-0 text-right">
-                      {count > 0 && (
-                        <div className="flex items-center gap-1 text-xs font-mono text-muted-foreground">
-                          <Download className="h-3 w-3" />{count}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-              {skills.length === 0 && (
-                <div className="px-6 py-6 text-center">
-                  <p className="text-muted-foreground font-mono text-sm">No skills published yet.</p>
+          {/* 14-day heatmap */}
+          <div className="flex-shrink-0 border-b border-border px-3 py-2">
+            <div className="flex items-start gap-1">
+              {/* Day labels */}
+              <div className="flex flex-col gap-[2px] mr-1 pt-[14px]">
+                {DAY_LABELS.map(d => (
+                  <div key={d} className="h-[10px] text-[7px] font-mono text-muted-foreground/30 leading-[10px]">{d}</div>
+                ))}
+              </div>
+              {/* Grid: 2 weeks as columns, 7 days as rows */}
+              <div className="flex-1">
+                <div className="flex gap-[3px] mb-1">
+                  <span className="text-[7px] font-mono text-muted-foreground/20 flex-1 text-center">forrige uke</span>
+                  <span className="text-[7px] font-mono text-muted-foreground/20 flex-1 text-center">denne uke</span>
                 </div>
-              )}
+                {heatmapGrid.users.length === 0 ? (
+                  <div className="grid grid-cols-[repeat(14,1fr)] gap-[2px]">
+                    {Array.from({ length: 14 }).map((_, i) => (
+                      <div key={i} className="aspect-square rounded-[2px] bg-accent/5" />
+                    ))}
+                  </div>
+                ) : (
+                  heatmapGrid.users.map(user => (
+                    <div key={user} className="flex items-center gap-1 mb-[2px]">
+                      <div className="grid grid-cols-[repeat(14,1fr)] gap-[2px] flex-1">
+                        {heatmapGrid.dayKeys.map(dayKey => {
+                          const count = heatmapGrid.userDays[user]?.[dayKey] || 0;
+                          return (
+                            <div
+                              key={dayKey}
+                              className={`aspect-square rounded-[2px] ${getHeatColor(count, heatmapGrid.maxCount)}`}
+                              title={`${user} · ${dayKey}: ${count}`}
+                            />
+                          );
+                        })}
+                      </div>
+                      <span className="text-[7px] font-mono text-muted-foreground/30 w-6 shrink-0 text-right">{user.slice(0, 4)}</span>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
-          </ScrollArea>
+            <p className="text-[7px] font-mono text-muted-foreground/20 text-center mt-1 tracking-wider uppercase">
+              Hours · siste 14d
+            </p>
+          </div>
+
+          {/* Skills */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="flex-shrink-0 flex items-center justify-between px-3 py-2 border-b border-border">
+              <div className="flex items-center gap-2">
+                <BookOpen className="h-3 w-3 text-accent" />
+                <span className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground">Skills</span>
+              </div>
+              <span className="text-[9px] font-mono text-muted-foreground/30">{skills.length}</span>
+            </div>
+            <ScrollArea className="flex-1">
+              <div className="divide-y divide-border">
+                {skills.map((skill: any, i: number) => {
+                  const slug = skill.slug || skill.title?.toLowerCase().replace(/\s+/g, "-");
+                  const count = downloadCounts[slug] || 0;
+                  return (
+                    <div key={skill._id} className="px-3 py-1.5 flex items-center gap-2">
+                      <span className="text-[9px] font-mono text-muted-foreground/20 w-4 shrink-0">{i + 1}</span>
+                      <span className="font-mono text-xs text-foreground truncate flex-1">{skill.title}</span>
+                      {count > 0 && (
+                        <span className="text-[9px] font-mono text-muted-foreground/40 flex items-center gap-0.5">
+                          <Download className="h-2.5 w-2.5" />{count}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </ScrollArea>
+          </div>
+
+          {/* Shipped Calendar */}
+          <div className="flex-shrink-0 border-t border-border">
+            <ShippedCalendar />
+          </div>
         </div>
 
-        {/* Top-right: Thinking */}
+        {/* Middle column: Thinking */}
         <div className="bg-background flex flex-col overflow-hidden">
-          <div className="flex-shrink-0 flex items-center gap-3 px-6 py-3 border-b border-border">
-            <MessageCircle className="h-4 w-4 text-accent" />
-            <span className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Thinking</span>
+          <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border">
+            <MessageCircle className="h-3 w-3 text-accent" />
+            <span className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground">Thinking</span>
           </div>
           <ScrollArea className="flex-1">
             <div className="divide-y divide-border">
               {tweets.length === 0 ? (
-                <p className="px-6 py-8 text-sm font-mono text-muted-foreground/40 text-center">—</p>
+                <p className="px-3 py-6 text-xs font-mono text-muted-foreground/30 text-center">—</p>
               ) : (
-                tweets.slice(0, 10).map((tweet) => {
+                tweets.slice(0, 15).map((tweet) => {
                   const counts = reactionCounts[tweet.id] || {};
                   return (
-                    <div key={tweet.id} className="px-6 py-3">
-                      <p className="text-sm text-foreground/90 leading-relaxed">{tweet.content}</p>
-                      <span className="text-[11px] font-mono text-muted-foreground/50 mt-1.5 block">
+                    <div key={tweet.id} className="px-3 py-2">
+                      <p className="text-xs text-foreground/90 leading-relaxed font-mono">{tweet.content}</p>
+                      <span className="text-[9px] font-mono text-muted-foreground/40 mt-1 block">
                         {tweet.author_name && `${tweet.author_name} · `}
                         {format(new Date(tweet.created_at), "MMM d · HH:mm")}
                       </span>
                       {Object.keys(counts).length > 0 && (
-                        <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                        <div className="flex gap-1 mt-1 flex-wrap">
                           {Object.entries(counts).map(([emoji, count]) => (
-                            <span key={emoji} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-mono border border-accent/30 bg-accent/10 text-foreground/80">
-                              <span>{emoji}</span><span>{count}</span>
+                            <span key={emoji} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-mono border border-accent/20 bg-accent/5 text-foreground/70">
+                              {emoji} {count}
                             </span>
                           ))}
                         </div>
@@ -379,34 +394,29 @@ const PublicDashboard = () => {
           </ScrollArea>
         </div>
 
-        {/* Bottom-left: Shipped Calendar */}
+        {/* Right column: News */}
         <div className="bg-background flex flex-col overflow-hidden">
-          <ShippedCalendar />
-        </div>
-
-        {/* Bottom-right: News */}
-        <div className="bg-background flex flex-col overflow-hidden">
-          <div className="flex-shrink-0 flex items-center gap-3 px-6 py-3 border-b border-border">
-            <FileText className="h-4 w-4 text-accent" />
-            <span className="text-xs font-mono uppercase tracking-widest text-muted-foreground">News</span>
+          <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border">
+            <FileText className="h-3 w-3 text-accent" />
+            <span className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground">News</span>
           </div>
           <ScrollArea className="flex-1">
             <div className="divide-y divide-border">
               {posts.length === 0 ? (
-                <p className="px-6 py-6 text-sm font-mono text-muted-foreground/40 text-center">—</p>
+                <p className="px-3 py-6 text-xs font-mono text-muted-foreground/30 text-center">—</p>
               ) : (
                 posts.map((post: any) => (
-                  <div key={post._id} className="px-6 py-3 cursor-pointer hover:bg-accent/5 transition-colors" onClick={() => setSelectedNewsId(post._id)}>
-                    <div className="flex items-start justify-between gap-3">
-                      <span className="font-mono text-sm font-medium text-foreground leading-snug">{post.title}</span>
+                  <div key={post._id} className="px-3 py-2 cursor-pointer hover:bg-accent/5 transition-colors" onClick={() => setSelectedNewsId(post._id)}>
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="font-mono text-xs font-medium text-foreground leading-snug">{post.title}</span>
                       {post.publishedAt && (
-                        <span className="text-[11px] font-mono text-muted-foreground/50 shrink-0 mt-0.5">
+                        <span className="text-[9px] font-mono text-muted-foreground/40 shrink-0 mt-0.5">
                           {format(new Date(post.publishedAt), "MMM d")}
                         </span>
                       )}
                     </div>
                     {post.excerpt && (
-                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-snug">{post.excerpt}</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2 leading-snug">{post.excerpt}</p>
                     )}
                   </div>
                 ))
