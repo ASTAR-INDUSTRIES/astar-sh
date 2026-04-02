@@ -207,15 +207,15 @@ export function registerTodoCommands(program: Command) {
   todo
     .command("list")
     .description("List tasks with filters")
-    .option("-s, --status <status>", "Filter: open, in_progress, completed, blocked, cancelled")
-    .option("-p, --priority <priority>", "Filter: low, medium, high, critical")
-    .option("-d, --due <due>", "Filter: today, overdue, week")
-    .option("-q, --search <text>", "Search title/description")
+    .option("--status <status>", "Filter: open, in_progress, completed, blocked, cancelled")
+    .option("--prio <priority>", "Filter: low, medium, high, critical")
+    .option("--due <due>", "Filter: today, overdue, week")
+    .option("--search <text>", "Search title/description")
     .action(async (opts) => {
       const token = await requireAuth();
       const api = new AstarAPI(token);
       try {
-        const tasks = await api.listTasks({ ...opts, assigned_to: "all" });
+        const tasks = await api.listTasks({ status: opts.status, priority: opts.prio, due: opts.due, search: opts.search, assigned_to: "all" });
         renderTaskTable(tasks);
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} ${e.message}`);
