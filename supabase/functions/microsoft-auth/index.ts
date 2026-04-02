@@ -1,14 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
-async function logCliEvent(supabaseAdmin: any, eventType: string, opts?: { userEmail?: string; userName?: string; metadata?: Record<string, any> }) {
+async function logAudit(supabaseAdmin: any, opts: { actor_email?: string; actor_name?: string; entity_type: string; action: string; channel?: string; state_after?: any; context?: any }) {
   try {
-    await supabaseAdmin.from("cli_events").insert({
-      event_type: eventType,
-      user_email: opts?.userEmail,
-      user_name: opts?.userName,
-      metadata: opts?.metadata ?? {},
-    });
-  } catch { /* non-blocking */ }
+    await supabaseAdmin.from("audit_events").insert(opts);
+  } catch {}
 }
 
 const corsHeaders = {
@@ -190,10 +185,13 @@ Deno.serve(async (req) => {
       }
 
       // Log the login event
-      await logCliEvent(supabaseAdmin, "user.login", {
-        userEmail: email,
-        userName: name,
-        metadata: { method: "microsoft_sso", isNewUser: !existingUser },
+      await logAudit(supabaseAdmin, {
+        actor_email: email,
+        actor_name: name,
+        entity_type: "user",
+        action: "login",
+        channel: "dashboard",
+        state_after: { method: "microsoft_sso", isNewUser: !existingUser },
       });
 
       // Redirect to app with session tokens in the URL hash (Supabase client picks these up)

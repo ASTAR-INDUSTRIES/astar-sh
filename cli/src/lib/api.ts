@@ -94,6 +94,22 @@ export interface TaskSuggestion {
   reasons: string[];
 }
 
+export interface AuditEvent {
+  id: string;
+  timestamp: string;
+  actor_email?: string;
+  actor_name?: string;
+  actor_type: string;
+  actor_agent_id?: string;
+  entity_type: string;
+  entity_id?: string;
+  action: string;
+  state_before?: any;
+  state_after?: any;
+  channel?: string;
+  context?: any;
+}
+
 export interface TaskActivity {
   id: string;
   actor: string;
@@ -358,6 +374,21 @@ export class AstarAPI {
   async suggestNextTask(): Promise<TaskSuggestion[]> {
     const data = await this.fetch<{ suggestions: TaskSuggestion[] }>("/tasks/suggest");
     return data.suggestions;
+  }
+
+  async queryAudit(filters?: { entity_type?: string; entity_id?: string; actor?: string; actor_agent_id?: string; channel?: string; action?: string; since?: string; limit?: number }): Promise<AuditEvent[]> {
+    const params = new URLSearchParams();
+    if (filters?.entity_type) params.set("entity_type", filters.entity_type);
+    if (filters?.entity_id) params.set("entity_id", filters.entity_id);
+    if (filters?.actor) params.set("actor", filters.actor);
+    if (filters?.actor_agent_id) params.set("actor_agent_id", filters.actor_agent_id);
+    if (filters?.channel) params.set("channel", filters.channel);
+    if (filters?.action) params.set("action", filters.action);
+    if (filters?.since) params.set("since", filters.since);
+    if (filters?.limit) params.set("limit", String(filters.limit));
+    const qs = params.toString();
+    const data = await this.fetch<{ events: AuditEvent[] }>(`/audit${qs ? `?${qs}` : ""}`);
+    return data.events;
   }
 
   async linkTask(num: number, linkType: string, linkRef: string): Promise<{ ok: boolean }> {

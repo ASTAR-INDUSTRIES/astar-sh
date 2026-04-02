@@ -7,13 +7,14 @@ import { registerFeedbackCommands } from "./commands/feedback";
 import { registerShippedCommands } from "./commands/shipped";
 import { registerHoursCommands } from "./commands/hours";
 import { registerTodoCommands } from "./commands/todo";
+import { registerAuditCommands } from "./commands/audit";
 import { registerUpdateCommand, checkForUpdates } from "./commands/update";
 import { getAuthStatus } from "./lib/auth";
 import { AstarAPI } from "./lib/api";
 import { c } from "./lib/ui";
 import { resolve } from "path";
 
-export const VERSION = "0.0.5";
+export const VERSION = "0.0.7";
 
 async function showDashboard() {
   const status = await getAuthStatus();
@@ -67,7 +68,7 @@ async function showDashboard() {
   console.log(`  ${c.dim}Tasks:${c.reset}     ${taskCount}`);
   console.log(`  ${c.dim}Feedback:${c.reset}  ${feedbackCount}`);
   console.log("");
-  console.log(`  ${c.dim}skill · news · todo · feedback · shipped · hours · update${c.reset}`);
+  console.log(`  ${c.dim}skill · news · todo · feedback · shipped · hours · audit · update${c.reset}`);
   console.log("");
 }
 
@@ -88,6 +89,7 @@ registerFeedbackCommands(program);
 registerShippedCommands(program);
 registerHoursCommands(program);
 registerTodoCommands(program);
+registerAuditCommands(program);
 registerUpdateCommand(program);
 
 await checkForUpdates();

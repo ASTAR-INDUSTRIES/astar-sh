@@ -16,9 +16,15 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 const eventLabels: Record<string, string> = {
-  "skill.download": "downloaded",
-  "skill.list": "listed skills",
-  "user.login": "signed in",
+  downloaded: "downloaded",
+  listed: "listed",
+  pushed: "pushed",
+  published: "published",
+  submitted: "submitted",
+  created: "created",
+  completed: "completed",
+  assigned: "assigned",
+  processed: "processed",
 };
 
 const ASTAR_VERSION = "0.0.1";
@@ -102,12 +108,12 @@ const PublicDashboard = () => {
   });
 
   const { data: cliEvents = [], refetch: refetchEvents } = useQuery({
-    queryKey: ["cli-events"],
+    queryKey: ["audit-events"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("cli_events")
+        .from("audit_events")
         .select("*")
-        .order("created_at", { ascending: false })
+        .order("timestamp", { ascending: false })
         .limit(50);
       if (error) throw error;
       return data;
@@ -116,10 +122,10 @@ const PublicDashboard = () => {
 
   useEffect(() => {
     const channel = supabase
-      .channel("cli-events-realtime")
+      .channel("audit-events-realtime")
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "cli_events" },
+        { event: "INSERT", schema: "public", table: "audit_events" },
         () => refetchEvents()
       )
       .subscribe();
@@ -165,15 +171,15 @@ const PublicDashboard = () => {
   }, []);
 
   const downloadCounts = cliEvents.reduce<Record<string, number>>((acc, ev: any) => {
-    if (ev.event_type === "skill.download" && ev.skill_slug) {
-      acc[ev.skill_slug] = (acc[ev.skill_slug] || 0) + 1;
+    if (ev.entity_type === "skill" && ev.action === "downloaded" && ev.entity_id) {
+      acc[ev.entity_id] = (acc[ev.entity_id] || 0) + 1;
     }
     return acc;
   }, {});
 
   const totalDownloads = Object.values(downloadCounts).reduce((a, b) => a + b, 0);
   const todayEvents = cliEvents.filter((ev: any) => {
-    const d = new Date(ev.created_at);
+    const d = new Date(ev.timestamp || ev.created_at);
     return d.toDateString() === now.toDateString();
   });
 
@@ -342,28 +348,24 @@ const PublicDashboard = () => {
                   <p className="px-6 py-8 text-sm font-mono text-muted-foreground/40 text-center">No activity yet</p>
                 ) : (
                   cliEvents.map((ev: any) => {
-                    const label = eventLabels[ev.event_type] || ev.event_type;
+                    const label = eventLabels[ev.action] || ev.action;
+                    const actor = ev.actor_name || ev.actor_email?.split("@")[0] || ev.actor_type || "system";
+                    const entity = ev.state_after?.title || ev.entity_id || "";
+                    const channelBadge = ev.channel === "mcp" ? "mcp" : ev.channel === "cli" ? "cli" : "";
                     return (
                       <div key={ev.id} className="px-6 py-3 flex items-start gap-3">
                         <Activity className="h-3.5 w-3.5 text-accent/60 mt-0.5 shrink-0" />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-mono text-foreground/80 leading-tight">
-                            {ev.event_type === "user.login" ? (
-                              <>
-                                <span className="text-accent">{ev.user_name || ev.user_email?.split("@")[0] || "user"}</span>
-                                {" "}<span className="text-muted-foreground">{label}</span>
-                              </>
-                            ) : ev.skill_slug ? (
-                              <>
-                                <span className="text-accent">{ev.skill_title || ev.skill_slug}</span>
-                                {" "}<span className="text-muted-foreground">{label}</span>
-                              </>
-                            ) : (
-                              <span className="text-muted-foreground">{label}</span>
+                            <span className="text-accent">{entity || actor}</span>
+                            {" "}<span className="text-muted-foreground">{label}</span>
+                            {entity ? <span className="text-muted-foreground/50">{" "}by {actor}</span> : null}
+                            {channelBadge && (
+                              <span className="ml-1.5 text-[9px] font-mono uppercase tracking-wider text-muted-foreground/30 bg-muted/50 px-1 py-0.5 rounded">{channelBadge}</span>
                             )}
                           </p>
                           <span className="text-[11px] font-mono text-muted-foreground/40">
-                            {formatDistanceToNow(new Date(ev.created_at), { addSuffix: true })}
+                            {formatDistanceToNow(new Date(ev.timestamp || ev.created_at), { addSuffix: true })}
                           </span>
                         </div>
                       </div>

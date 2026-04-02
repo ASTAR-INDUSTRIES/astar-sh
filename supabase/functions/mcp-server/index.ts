@@ -781,6 +781,22 @@ const TOOLS = [
       properties: {},
     },
   },
+  {
+    name: "query_audit",
+    description: "Query the audit trail — who did what, when, how, and why. Use to trace actions, investigate changes, or understand event chains.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entity_type: { type: "string", description: "Filter: task, skill, news, feedback, inquiry, milestone" },
+        entity_id: { type: "string", description: "Filter by entity ID (task number, slug, etc.)" },
+        actor_email: { type: "string", description: "Filter by actor email" },
+        actor_agent_id: { type: "string", description: "Filter by agent ID (e.g. 'cfa')" },
+        channel: { type: "string", enum: ["cli", "mcp", "api", "dashboard", "system"], description: "Filter by channel" },
+        action: { type: "string", description: "Filter by action (created, completed, etc.)" },
+        limit: { type: "number", description: "Max results (default 20)" },
+      },
+    },
+  },
 ];
 
 // ── News Helper: resolve slug to ID ──────────────────────────────────
@@ -1219,7 +1235,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
           await sb.from("task_links").insert({ task_id: data.id, link_type: link.type, link_ref: link.ref });
         }
       }
-      await sb.from("task_activity").insert({ task_id: data.id, actor: user.email, actor_type: "human", action: "created", details: { title: args.title } });
+      await sb.from("audit_events").insert({ actor_email: user.email, actor_type: "human", entity_type: "task", entity_id: String(data.task_number), action: "created", channel: "mcp", state_after: { title: args.title }, context: { task_uuid: data.id } });
       const parts = [args.assigned_to ? ` → ${args.assigned_to}` : "", parentId ? ` (subtask of #${args.parent_task_number})` : ""];
       return [{ type: "text", text: `✓ Task #${data.task_number} created: "${args.title}"${parts.join("")}` }];
     }
@@ -1236,7 +1252,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       if (args.status === "completed") { patch.completed_by = user.email; patch.completed_at = new Date().toISOString(); }
       const { error } = await sb.from("tasks").update(patch).eq("id", task.id);
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
-      await sb.from("task_activity").insert({ task_id: task.id, actor: user.email, actor_type: "human", action: args.status === "completed" ? "completed" : "updated", details: changes });
+      await sb.from("audit_events").insert({ actor_email: user.email, actor_type: "human", entity_type: "task", entity_id: String(args.task_number), action: args.status === "completed" ? "completed" : "updated", channel: "mcp", state_after: changes, context: { task_uuid: task.id } });
       return [{ type: "text", text: `✓ Task #${args.task_number} updated.` }];
     }
 
@@ -1247,7 +1263,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       if (task.status === "completed") return [{ type: "text", text: `Task #${args.task_number} is already completed.` }];
       const { error } = await sb.from("tasks").update({ status: "completed", completed_by: user.email, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", task.id);
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
-      await sb.from("task_activity").insert({ task_id: task.id, actor: user.email, actor_type: "human", action: "completed", details: {} });
+      await sb.from("audit_events").insert({ actor_email: user.email, actor_type: "human", entity_type: "task", entity_id: String(args.task_number), action: "completed", channel: "mcp", context: { task_uuid: task.id } });
       return [{ type: "text", text: `✓ Task #${args.task_number} completed: "${task.title}"` }];
     }
 
@@ -1270,7 +1286,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const sb = adminClient();
       const { data: task, error: fetchErr } = await sb.from("tasks").select("*").eq("task_number", args.task_number).single();
       if (fetchErr || !task) return [{ type: "text", text: "Error: Task not found." }];
-      const { data: activity } = await sb.from("task_activity").select("*").eq("task_id", task.id).order("created_at", { ascending: false }).limit(10);
+      const { data: activity } = await sb.from("audit_events").select("*").eq("entity_type", "task").eq("entity_id", String(task.task_number)).order("timestamp", { ascending: false }).limit(10);
       const { data: subtasks } = await sb.from("tasks").select("task_number, title, status").eq("parent_task_id", task.id).order("task_number");
       const { data: links } = await sb.from("task_links").select("*").eq("task_id", task.id);
       const actLog = (activity || []).map((a: any) => `  ${a.created_at.slice(0, 16)} ${a.actor.split("@")[0]} ${a.action}`).join("\n");
@@ -1290,7 +1306,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const sb = adminClient();
       const { data: task, error: fetchErr } = await sb.from("tasks").select("id").eq("task_number", args.task_number).single();
       if (fetchErr || !task) return [{ type: "text", text: "Error: Task not found." }];
-      await sb.from("task_activity").insert({ task_id: task.id, actor: user.email, actor_type: "human", action: "commented", details: { comment: args.comment } });
+      await sb.from("audit_events").insert({ actor_email: user.email, actor_type: "human", entity_type: "task", entity_id: String(args.task_number), action: "commented", channel: "mcp", state_after: { comment: args.comment }, context: { task_uuid: task.id } });
       return [{ type: "text", text: `✓ Comment added to task #${args.task_number}.` }];
     }
 
@@ -1299,7 +1315,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const { data: task } = await sb.from("tasks").select("id").eq("task_number", args.task_number).single();
       if (!task) return [{ type: "text", text: "Error: Task not found." }];
       await sb.from("task_links").insert({ task_id: task.id, link_type: args.link_type, link_ref: args.link_ref });
-      await sb.from("task_activity").insert({ task_id: task.id, actor: user.email, actor_type: "human", action: "linked", details: { link_type: args.link_type, link_ref: args.link_ref } });
+      await sb.from("audit_events").insert({ actor_email: user.email, actor_type: "human", entity_type: "task", entity_id: String(args.task_number), action: "linked", channel: "mcp", state_after: { link_type: args.link_type, link_ref: args.link_ref }, context: { task_uuid: task.id } });
       return [{ type: "text", text: `✓ Linked ${args.link_type} "${args.link_ref}" to task #${args.task_number}.` }];
     }
 
@@ -1317,7 +1333,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const { data: task } = await sb.from("tasks").select("id").eq("task_number", args.task_number).single();
       if (!task) return [{ type: "text", text: "Error: Task not found." }];
       await sb.from("tasks").update({ requires_triage: false, updated_at: new Date().toISOString() }).eq("id", task.id);
-      await sb.from("task_activity").insert({ task_id: task.id, actor: user.email, actor_type: "human", action: "triage_accepted", details: {} });
+      await sb.from("audit_events").insert({ actor_email: user.email, actor_type: "human", entity_type: "task", entity_id: String(args.task_number), action: "triage_accepted", channel: "mcp", context: { task_uuid: task.id } });
       return [{ type: "text", text: `✓ Task #${args.task_number} accepted into main list.` }];
     }
 
@@ -1326,7 +1342,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const { data: task } = await sb.from("tasks").select("id").eq("task_number", args.task_number).single();
       if (!task) return [{ type: "text", text: "Error: Task not found." }];
       await sb.from("tasks").update({ status: "cancelled", archived_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", task.id);
-      await sb.from("task_activity").insert({ task_id: task.id, actor: user.email, actor_type: "human", action: "triage_dismissed", details: { reason: args.reason || "" } });
+      await sb.from("audit_events").insert({ actor_email: user.email, actor_type: "human", entity_type: "task", entity_id: String(args.task_number), action: "triage_dismissed", channel: "mcp", state_after: { reason: args.reason || "" }, context: { task_uuid: task.id } });
       return [{ type: "text", text: `✓ Task #${args.task_number} dismissed.` }];
     }
 
@@ -1366,6 +1382,22 @@ async function handleTool(name: string, args: any, user: { email: string; userId
 
       const out = scored.map((s: any, i: number) => `${i + 1}. #${s.task.task_number} ${s.task.title}\n   ${s.reasons.join(", ")} (score: ${s.score})`).join("\n\n");
       return [{ type: "text", text: `Suggested tasks:\n\n${out}` }];
+    }
+
+    case "query_audit": {
+      const sb = adminClient();
+      let query = sb.from("audit_events").select("*").order("timestamp", { ascending: false }).limit(args.limit || 20);
+      if (args.entity_type) query = query.eq("entity_type", args.entity_type);
+      if (args.entity_id) query = query.eq("entity_id", args.entity_id);
+      if (args.actor_email) query = query.eq("actor_email", args.actor_email);
+      if (args.actor_agent_id) query = query.eq("actor_agent_id", args.actor_agent_id);
+      if (args.channel) query = query.eq("channel", args.channel);
+      if (args.action) query = query.eq("action", args.action);
+      const { data, error } = await query;
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      if (!data?.length) return [{ type: "text", text: "No audit events found." }];
+      const out = data.map((e: any) => `${e.timestamp.slice(0, 16)} [${e.channel || "?"}] ${e.actor_email?.split("@")[0] || e.actor_type} → ${e.entity_type}${e.entity_id ? " #" + e.entity_id : ""} ${e.action}`).join("\n");
+      return [{ type: "text", text: out }];
     }
 
     default:
