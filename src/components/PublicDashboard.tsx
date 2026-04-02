@@ -237,6 +237,9 @@ const PublicDashboard = () => {
             <span className="text-sm font-mono text-muted-foreground/50 tabular-nums">
               {format(now, "ss")}
             </span>
+            <span className="text-[9px] font-mono text-muted-foreground/30 tabular-nums">
+              {String(now.getMilliseconds()).padStart(3, "0").slice(0, 2)}
+            </span>
           </div>
           <span className="text-[10px] font-mono text-muted-foreground/40 mt-0.5">
             {format(now, "EEE dd")}
