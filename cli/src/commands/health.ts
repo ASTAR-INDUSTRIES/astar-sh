@@ -85,7 +85,7 @@ async function checkCfa(): Promise<{ online: boolean; pending: number }> {
 
 async function runHealthChecks(extended: boolean): Promise<HealthResult> {
   const local = getLocalHash();
-  const remote = extended ? getRemoteHash() : null;
+  const remote = getRemoteHash();
   const behind = remote !== null && local !== null && remote !== local;
 
   let cache = await getAuthCache();
