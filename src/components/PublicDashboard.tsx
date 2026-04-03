@@ -36,13 +36,14 @@ const NewsAutoScroll = ({ posts, onSelect }: { posts: any[]; onSelect: (id: stri
     if (posts.length === 0) return;
     const el = scrollRef.current;
     if (!el) return;
+    // Start at bottom so newest (top) scrolls into view
+    el.scrollTop = el.scrollHeight;
     const interval = setInterval(() => {
       if (hovered.current) return;
-      const { scrollTop, scrollHeight, clientHeight } = el;
-      if (scrollTop + clientHeight >= scrollHeight - 4) {
-        el.scrollTo({ top: 0, behavior: "smooth" });
+      if (el.scrollTop <= 4) {
+        el.scrollTop = el.scrollHeight;
       } else {
-        el.scrollBy({ top: 60, behavior: "smooth" });
+        el.scrollBy({ top: -60, behavior: "smooth" });
       }
     }, 4000);
     return () => clearInterval(interval);
