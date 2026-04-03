@@ -2,6 +2,7 @@ import { homedir } from "os";
 import { join } from "path";
 import { createInterface } from "readline";
 import { c } from "./ui";
+import { hashContent } from "./manifest";
 
 const GLOBAL_SKILLS_DIR = join(homedir(), ".claude", "skills");
 const SKILL_DIR = join(GLOBAL_SKILLS_DIR, "astar-platform");
@@ -124,6 +125,7 @@ export async function installBaseSkill(): Promise<void> {
     title: "Astar Platform",
     installedAt: new Date().toISOString(),
     remoteUpdatedAt: new Date().toISOString(),
+    content_hash: hashContent(ASTAR_PLATFORM_SKILL),
   }, null, 2));
 }
 

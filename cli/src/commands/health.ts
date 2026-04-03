@@ -5,7 +5,7 @@ import { c } from "../lib/ui";
 import { VERSION } from "../index";
 import { getAuthCache } from "../lib/config";
 import { isBaseSkillInstalled, installBaseSkill, getGlobalSkillsDir, ASTAR_PLATFORM_SKILL } from "../lib/base-skill";
-import { readManifest, hashContent } from "../lib/manifest";
+import { readManifest, writeManifest, hashContent } from "../lib/manifest";
 import { getLocalHash, getRemoteHash } from "./update";
 import { getConfig } from "../lib/config";
 
@@ -41,7 +41,11 @@ async function checkSkillIntegrity(skillDir: string, name: string): Promise<Skil
   const content = await skillFile.text();
 
   if (!manifest) return { name, status: "ok", integrity: "no manifest" };
-  if (!manifest.content_hash) return { name, status: "ok", integrity: "unverified" };
+  if (!manifest.content_hash) {
+    manifest.content_hash = hashContent(content);
+    await writeManifest(skillDir, manifest);
+    return { name, status: "ok", integrity: "ok (hash stamped)" };
+  }
 
   const currentHash = hashContent(content);
   if (currentHash !== manifest.content_hash) return { name, status: "corrupted", integrity: `hash mismatch (expected ${manifest.content_hash}, got ${currentHash})` };
@@ -127,18 +131,26 @@ async function runHealthChecks(extended: boolean): Promise<HealthResult> {
     } catch {}
   }
 
+  const canAutoRefresh = authExpired && cache?.homeAccountId;
+  const baseOk = baseInstalled && !baseIntegrity.includes("mismatch");
+
   let overall: "healthy" | "warning" | "critical" = "healthy";
   if (!baseInstalled || (!authValid && !authExpired)) overall = "critical";
-  else if (authExpired || behind || baseIntegrity === "corrupted") overall = "critical";
+  else if (baseIntegrity.includes("mismatch")) overall = "critical";
+  else if (authExpired && !canAutoRefresh) overall = "critical";
+  else if (authExpired && canAutoRefresh) overall = "warning";
+  else if (behind) overall = "warning";
   else if (globalSkills.some((s) => s.status === "corrupted") || (extended && !api.reachable)) overall = "warning";
   else if (extended && !cfa.online && cfa.pending > 0) overall = "warning";
+
+  const baseStatus = !baseInstalled ? "missing" : baseIntegrity.includes("mismatch") ? "corrupted" : "ok";
 
   return {
     overall,
     checks: {
       cli: { status: behind ? "outdated" : "ok", current: local || VERSION, latest: remote, behind },
-      auth: { status: authValid ? "ok" : authExpired ? "expired" : "missing", email: cache?.account?.username || null, valid: authValid, expired: authExpired },
-      base_skill: { status: baseInstalled ? (baseIntegrity === "ok" || baseIntegrity === "unverified" ? "ok" : "corrupted") : "missing", installed: baseInstalled, integrity: baseIntegrity },
+      auth: { status: authValid ? "ok" : authExpired ? (canAutoRefresh ? "refresh" : "expired") : "missing", email: cache?.account?.username || null, valid: authValid, expired: authExpired },
+      base_skill: { status: baseStatus, installed: baseInstalled, integrity: baseIntegrity.includes("mismatch") ? baseIntegrity : "ok" },
       global_skills: globalSkills,
       project_skills: projectSkills,
       api: { status: api.reachable ? "ok" : "unreachable", reachable: api.reachable, latency_ms: api.latency_ms },
@@ -163,8 +175,12 @@ function renderHealth(result: HealthResult, extended: boolean) {
 
   console.log(`  ${c.bold}Core${c.reset}`);
   console.log(`  ${icon(ch.cli.status)} CLI        ${c.dim}v${ch.cli.current}${c.reset}${ch.cli.behind ? ` ${c.yellow}→ ${ch.cli.latest} available${c.reset}` : ` ${c.dim}(latest)${c.reset}`}`);
-  console.log(`  ${icon(ch.auth.status)} Auth       ${ch.auth.email ? `${ch.auth.email}` : `${c.dim}not signed in${c.reset}`}${ch.auth.expired ? ` ${c.yellow}(expired — may auto-refresh)${c.reset}` : ch.auth.valid ? ` ${c.dim}(valid)${c.reset}` : ""}`);
-  console.log(`  ${icon(ch.base_skill.status)} Base skill ${ch.base_skill.installed ? `astar-platform ${c.dim}(${ch.base_skill.integrity})${c.reset}` : `${c.red}not installed${c.reset}`}`);
+  const authMsg = ch.auth.status === "ok" ? `${c.dim}(valid)${c.reset}`
+    : ch.auth.status === "refresh" ? `${c.yellow}(expired — will auto-refresh)${c.reset}`
+    : ch.auth.status === "expired" ? `${c.red}(expired — run astar login)${c.reset}`
+    : "";
+  console.log(`  ${icon(ch.auth.status === "refresh" ? "warning" : ch.auth.status)} Auth       ${ch.auth.email || `${c.dim}not signed in${c.reset}`} ${authMsg}`);
+  console.log(`  ${icon(ch.base_skill.status)} Base skill ${ch.base_skill.installed ? `astar-platform ${c.dim}(${ch.base_skill.integrity})${c.reset}` : `${c.red}not installed — run astar login or astar health --fix${c.reset}`}`);
 
   if (extended) {
     console.log("");
