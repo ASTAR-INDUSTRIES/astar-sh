@@ -72,7 +72,7 @@ const NewsAutoScroll = ({ posts, onSelect }: { posts: any[]; onSelect: (id: stri
                   <span className="font-mono text-sm font-medium text-foreground leading-snug">{post.title}</span>
                   {post.publishedAt && (
                     <span className="text-[10px] font-mono text-muted-foreground/40 shrink-0 mt-0.5">
-                      {format(new Date(post.publishedAt), "MMM d")}
+                      {format(new Date(post.publishedAt), "MMM d HH:mm")}
                     </span>
                   )}
                 </div>
