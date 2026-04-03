@@ -1126,6 +1126,100 @@ app.get("/status", async (c) => {
   }, 200, corsHeaders);
 });
 
+// ── POST /agents — register agent ────────────────────────────────────
+app.post("/agents", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const body = await c.req.json();
+  if (!body.slug || !body.name) return c.json({ error: "slug and name required" }, 400, corsHeaders);
+
+  const sb = getSupabase();
+  const { error } = await sb.from("agents").insert({
+    slug: body.slug,
+    name: body.name,
+    email: body.email || null,
+    role: body.role || null,
+    owner: body.owner || user.email,
+    skill_slug: body.skill_slug || null,
+    scopes: body.scopes || [],
+    machine: body.machine || null,
+    config: body.config || {},
+  });
+
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+  await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "agent", entity_id: body.slug, action: "registered", channel: "api", state_after: { name: body.name, scopes: body.scopes } });
+
+  return c.json({ ok: true, slug: body.slug }, 200, corsHeaders);
+});
+
+// ── GET /agents — list all agents ───────────────────────────────────
+app.get("/agents", async (c) => {
+  const sb = getSupabase();
+  const { data, error } = await sb.from("agents").select("*").order("created_at", { ascending: false });
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+  return c.json({ agents: data || [] }, 200, corsHeaders);
+});
+
+// ── GET /agents/:slug — single agent + activity ─────────────────────
+app.get("/agents/:slug", async (c) => {
+  const slug = c.req.param("slug");
+  const sb = getSupabase();
+
+  const { data: agent, error } = await sb.from("agents").select("*").eq("slug", slug).single();
+  if (error || !agent) return c.json({ error: "Agent not found" }, 404, corsHeaders);
+
+  const { data: activity } = await sb.from("audit_events").select("*").eq("actor_agent_id", slug).order("timestamp", { ascending: false }).limit(10);
+
+  return c.json({ agent, activity: activity || [] }, 200, corsHeaders);
+});
+
+// ── PATCH /agents/:slug — update agent ──────────────────────────────
+app.patch("/agents/:slug", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const slug = c.req.param("slug");
+  const body = await c.req.json();
+  const sb = getSupabase();
+
+  const patch: any = {};
+  for (const field of ["status", "scopes", "config", "machine", "skill_slug", "email", "role"]) {
+    if (body[field] !== undefined) patch[field] = body[field];
+  }
+
+  if (Object.keys(patch).length === 0) return c.json({ error: "Nothing to update" }, 400, corsHeaders);
+
+  const { error } = await sb.from("agents").update(patch).eq("slug", slug);
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+  const action = body.status ? "status_changed" : "updated";
+  await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "agent", entity_id: slug, action, channel: "api", state_after: patch });
+
+  return c.json({ ok: true }, 200, corsHeaders);
+});
+
+// ── POST /agents/:slug/heartbeat — agent liveness ───────────────────
+app.post("/agents/:slug/heartbeat", async (c) => {
+  const slug = c.req.param("slug");
+  const sb = getSupabase();
+
+  const { data: agent, error: fetchErr } = await sb.from("agents").select("status, scopes, last_seen").eq("slug", slug).single();
+  if (fetchErr || !agent) return c.json({ error: "Agent not found" }, 404, corsHeaders);
+
+  const now = new Date().toISOString();
+  await sb.from("agents").update({ last_seen: now }).eq("slug", slug);
+
+  const lastSeen = agent.last_seen ? new Date(agent.last_seen) : null;
+  const gap = lastSeen ? (Date.now() - lastSeen.getTime()) / 1000 : Infinity;
+  if (gap > 300) {
+    await logAudit({ actor_agent_id: slug, actor_type: "agent", entity_type: "agent", entity_id: slug, action: "heartbeat", channel: "system" });
+  }
+
+  return c.json({ status: agent.status, scopes: agent.scopes }, 200, corsHeaders);
+});
+
 // ── Health ─────────────────────────────────────────────────────────────
 app.get("/", (c) => c.json({ status: "ok", service: "skills-api" }, 200, corsHeaders));
 

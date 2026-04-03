@@ -823,6 +823,43 @@ const TOOLS = [
       },
     },
   },
+  // ── Agent Tools ──────────────────────────────────────────────────────
+  {
+    name: "list_agents",
+    description: "List all registered agents with status and last seen",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: { type: "string", enum: ["active", "paused", "retired"] },
+      },
+    },
+  },
+  {
+    name: "get_agent",
+    description: "Get detailed info about a specific agent",
+    inputSchema: {
+      type: "object",
+      properties: { slug: { type: "string", description: "Agent slug (e.g. cfa, clo)" } },
+      required: ["slug"],
+    },
+  },
+  {
+    name: "register_agent",
+    description: "Register a new agent in the system",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: { type: "string", description: "Unique slug (e.g. cfa, clo, marketing)" },
+        name: { type: "string", description: "Display name" },
+        owner: { type: "string", description: "Owner email" },
+        email: { type: "string", description: "Agent's Microsoft email" },
+        skill_slug: { type: "string", description: "Skill that defines behavior" },
+        scopes: { type: "array", items: { type: "string" }, description: "Allowed tool scopes" },
+        machine: { type: "string", description: "Machine the agent runs on" },
+      },
+      required: ["slug", "name"],
+    },
+  },
 ];
 
 // ── News Helper: resolve slug to ID ──────────────────────────────────
@@ -1440,6 +1477,44 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       if (!data?.length) return [{ type: "text", text: "No audit events found." }];
       const out = data.map((e: any) => `${e.timestamp.slice(0, 16)} [${e.channel || "?"}] ${e.actor_email?.split("@")[0] || e.actor_type} → ${e.entity_type}${e.entity_id ? " #" + e.entity_id : ""} ${e.action}`).join("\n");
       return [{ type: "text", text: out }];
+    }
+
+    case "list_agents": {
+      const sb = adminClient();
+      let query = sb.from("agents").select("*").order("created_at", { ascending: false });
+      if (args.status) query = query.eq("status", args.status);
+      const { data, error } = await query;
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      if (!data?.length) return [{ type: "text", text: "No agents registered." }];
+      const out = data.map((a: any) => {
+        const seen = a.last_seen ? `last seen ${new Date(a.last_seen).toLocaleTimeString()}` : "never seen";
+        return `[${a.status}] ${a.slug} — ${a.name} (${seen})`;
+      }).join("\n");
+      return [{ type: "text", text: out }];
+    }
+
+    case "get_agent": {
+      const sb = adminClient();
+      const { data: agent } = await sb.from("agents").select("*").eq("slug", args.slug).single();
+      if (!agent) return [{ type: "text", text: "Agent not found." }];
+      const { data: activity } = await sb.from("audit_events").select("*").eq("actor_agent_id", args.slug).order("timestamp", { ascending: false }).limit(10);
+      const actLog = (activity || []).map((e: any) => `  ${e.timestamp.slice(0, 16)} ${e.action} ${e.entity_type}${e.entity_id ? " #" + e.entity_id : ""}`).join("\n");
+      return [{ type: "text", text: `${agent.name} (${agent.slug})\nStatus: ${agent.status} | Owner: ${agent.owner}\nEmail: ${agent.email || "none"} | Skill: ${agent.skill_slug || "none"}\nScopes: ${agent.scopes?.join(", ") || "none"}\nMachine: ${agent.machine || "unknown"}\nLast seen: ${agent.last_seen || "never"}\n\nRecent activity:\n${actLog || "  (none)"}` }];
+    }
+
+    case "register_agent": {
+      const sb = adminClient();
+      const { error } = await sb.from("agents").insert({
+        slug: args.slug,
+        name: args.name,
+        owner: args.owner || user.email,
+        email: args.email || null,
+        skill_slug: args.skill_slug || null,
+        scopes: args.scopes || [],
+        machine: args.machine || null,
+      });
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      return [{ type: "text", text: `✓ Agent "${args.name}" registered (slug: ${args.slug})` }];
     }
 
     default:

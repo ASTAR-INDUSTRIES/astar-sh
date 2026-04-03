@@ -8,6 +8,7 @@ import { registerShippedCommands } from "./commands/shipped";
 import { registerHoursCommands } from "./commands/hours";
 import { registerTodoCommands } from "./commands/todo";
 import { registerAuditCommands } from "./commands/audit";
+import { registerAgentCommands } from "./commands/agent";
 import { registerHealthCommand } from "./commands/health";
 import { registerStatusCommand } from "./commands/status";
 import { registerChangelogCommand } from "./commands/changelog";
@@ -17,7 +18,7 @@ import { AstarAPI } from "./lib/api";
 import { c } from "./lib/ui";
 import { resolve } from "path";
 
-export const VERSION = "0.0.18";
+export const VERSION = "0.0.19";
 
 async function showDashboard() {
   const status = await getAuthStatus();
@@ -93,6 +94,7 @@ registerShippedCommands(program);
 registerHoursCommands(program);
 registerTodoCommands(program);
 registerAuditCommands(program);
+registerAgentCommands(program);
 registerHealthCommand(program);
 registerStatusCommand(program);
 registerChangelogCommand(program);

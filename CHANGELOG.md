@@ -5,6 +5,14 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.19] - 2026-04-03
+### Added
+- Agent registry: `agents` table for tracking non-human employees
+- `astar agent list/info/register/pause/resume/retire/logs` commands
+- Heartbeat endpoint for agent liveness monitoring (returns status + scopes)
+- `list_agents`, `get_agent`, `register_agent` MCP tools
+- API: POST/GET/PATCH /agents + POST /agents/:slug/heartbeat
+
 ## [0.0.18] - 2026-04-03
 ### Added
 - `astar feedback close <id>` — mark feedback as done with optional resolution
