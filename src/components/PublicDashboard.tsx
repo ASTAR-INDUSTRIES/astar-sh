@@ -36,13 +36,14 @@ const NewsAutoScroll = ({ posts, onSelect }: { posts: any[]; onSelect: (id: stri
     if (posts.length === 0) return;
     const el = scrollRef.current;
     if (!el) return;
+    // Start at bottom so newest (top) scrolls into view
+    el.scrollTop = el.scrollHeight;
     const interval = setInterval(() => {
       if (hovered.current) return;
-      const { scrollTop, scrollHeight, clientHeight } = el;
-      if (scrollTop + clientHeight >= scrollHeight - 4) {
-        el.scrollTo({ top: 0, behavior: "smooth" });
+      if (el.scrollTop <= 4) {
+        el.scrollTop = el.scrollHeight;
       } else {
-        el.scrollBy({ top: 60, behavior: "smooth" });
+        el.scrollBy({ top: -60, behavior: "smooth" });
       }
     }, 4000);
     return () => clearInterval(interval);
@@ -56,7 +57,8 @@ const NewsAutoScroll = ({ posts, onSelect }: { posts: any[]; onSelect: (id: stri
       </div>
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto"
+        className="flex-1 overflow-y-auto scrollbar-hide"
+        style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
         onMouseEnter={() => { hovered.current = true; }}
         onMouseLeave={() => { hovered.current = false; }}
       >
@@ -70,7 +72,7 @@ const NewsAutoScroll = ({ posts, onSelect }: { posts: any[]; onSelect: (id: stri
                   <span className="font-mono text-sm font-medium text-foreground leading-snug">{post.title}</span>
                   {post.publishedAt && (
                     <span className="text-[10px] font-mono text-muted-foreground/40 shrink-0 mt-0.5">
-                      {format(new Date(post.publishedAt), "MMM d")}
+                      {format(new Date(post.publishedAt), "MMM d HH:mm")}
                     </span>
                   )}
                 </div>
