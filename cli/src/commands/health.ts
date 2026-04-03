@@ -4,6 +4,7 @@ import type { Command } from "commander";
 import { c } from "../lib/ui";
 import { VERSION } from "../index";
 import { getAuthCache } from "../lib/config";
+import { getToken } from "../lib/auth";
 import { isBaseSkillInstalled, installBaseSkill, getGlobalSkillsDir, ASTAR_PLATFORM_SKILL } from "../lib/base-skill";
 import { readManifest, writeManifest, hashContent } from "../lib/manifest";
 import { getLocalHash, getRemoteHash } from "./update";
@@ -87,9 +88,18 @@ async function runHealthChecks(extended: boolean): Promise<HealthResult> {
   const remote = extended ? getRemoteHash() : null;
   const behind = remote !== null && local !== null && remote !== local;
 
-  const cache = await getAuthCache();
-  const authValid = cache !== null && cache.expiresAt > Date.now();
-  const authExpired = cache !== null && cache.expiresAt <= Date.now();
+  let cache = await getAuthCache();
+  let authValid = cache !== null && cache.expiresAt > Date.now();
+  let authExpired = cache !== null && cache.expiresAt <= Date.now();
+
+  if (authExpired && cache?.homeAccountId) {
+    try {
+      await getToken();
+      cache = await getAuthCache();
+      authValid = cache !== null && cache.expiresAt > Date.now();
+      authExpired = false;
+    } catch {}
+  }
 
   const baseInstalled = await isBaseSkillInstalled();
   let baseIntegrity = "missing";
