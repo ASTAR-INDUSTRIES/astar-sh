@@ -259,6 +259,16 @@ export class AstarAPI {
     }
   }
 
+  async updateFeedback(id: string, status: string, resolution?: string): Promise<void> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/feedback/${id}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ status, resolution }),
+    });
+    if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+  }
+
   async listMilestones(month?: string): Promise<Milestone[]> {
     const params = new URLSearchParams();
     if (month) params.set("month", month);

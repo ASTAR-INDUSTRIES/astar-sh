@@ -128,4 +128,36 @@ export function registerFeedbackCommands(program: Command) {
         process.exit(1);
       }
     });
+
+  fb
+    .command("close <id>")
+    .description("Mark feedback as done")
+    .option("-r, --resolution <text>", "Resolution note")
+    .action(async (id: string, opts: { resolution?: string }) => {
+      const token = await requireAuth();
+      const api = new AstarAPI(token);
+      try {
+        await api.updateFeedback(id, "done", opts.resolution);
+        console.log(`${c.green}✓${c.reset} Feedback closed`);
+      } catch (e: any) {
+        console.error(`${c.red}✗${c.reset} ${e.message}`);
+        process.exit(1);
+      }
+    });
+
+  fb
+    .command("reject <id>")
+    .description("Mark feedback as not relevant")
+    .option("-r, --reason <text>", "Reason for rejection")
+    .action(async (id: string, opts: { reason?: string }) => {
+      const token = await requireAuth();
+      const api = new AstarAPI(token);
+      try {
+        await api.updateFeedback(id, "rejected", opts.reason);
+        console.log(`${c.green}✓${c.reset} Feedback rejected`);
+      } catch (e: any) {
+        console.error(`${c.red}✗${c.reset} ${e.message}`);
+        process.exit(1);
+      }
+    });
 }

@@ -399,6 +399,29 @@ app.post("/feedback", async (c) => {
   return c.json({ ok: true }, 200, corsHeaders);
 });
 
+// ── PATCH /feedback/:id — update feedback status ────────────────────
+app.patch("/feedback/:id", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const id = c.req.param("id");
+  const body = await c.req.json();
+  const sb = getSupabase();
+
+  const patch: any = {};
+  if (body.status) patch.status = body.status;
+  if (body.resolution !== undefined) patch.resolution = body.resolution;
+
+  if (Object.keys(patch).length === 0) return c.json({ error: "Nothing to update" }, 400, corsHeaders);
+
+  const { error } = await sb.from("feedback").update(patch).eq("id", id);
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+  await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "feedback", entity_id: id, action: "status_changed", channel: "api", state_after: patch });
+
+  return c.json({ ok: true }, 200, corsHeaders);
+});
+
 // ── GET /milestones — list milestones ────────────────────────────────
 app.get("/milestones", async (c) => {
   const month = c.req.query("month");

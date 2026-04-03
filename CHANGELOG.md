@@ -5,6 +5,13 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.18] - 2026-04-03
+### Added
+- `astar feedback close <id>` — mark feedback as done with optional resolution
+- `astar feedback reject <id>` — mark feedback as not relevant
+- `PATCH /feedback/:id` API endpoint for status updates
+- `update_feedback` MCP tool
+
 ## [0.0.17] - 2026-04-03
 ### Added
 - `astar status` — personal weekly report card with activity bars, streak, tasks, leaderboard

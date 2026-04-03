@@ -579,6 +579,19 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: "update_feedback",
+    description: "Update a feedback item's status (close, accept, reject)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Feedback UUID" },
+        status: { type: "string", enum: ["accepted", "rejected", "done"], description: "New status" },
+        resolution: { type: "string", description: "Resolution note (what was done)" },
+      },
+      required: ["id", "status"],
+    },
+  },
   // ── Milestone Tools ─────────────────────────────────────────────────
   {
     name: "create_milestone",
@@ -1133,6 +1146,15 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
       if (!data?.length) return [{ type: "text", text: "No feedback found." }];
       return [{ type: "text", text: JSON.stringify(data, null, 2) }];
+    }
+
+    case "update_feedback": {
+      const sb = adminClient();
+      const patch: any = { status: args.status };
+      if (args.resolution) patch.resolution = args.resolution;
+      const { error } = await sb.from("feedback").update(patch).eq("id", args.id);
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      return [{ type: "text", text: `✓ Feedback updated to "${args.status}".` }];
     }
 
     // ── Milestones ──────────────────────────────────────────────────
