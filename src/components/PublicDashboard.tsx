@@ -28,6 +28,64 @@ const regionColors: Record<string, string> = {
 const HEATMAP_DAYS = 14;
 const DAY_LABELS = ["Ma", "Ti", "On", "To", "Fr", "Lø", "Sø"];
 
+const NewsAutoScroll = ({ posts, onSelect }: { posts: any[]; onSelect: (id: string) => void }) => {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const hovered = useRef(false);
+
+  useEffect(() => {
+    if (posts.length === 0) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const interval = setInterval(() => {
+      if (hovered.current) return;
+      const { scrollTop, scrollHeight, clientHeight } = el;
+      if (scrollTop + clientHeight >= scrollHeight - 4) {
+        el.scrollTo({ top: 0, behavior: "smooth" });
+      } else {
+        el.scrollBy({ top: 60, behavior: "smooth" });
+      }
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [posts.length]);
+
+  return (
+    <div className="bg-background flex flex-col overflow-hidden">
+      <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-border">
+        <FileText className="h-3.5 w-3.5 text-accent" />
+        <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">News</span>
+      </div>
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto"
+        onMouseEnter={() => { hovered.current = true; }}
+        onMouseLeave={() => { hovered.current = false; }}
+      >
+        <div className="divide-y divide-border">
+          {posts.length === 0 ? (
+            <p className="px-4 py-6 text-sm font-mono text-muted-foreground/30 text-center">—</p>
+          ) : (
+            posts.map((post: any) => (
+              <div key={post._id} className="px-4 py-3 cursor-pointer hover:bg-accent/5 transition-colors" onClick={() => onSelect(post._id)}>
+                <div className="flex items-start justify-between gap-2">
+                  <span className="font-mono text-sm font-medium text-foreground leading-snug">{post.title}</span>
+                  {post.publishedAt && (
+                    <span className="text-[10px] font-mono text-muted-foreground/40 shrink-0 mt-0.5">
+                      {format(new Date(post.publishedAt), "MMM d")}
+                    </span>
+                  )}
+                </div>
+                {post.excerpt && (
+                  <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2 leading-snug">{post.excerpt}</p>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const PublicDashboard = () => {
   const [now, setNow] = useState(new Date());
   const [selectedNewsId, setSelectedNewsId] = useState<string | null>(null);
