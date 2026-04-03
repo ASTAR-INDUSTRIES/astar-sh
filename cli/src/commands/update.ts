@@ -7,7 +7,7 @@ import { updateBaseSkillIfInstalled } from "../lib/base-skill";
 
 const INSTALL_DIR = join(homedir(), ".astar", "cli");
 
-function getLocalHash(): string | null {
+export function getLocalHash(): string | null {
   try {
     return execSync("git rev-parse --short HEAD", { cwd: INSTALL_DIR, stdio: "pipe" }).toString().trim();
   } catch {
@@ -15,7 +15,7 @@ function getLocalHash(): string | null {
   }
 }
 
-function getRemoteHash(): string | null {
+export function getRemoteHash(): string | null {
   try {
     execSync("git fetch --quiet", { cwd: INSTALL_DIR, stdio: "pipe" });
     return execSync("git rev-parse --short origin/main", { cwd: INSTALL_DIR, stdio: "pipe" }).toString().trim();

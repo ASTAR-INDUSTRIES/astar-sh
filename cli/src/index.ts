@@ -8,13 +8,14 @@ import { registerShippedCommands } from "./commands/shipped";
 import { registerHoursCommands } from "./commands/hours";
 import { registerTodoCommands } from "./commands/todo";
 import { registerAuditCommands } from "./commands/audit";
+import { registerHealthCommand } from "./commands/health";
 import { registerUpdateCommand, checkForUpdates } from "./commands/update";
 import { getAuthStatus } from "./lib/auth";
 import { AstarAPI } from "./lib/api";
 import { c } from "./lib/ui";
 import { resolve } from "path";
 
-export const VERSION = "0.0.7";
+export const VERSION = "0.0.8";
 
 async function showDashboard() {
   const status = await getAuthStatus();
@@ -90,6 +91,7 @@ registerShippedCommands(program);
 registerHoursCommands(program);
 registerTodoCommands(program);
 registerAuditCommands(program);
+registerHealthCommand(program);
 registerUpdateCommand(program);
 
 await checkForUpdates();

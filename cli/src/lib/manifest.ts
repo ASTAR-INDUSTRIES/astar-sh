@@ -6,6 +6,13 @@ export interface SkillManifest {
   author?: string;
   installedAt: string;
   remoteUpdatedAt: string;
+  content_hash?: string;
+}
+
+export function hashContent(content: string): string {
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(content);
+  return hasher.digest("hex").slice(0, 16);
 }
 
 export async function writeManifest(skillDir: string, manifest: SkillManifest) {

@@ -4,7 +4,7 @@ import type { Command } from "commander";
 import { getToken, getAuthStatus } from "../lib/auth";
 import { AstarAPI, type SkillFull, type SkillSummary } from "../lib/api";
 import { c, table, badge, tag } from "../lib/ui";
-import { writeManifest, readManifest, isOutdated, type SkillManifest } from "../lib/manifest";
+import { writeManifest, readManifest, isOutdated, hashContent, type SkillManifest } from "../lib/manifest";
 import { diffFiles, renderDiff, type FileDiff } from "../lib/diff";
 import { getGlobalSkillsDir } from "../lib/base-skill";
 
@@ -36,6 +36,7 @@ async function writeSkillToDisk(skill: SkillFull, baseDir?: string) {
     author: skill.author,
     installedAt: new Date().toISOString(),
     remoteUpdatedAt: skill._updatedAt ?? new Date().toISOString(),
+    content_hash: hashContent(skill.skillMd),
   });
 
   return skillDir;
