@@ -397,36 +397,8 @@ const PublicDashboard = () => {
           </ScrollArea>
         </div>
 
-        {/* Right column: News — full height */}
-        <div className="bg-background flex flex-col overflow-hidden">
-          <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-border">
-            <FileText className="h-3.5 w-3.5 text-accent" />
-            <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">News</span>
-          </div>
-          <ScrollArea className="flex-1">
-            <div className="divide-y divide-border">
-              {posts.length === 0 ? (
-                <p className="px-4 py-6 text-sm font-mono text-muted-foreground/30 text-center">—</p>
-              ) : (
-                posts.map((post: any) => (
-                  <div key={post._id} className="px-4 py-3 cursor-pointer hover:bg-accent/5 transition-colors" onClick={() => setSelectedNewsId(post._id)}>
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="font-mono text-sm font-medium text-foreground leading-snug">{post.title}</span>
-                      {post.publishedAt && (
-                        <span className="text-[10px] font-mono text-muted-foreground/40 shrink-0 mt-0.5">
-                          {format(new Date(post.publishedAt), "MMM d")}
-                        </span>
-                      )}
-                    </div>
-                    {post.excerpt && (
-                      <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2 leading-snug">{post.excerpt}</p>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </ScrollArea>
-        </div>
+        {/* Right column: News — full height, auto-scroll */}
+        <NewsAutoScroll posts={posts} onSelect={setSelectedNewsId} />
       </div>
 
       {/* News detail dialog */}
