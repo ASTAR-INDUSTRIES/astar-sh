@@ -5,6 +5,13 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.17] - 2026-04-03
+### Added
+- `astar status` — personal weekly report card with activity bars, streak, tasks, leaderboard
+- `astar status --full` — adds breakdown bars and team leaderboard
+- `astar status --json` — machine-readable output
+- `GET /status` API endpoint with aggregated personal stats
+
 ## [0.0.16] - 2026-04-03
 ### Added
 - Install and update tracking via `/ping` endpoint (no auth, logs to audit_events)

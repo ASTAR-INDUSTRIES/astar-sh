@@ -384,6 +384,10 @@ export class AstarAPI {
     return data.suggestions;
   }
 
+  async getStatus(): Promise<any> {
+    return this.fetch("/status");
+  }
+
   async queryAudit(filters?: { entity_type?: string; entity_id?: string; actor?: string; actor_agent_id?: string; channel?: string; action?: string; since?: string; limit?: number }): Promise<AuditEvent[]> {
     const params = new URLSearchParams();
     if (filters?.entity_type) params.set("entity_type", filters.entity_type);

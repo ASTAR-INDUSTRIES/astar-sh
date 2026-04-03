@@ -1026,6 +1026,83 @@ app.post("/ping", async (c) => {
   return c.json({ ok: true }, 200, corsHeaders);
 });
 
+// ── GET /status — personal dashboard data ───────────────────────────
+app.get("/status", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const sb = getSupabase();
+  const now = new Date();
+  const dayOfWeek = now.getDay();
+  const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() - mondayOffset);
+  weekStart.setHours(0, 0, 0, 0);
+  const weekStartStr = weekStart.toISOString();
+
+  const [eventsRes, tasksRes, openTasksRes, newsRes, feedbackRes, leaderboardRes] = await Promise.all([
+    sb.from("audit_events").select("timestamp, entity_type, action, actor_email").eq("actor_email", user.email).gte("timestamp", weekStartStr),
+    sb.from("tasks").select("*", { count: "exact", head: true }).eq("assigned_to", user.email).eq("status", "completed").gte("completed_at", weekStartStr),
+    sb.from("tasks").select("task_number, title, priority, due_date, status").eq("assigned_to", user.email).in("status", ["open", "in_progress"]).is("archived_at", null).order("created_at", { ascending: false }).limit(5),
+    sb.from("audit_events").select("*", { count: "exact", head: true }).eq("actor_email", user.email).eq("entity_type", "news").eq("action", "published").gte("timestamp", weekStartStr),
+    sb.from("audit_events").select("*", { count: "exact", head: true }).eq("actor_email", user.email).eq("entity_type", "feedback").gte("timestamp", weekStartStr),
+    sb.from("audit_events").select("actor_email, actor_name").gte("timestamp", weekStartStr),
+  ]);
+
+  const events = eventsRes.data || [];
+  const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const days: any[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(weekStart);
+    d.setDate(weekStart.getDate() + i);
+    const dateStr = d.toISOString().split("T")[0];
+    const dayEvents = events.filter((e: any) => e.timestamp.startsWith(dateStr));
+    const breakdown: Record<string, number> = {};
+    for (const e of dayEvents) { breakdown[e.entity_type] = (breakdown[e.entity_type] || 0) + 1; }
+    days.push({ date: dateStr, day: dayNames[i], actions: dayEvents.length, breakdown });
+  }
+
+  // Streak
+  let streak = 0;
+  const today = now.toISOString().split("T")[0];
+  for (let i = 0; i < 30; i++) {
+    const d = new Date(now);
+    d.setDate(now.getDate() - i);
+    const dateStr = d.toISOString().split("T")[0];
+    const { count } = await sb.from("audit_events").select("*", { count: "exact", head: true }).eq("actor_email", user.email).gte("timestamp", dateStr + "T00:00:00").lt("timestamp", dateStr + "T23:59:59");
+    if ((count || 0) > 0) streak++;
+    else if (i > 0) break;
+  }
+
+  // Leaderboard
+  const lbMap: Record<string, { name: string; count: number }> = {};
+  for (const e of (leaderboardRes.data || [])) {
+    const key = e.actor_email || "system";
+    if (!lbMap[key]) lbMap[key] = { name: e.actor_name || key.split("@")[0], count: 0 };
+    lbMap[key].count++;
+  }
+  const leaderboard = Object.values(lbMap).sort((a, b) => b.count - a.count).slice(0, 5);
+
+  // Top task
+  const topTask = (openTasksRes.data || [])[0] || null;
+
+  return c.json({
+    user: { email: user.email, name: user.name },
+    week: {
+      number: Math.ceil((now.getDate() + mondayOffset) / 7),
+      days,
+      tasks_completed: tasksRes.count || 0,
+      tasks_open: (openTasksRes.data || []).length,
+      news_published: newsRes.count || 0,
+      feedback_submitted: feedbackRes.count || 0,
+    },
+    streak,
+    top_task: topTask,
+    open_tasks: openTasksRes.data || [],
+    leaderboard,
+  }, 200, corsHeaders);
+});
+
 // ── Health ─────────────────────────────────────────────────────────────
 app.get("/", (c) => c.json({ status: "ok", service: "skills-api" }, 200, corsHeaders));
 
