@@ -272,36 +272,36 @@ const PublicDashboard = () => {
         </div>
       </div>
 
-      {/* Main grid: left column (heatmap + skills + shipped) | right column (thinking + news) */}
-      <div className="flex-1 grid grid-cols-[1fr_1fr_1fr] gap-px bg-border overflow-hidden">
+      {/* Main grid: left (heatmap+skills+shipped) | middle (thinking) | right (news) */}
+      <div className="flex-1 grid grid-cols-[1fr_1fr_1fr] gap-px bg-border overflow-hidden min-h-0">
 
         {/* Left column */}
         <div className="bg-background flex flex-col overflow-hidden">
           {/* 14-day heatmap */}
-          <div className="flex-shrink-0 border-b border-border px-3 py-2">
-            <div className="flex items-start gap-1">
+          <div className="flex-shrink-0 border-b border-border px-4 py-3">
+            <div className="flex items-start gap-2">
               {/* Day labels */}
-              <div className="flex flex-col gap-[2px] mr-1 pt-[14px]">
+              <div className="flex flex-col gap-[3px] mr-1 pt-[18px]">
                 {DAY_LABELS.map(d => (
-                  <div key={d} className="h-[10px] text-[7px] font-mono text-muted-foreground/30 leading-[10px]">{d}</div>
+                  <div key={d} className="h-[14px] text-[9px] font-mono text-muted-foreground/40 leading-[14px]">{d}</div>
                 ))}
               </div>
               {/* Grid: 2 weeks as columns, 7 days as rows */}
               <div className="flex-1">
-                <div className="flex gap-[3px] mb-1">
-                  <span className="text-[7px] font-mono text-muted-foreground/20 flex-1 text-center">forrige uke</span>
-                  <span className="text-[7px] font-mono text-muted-foreground/20 flex-1 text-center">denne uke</span>
+                <div className="flex gap-[4px] mb-1.5">
+                  <span className="text-[8px] font-mono text-muted-foreground/25 flex-1 text-center">forrige uke</span>
+                  <span className="text-[8px] font-mono text-muted-foreground/25 flex-1 text-center">denne uke</span>
                 </div>
                 {heatmapGrid.users.length === 0 ? (
-                  <div className="grid grid-cols-[repeat(14,1fr)] gap-[2px]">
+                  <div className="grid grid-cols-[repeat(14,1fr)] gap-[3px]">
                     {Array.from({ length: 14 }).map((_, i) => (
                       <div key={i} className="aspect-square rounded-[2px] bg-accent/5" />
                     ))}
                   </div>
                 ) : (
                   heatmapGrid.users.map(user => (
-                    <div key={user} className="flex items-center gap-1 mb-[2px]">
-                      <div className="grid grid-cols-[repeat(14,1fr)] gap-[2px] flex-1">
+                    <div key={user} className="flex items-center gap-1.5 mb-[3px]">
+                      <div className="grid grid-cols-[repeat(14,1fr)] gap-[3px] flex-1">
                         {heatmapGrid.dayKeys.map(dayKey => {
                           const count = heatmapGrid.userDays[user]?.[dayKey] || 0;
                           return (
@@ -313,25 +313,25 @@ const PublicDashboard = () => {
                           );
                         })}
                       </div>
-                      <span className="text-[7px] font-mono text-muted-foreground/30 w-6 shrink-0 text-right">{user.slice(0, 4)}</span>
+                      <span className="text-[8px] font-mono text-muted-foreground/30 w-8 shrink-0 text-right">{user.slice(0, 5)}</span>
                     </div>
                   ))
                 )}
               </div>
             </div>
-            <p className="text-[7px] font-mono text-muted-foreground/20 text-center mt-1 tracking-wider uppercase">
+            <p className="text-[8px] font-mono text-muted-foreground/20 text-center mt-1.5 tracking-wider uppercase">
               Hours · siste 14d
             </p>
           </div>
 
           {/* Skills */}
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="flex-shrink-0 flex items-center justify-between px-3 py-2 border-b border-border">
+          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+            <div className="flex-shrink-0 flex items-center justify-between px-4 py-2 border-b border-border">
               <div className="flex items-center gap-2">
-                <BookOpen className="h-3 w-3 text-accent" />
-                <span className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground">Skills</span>
+                <BookOpen className="h-3.5 w-3.5 text-accent" />
+                <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">Skills</span>
               </div>
-              <span className="text-[9px] font-mono text-muted-foreground/30">{skills.length}</span>
+              <span className="text-[10px] font-mono text-muted-foreground/30">{skills.length}</span>
             </div>
             <ScrollArea className="flex-1">
               <div className="divide-y divide-border">
@@ -339,12 +339,12 @@ const PublicDashboard = () => {
                   const slug = skill.slug || skill.title?.toLowerCase().replace(/\s+/g, "-");
                   const count = downloadCounts[slug] || 0;
                   return (
-                    <div key={skill._id} className="px-3 py-1.5 flex items-center gap-2">
-                      <span className="text-[9px] font-mono text-muted-foreground/20 w-4 shrink-0">{i + 1}</span>
-                      <span className="font-mono text-xs text-foreground truncate flex-1">{skill.title}</span>
+                    <div key={skill._id} className="px-4 py-2 flex items-center gap-2">
+                      <span className="text-[10px] font-mono text-muted-foreground/20 w-5 shrink-0">{i + 1}</span>
+                      <span className="font-mono text-sm text-foreground truncate flex-1">{skill.title}</span>
                       {count > 0 && (
-                        <span className="text-[9px] font-mono text-muted-foreground/40 flex items-center gap-0.5">
-                          <Download className="h-2.5 w-2.5" />{count}
+                        <span className="text-[10px] font-mono text-muted-foreground/40 flex items-center gap-0.5">
+                          <Download className="h-3 w-3" />{count}
                         </span>
                       )}
                     </div>
@@ -354,36 +354,36 @@ const PublicDashboard = () => {
             </ScrollArea>
           </div>
 
-          {/* Shipped Calendar */}
+          {/* Shipped Calendar — compact */}
           <div className="flex-shrink-0 border-t border-border">
             <ShippedCalendar />
           </div>
         </div>
 
-        {/* Middle column: Thinking */}
+        {/* Middle column: Thinking — full height */}
         <div className="bg-background flex flex-col overflow-hidden">
-          <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border">
-            <MessageCircle className="h-3 w-3 text-accent" />
-            <span className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground">Thinking</span>
+          <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-border">
+            <MessageCircle className="h-3.5 w-3.5 text-accent" />
+            <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">Thinking</span>
           </div>
           <ScrollArea className="flex-1">
             <div className="divide-y divide-border">
               {tweets.length === 0 ? (
-                <p className="px-3 py-6 text-xs font-mono text-muted-foreground/30 text-center">—</p>
+                <p className="px-4 py-6 text-sm font-mono text-muted-foreground/30 text-center">—</p>
               ) : (
-                tweets.slice(0, 15).map((tweet) => {
+                tweets.slice(0, 20).map((tweet) => {
                   const counts = reactionCounts[tweet.id] || {};
                   return (
-                    <div key={tweet.id} className="px-3 py-2">
-                      <p className="text-xs text-foreground/90 leading-relaxed font-mono">{tweet.content}</p>
-                      <span className="text-[9px] font-mono text-muted-foreground/40 mt-1 block">
+                    <div key={tweet.id} className="px-4 py-3">
+                      <p className="text-sm text-foreground/90 leading-relaxed font-mono">{tweet.content}</p>
+                      <span className="text-[10px] font-mono text-muted-foreground/40 mt-1.5 block">
                         {tweet.author_name && `${tweet.author_name} · `}
                         {format(new Date(tweet.created_at), "MMM d · HH:mm")}
                       </span>
                       {Object.keys(counts).length > 0 && (
-                        <div className="flex gap-1 mt-1 flex-wrap">
+                        <div className="flex gap-1 mt-1.5 flex-wrap">
                           {Object.entries(counts).map(([emoji, count]) => (
-                            <span key={emoji} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-mono border border-accent/20 bg-accent/5 text-foreground/70">
+                            <span key={emoji} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[11px] font-mono border border-accent/20 bg-accent/5 text-foreground/70">
                               {emoji} {count}
                             </span>
                           ))}
@@ -397,29 +397,29 @@ const PublicDashboard = () => {
           </ScrollArea>
         </div>
 
-        {/* Right column: News */}
+        {/* Right column: News — full height */}
         <div className="bg-background flex flex-col overflow-hidden">
-          <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border">
-            <FileText className="h-3 w-3 text-accent" />
-            <span className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground">News</span>
+          <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-border">
+            <FileText className="h-3.5 w-3.5 text-accent" />
+            <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">News</span>
           </div>
           <ScrollArea className="flex-1">
             <div className="divide-y divide-border">
               {posts.length === 0 ? (
-                <p className="px-3 py-6 text-xs font-mono text-muted-foreground/30 text-center">—</p>
+                <p className="px-4 py-6 text-sm font-mono text-muted-foreground/30 text-center">—</p>
               ) : (
                 posts.map((post: any) => (
-                  <div key={post._id} className="px-3 py-2 cursor-pointer hover:bg-accent/5 transition-colors" onClick={() => setSelectedNewsId(post._id)}>
+                  <div key={post._id} className="px-4 py-3 cursor-pointer hover:bg-accent/5 transition-colors" onClick={() => setSelectedNewsId(post._id)}>
                     <div className="flex items-start justify-between gap-2">
-                      <span className="font-mono text-xs font-medium text-foreground leading-snug">{post.title}</span>
+                      <span className="font-mono text-sm font-medium text-foreground leading-snug">{post.title}</span>
                       {post.publishedAt && (
-                        <span className="text-[9px] font-mono text-muted-foreground/40 shrink-0 mt-0.5">
+                        <span className="text-[10px] font-mono text-muted-foreground/40 shrink-0 mt-0.5">
                           {format(new Date(post.publishedAt), "MMM d")}
                         </span>
                       )}
                     </div>
                     {post.excerpt && (
-                      <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2 leading-snug">{post.excerpt}</p>
+                      <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2 leading-snug">{post.excerpt}</p>
                     )}
                   </div>
                 ))
