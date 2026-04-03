@@ -443,7 +443,7 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        title: { type: "string", description: "Factual, descriptive headline (no clickbait)" },
+        title: { type: "string", description: "Factual, descriptive headline (max 60 chars, no clickbait)" },
         slug: { type: "string", description: "URL slug (auto-generated from title if omitted)" },
         excerpt: { type: "string", description: "1-2 sentence factual summary" },
         content: { type: "string", description: "Full article body in Markdown" },
@@ -466,6 +466,19 @@ const TOOLS = [
         consensus: { type: "array", items: { type: "string" }, description: "Points where all sources agree" },
         divergence: { type: "array", items: { type: "string" }, description: "Points where sources disagree or frame differently" },
         takeaway: { type: "string", description: "Astar-specific actionable insight for the team" },
+        entities: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "Company or org name (e.g. Anthropic, OpenAI)" },
+              domain: { type: "string", description: "Website domain for logo (e.g. anthropic.com)" },
+            },
+            required: ["name", "domain"],
+          },
+          description: "Primary companies/orgs — used for logo display",
+        },
+        continues: { type: "string", description: "Slug of previous article this is a follow-up to" },
         author_name: { type: "string", description: "Author display name (defaults to your name)" },
         published: { type: "boolean", description: "Publish immediately (default true)" },
       },
@@ -1026,12 +1039,15 @@ async function handleTool(name: string, args: any, user: { email: string; userId
         consensus: args.consensus || [],
         divergence: args.divergence || [],
         takeaway: args.takeaway || "",
+        entities: (args.entities || []).map((e: any) => ({ _type: "newsEntity", _key: crypto.randomUUID().slice(0, 8), name: e.name, domain: e.domain })),
+        continues: args.continues || null,
         authorName: args.author_name || user.email.split("@")[0],
         publishedAt: new Date().toISOString(),
         published: args.published ?? true,
       };
       await sanityMutate([{ createOrReplace: doc }]);
-      return [{ type: "text", text: `✓ News "${args.title}" published (slug: ${slug}, ${sources.length} sources).` }];
+      const entityNames = (args.entities || []).map((e: any) => e.name).join(", ");
+      return [{ type: "text", text: `✓ News "${args.title}" published (slug: ${slug}, ${sources.length} sources${entityNames ? `, entities: ${entityNames}` : ""}).` }];
     }
 
     case "update_news": {
@@ -1056,6 +1072,10 @@ async function handleTool(name: string, args: any, user: { email: string; userId
           url: s.url, perspective: s.perspective || "",
         }));
       }
+      if (args.entities !== undefined) {
+        patch.entities = args.entities.map((e: any) => ({ _type: "newsEntity", _key: crypto.randomUUID().slice(0, 8), name: e.name, domain: e.domain }));
+      }
+      if (args.continues !== undefined) patch.continues = args.continues;
       if (Object.keys(patch).length === 0) return [{ type: "text", text: "No fields to update." }];
       await sanityMutate([{ patch: { id: docId, set: patch } }]);
       return [{ type: "text", text: `✓ News post updated.` }];

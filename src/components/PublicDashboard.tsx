@@ -69,7 +69,17 @@ const NewsAutoScroll = ({ posts, onSelect }: { posts: any[]; onSelect: (id: stri
             posts.map((post: any) => (
               <div key={post._id} className="px-4 py-3 cursor-pointer hover:bg-accent/5 transition-colors" onClick={() => onSelect(post._id)}>
                 <div className="flex items-start justify-between gap-2">
-                  <span className="font-mono text-sm font-medium text-foreground leading-snug">{post.title}</span>
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    {post.entities?.[0]?.domain && (
+                      <img
+                        src={`https://logo.clearbit.com/${post.entities[0].domain}`}
+                        alt=""
+                        className="h-4 w-4 rounded-sm shrink-0"
+                        onError={(e: any) => { e.currentTarget.style.display = "none"; }}
+                      />
+                    )}
+                    <span className="font-mono text-sm font-medium text-foreground leading-snug">{post.title}</span>
+                  </div>
                   {post.publishedAt && (
                     <span className="text-[10px] font-mono text-muted-foreground/40 shrink-0 mt-0.5">
                       {format(new Date(post.publishedAt), "MMM d HH:mm")}
@@ -104,6 +114,9 @@ const PublicDashboard = () => {
       `*[_type == "newsPost" && _id == $id][0] {
         _id, title, excerpt, content, category, coverImage,
         sources[] { name, region, url, perspective },
+        entities[] { name, domain },
+        continues,
+        "continuesTitle": *[_type == "newsPost" && slug.current == ^.continues][0].title,
         consensus, divergence, takeaway,
         authorName, publishedAt
       }`,
@@ -127,7 +140,7 @@ const PublicDashboard = () => {
     queryFn: () =>
       sanityClient.fetch<any[]>(
         `*[_type == "newsPost" && published == true] | order(publishedAt desc)[0...10] {
-          _id, title, excerpt, category, publishedAt, authorName
+          _id, title, excerpt, category, publishedAt, authorName, entities[] { name, domain }, continues
         }`
       ),
     refetchInterval: 60000,
@@ -466,7 +479,22 @@ const PublicDashboard = () => {
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           {newsDetail && (
             <>
-              {newsDetail.coverImage && (
+              {newsDetail.entities?.length > 0 && (
+                <div className="flex items-center gap-3 -mt-1 mb-3">
+                  {newsDetail.entities.map((ent: any, i: number) => (
+                    <div key={i} className="flex items-center gap-1.5">
+                      <img
+                        src={`https://logo.clearbit.com/${ent.domain}`}
+                        alt=""
+                        className="h-6 w-6 rounded-sm"
+                        onError={(e: any) => { e.currentTarget.style.display = "none"; }}
+                      />
+                      <span className="text-xs font-mono text-muted-foreground">{ent.name}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {newsDetail.coverImage && !newsDetail.entities?.length && (
                 <img src={newsDetail.coverImage} alt="" className="w-full h-48 object-cover rounded-md -mt-2 mb-4" />
               )}
               <DialogHeader>
@@ -478,6 +506,11 @@ const PublicDashboard = () => {
                   <span>·</span>
                   <span className="text-accent uppercase tracking-wider">{newsDetail.category}</span>
                 </div>
+                {newsDetail.continues && newsDetail.continuesTitle && (
+                  <p className="text-xs font-mono text-muted-foreground/60 mt-1">
+                    Continues: {newsDetail.continuesTitle}
+                  </p>
+                )}
               </DialogHeader>
 
               {newsDetail.excerpt && (

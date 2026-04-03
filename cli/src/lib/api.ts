@@ -29,6 +29,11 @@ export interface NewsSource {
   perspective?: string;
 }
 
+export interface NewsEntity {
+  name: string;
+  domain: string;
+}
+
 export interface NewsSummary {
   _id: string;
   slug: string;
@@ -37,6 +42,8 @@ export interface NewsSummary {
   category: string;
   coverImage?: string;
   sources?: NewsSource[];
+  entities?: NewsEntity[];
+  continues?: string;
   authorName: string;
   publishedAt: string;
   _updatedAt?: string;
@@ -47,6 +54,7 @@ export interface NewsFull extends NewsSummary {
   consensus?: string[];
   divergence?: string[];
   takeaway?: string;
+  continuesTitle?: string;
 }
 
 export interface TaskLink {

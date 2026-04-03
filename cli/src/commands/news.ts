@@ -41,12 +41,13 @@ export function registerNewsCommands(program: Command) {
 
       console.log("");
       table(
-        ["#", "Title", "Category", "Sources", "Date"],
+        ["#", "Title", "Entities", "Category", "Sources", "Date"],
         articles.map((a, i) => [
           `${c.dim}${i + 1}${c.reset}`,
-          `${c.cyan}${truncate(a.title, 42)}${c.reset}`,
+          `${c.cyan}${truncate(a.title, 38)}${c.reset}`,
+          a.entities?.length ? `${c.dim}${a.entities.map((e) => e.name).join(", ")}${c.reset}` : `${c.dim}—${c.reset}`,
           a.category ? tag(a.category) : "",
-          a.sources?.length ? `${c.dim}${a.sources.length} sources${c.reset}` : `${c.dim}—${c.reset}`,
+          a.sources?.length ? `${c.dim}${a.sources.length}${c.reset}` : `${c.dim}—${c.reset}`,
           `${c.dim}${fmtDate(a.publishedAt)}${c.reset}`,
         ])
       );
@@ -69,6 +70,16 @@ export function registerNewsCommands(program: Command) {
         console.log("");
         console.log(`  ${c.bold}${c.white}${a.title}${c.reset}`);
         console.log(`  ${c.dim}${a.authorName}${c.reset} · ${c.dim}${fmtDate(a.publishedAt)}${c.reset} · ${tag(a.category)}`);
+
+        if (a.entities?.length) {
+          console.log(`  ${c.dim}Entities:${c.reset} ${a.entities.map((e) => `${e.name} ${c.dim}(${e.domain})${c.reset}`).join(` ${c.dim}·${c.reset} `)}`);
+        }
+
+        if (a.continues && a.continuesTitle) {
+          console.log(`  ${c.dim}Continues:${c.reset} ${a.continuesTitle}`);
+          console.log(`  ${c.dim}→ astar news info ${a.continues}${c.reset}`);
+        }
+
         console.log("");
 
         if (a.excerpt) {
