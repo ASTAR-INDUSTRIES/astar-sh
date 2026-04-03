@@ -4,6 +4,7 @@ import { homedir } from "os";
 import { join } from "path";
 import { c } from "../lib/ui";
 import { updateBaseSkillIfInstalled } from "../lib/base-skill";
+import { getConfig } from "../lib/config";
 
 const INSTALL_DIR = join(homedir(), ".astar", "cli");
 
@@ -58,6 +59,11 @@ export function registerUpdateCommand(program: Command) {
         if (await updateBaseSkillIfInstalled()) {
           console.log(`  ${c.green}✓${c.reset} Updated ${c.cyan}astar-platform${c.reset} skill`);
         }
+
+        try {
+          const config = await getConfig();
+          fetch(`${config.apiUrl}/ping`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "update", version: localAfter, os: process.platform }) }).catch(() => {});
+        } catch {}
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} Update failed. Reinstall with:`);
         console.error(`  curl -fsSL https://raw.githubusercontent.com/ASTAR-INDUSTRIES/astar-sh/main/cli/install.sh | bash`);

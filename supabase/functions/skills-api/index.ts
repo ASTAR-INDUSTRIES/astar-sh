@@ -1013,6 +1013,19 @@ app.get("/audit", async (c) => {
   return c.json({ events: data || [] }, 200, corsHeaders);
 });
 
+// ── POST /ping — track installs and updates (no auth) ───────────────
+app.post("/ping", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  await logAudit({
+    actor_type: "system",
+    entity_type: "cli",
+    action: body.action || "install",
+    channel: "system",
+    state_after: { version: body.version, os: body.os },
+  });
+  return c.json({ ok: true }, 200, corsHeaders);
+});
+
 // ── Health ─────────────────────────────────────────────────────────────
 app.get("/", (c) => c.json({ status: "ok", service: "skills-api" }, 200, corsHeaders));
 

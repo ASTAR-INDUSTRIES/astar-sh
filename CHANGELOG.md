@@ -5,6 +5,12 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.16] - 2026-04-03
+### Added
+- Install and update tracking via `/ping` endpoint (no auth, logs to audit_events)
+- `astar changelog` command to view recent changes
+- CHANGELOG.md auto-versioned by pre-commit hook
+
 ## [0.0.15] - 2026-04-03
 
 ## [0.0.14] - 2026-04-03

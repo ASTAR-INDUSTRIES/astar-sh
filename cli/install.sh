@@ -55,6 +55,12 @@ if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
 fi
 
 VERSION=$(cd "$INSTALL_DIR" && git rev-parse --short HEAD)
+
+# Track install
+curl -s -X POST "https://owerciqeeelwrqseajqq.supabase.co/functions/v1/skills-api/ping" \
+  -H "Content-Type: application/json" \
+  -d "{\"action\":\"install\",\"version\":\"$VERSION\",\"os\":\"$(uname -s)\"}" 2>/dev/null &
+
 echo ""
 echo "  ✓ astar CLI installed ($VERSION)"
 echo ""
