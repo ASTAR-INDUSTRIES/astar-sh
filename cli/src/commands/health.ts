@@ -234,7 +234,7 @@ export function registerHealthCommand(program: Command) {
           await installBaseSkill();
           result.checks.base_skill = { status: "ok", installed: true, integrity: "ok" };
           console.log(`  ${c.green}✓${c.reset} Installed astar-platform skill`);
-        } else if (result.checks.base_skill.integrity === "corrupted" || result.checks.base_skill.integrity === "hash mismatch") {
+        } else if (result.checks.base_skill.status === "corrupted" || result.checks.base_skill.integrity.includes("mismatch")) {
           console.log(`  ${c.dim}Reinstalling base skill (integrity issue)...${c.reset}`);
           await installBaseSkill();
           result.checks.base_skill = { status: "ok", installed: true, integrity: "ok" };
