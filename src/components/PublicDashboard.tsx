@@ -57,7 +57,8 @@ const NewsAutoScroll = ({ posts, onSelect }: { posts: any[]; onSelect: (id: stri
       </div>
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto"
+        className="flex-1 overflow-y-auto scrollbar-hide"
+        style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
         onMouseEnter={() => { hovered.current = true; }}
         onMouseLeave={() => { hovered.current = false; }}
       >
