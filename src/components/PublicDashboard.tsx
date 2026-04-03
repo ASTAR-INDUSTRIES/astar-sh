@@ -36,17 +36,31 @@ const NewsAutoScroll = ({ posts, onSelect }: { posts: any[]; onSelect: (id: stri
     if (posts.length === 0) return;
     const el = scrollRef.current;
     if (!el) return;
-    // Start at bottom so newest (top) scrolls into view
     el.scrollTop = el.scrollHeight;
-    const interval = setInterval(() => {
-      if (hovered.current) return;
-      if (el.scrollTop <= 4) {
-        el.scrollTop = el.scrollHeight;
-      } else {
-        el.scrollBy({ top: -60, behavior: "smooth" });
+
+    let raf: number;
+    let lastTime = 0;
+    const SPEED = 20; // pixels per second
+
+    const tick = (time: number) => {
+      if (lastTime === 0) lastTime = time;
+      const delta = time - lastTime;
+      lastTime = time;
+
+      if (!hovered.current) {
+        if (el.scrollTop <= 0) {
+          // Seamlessly reset to bottom
+          el.scrollTop = el.scrollHeight;
+          lastTime = 0;
+        } else {
+          el.scrollTop -= (SPEED * delta) / 1000;
+        }
       }
-    }, 4000);
-    return () => clearInterval(interval);
+      raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
   }, [posts.length]);
 
   return (
