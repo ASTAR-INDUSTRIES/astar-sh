@@ -5,6 +5,11 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.25] - 2026-04-04
+### Added
+- Scope enforcement on MCP tools — agents can only call tools matching their scopes
+- Denied tool calls logged to audit with `scope_denied` action
+
 ## [0.0.24] - 2026-04-04
 ### Added
 - `agent_inbox` table — unified message queue for all agents

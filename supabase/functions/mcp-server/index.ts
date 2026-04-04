@@ -27,6 +27,20 @@ function adminClient() {
   });
 }
 
+const TOOL_SCOPES: Record<string, string> = {
+  post_tweet: "tweet.post", list_tweets: "tweet.read", delete_tweet: "tweet.delete", react_to_tweet: "tweet.write",
+  query_content: "content.read", get_stats: "content.read",
+  create_skill: "skill.create", update_skill: "skill.write", delete_skill: "skill.delete", list_skills: "skill.read", get_skill: "skill.read", upload_skill_file: "skill.write", delete_skill_file: "skill.delete", get_skill_history: "skill.read",
+  create_news: "news.create", update_news: "news.write", delete_news: "news.delete", list_news: "news.read",
+  submit_feedback: "feedback.write", list_feedback: "feedback.read", update_feedback: "feedback.write",
+  create_milestone: "milestone.create", list_milestones: "milestone.read",
+  ask_agent: "inbox.write", list_inbox: "inbox.read", read_inbox: "inbox.read", respond_inbox: "inbox.respond",
+  submit_inquiry: "inbox.write", list_own_inquiries: "inbox.read", list_pending_inquiries: "inbox.read", respond_inquiry: "inbox.respond",
+  create_task: "task.create", update_task: "task.write", complete_task: "task.write", list_tasks: "task.read", get_task: "task.read", comment_task: "task.write", link_task: "task.write", triage_tasks: "task.read", accept_task: "task.write", dismiss_task: "task.write", get_velocity: "task.read", suggest_next_task: "task.read",
+  query_audit: "audit.read",
+  list_agents: "agent.read", get_agent: "agent.read", register_agent: "agent.create",
+};
+
 function sanityToken(): string {
   return env("SANITY_API_TOKEN");
 }
@@ -942,6 +956,19 @@ function toSlug(title: string): string {
 // ── MCP Tool Handlers ──────────────────────────────────────────────────
 async function handleTool(name: string, args: any, user: { email: string; userId: string }): Promise<any[]> {
   const sb = adminClient();
+
+  const { data: callerAgent } = await sb.from("agents").select("slug, scopes, status").eq("email", user.email).maybeSingle();
+  if (callerAgent) {
+    const required = TOOL_SCOPES[name];
+    if (required && !callerAgent.scopes?.includes(required)) {
+      await sb.from("audit_events").insert({
+        actor_email: user.email, actor_type: "agent", actor_agent_id: callerAgent.slug,
+        entity_type: "tool", entity_id: name, action: "scope_denied",
+        channel: "mcp", state_after: { required_scope: required, agent_scopes: callerAgent.scopes },
+      });
+      return [{ type: "text", text: `Denied: agent '${callerAgent.slug}' lacks scope '${required}' for tool '${name}'` }];
+    }
+  }
 
   switch (name) {
     case "post_tweet": {

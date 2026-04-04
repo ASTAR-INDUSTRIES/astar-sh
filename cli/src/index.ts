@@ -19,7 +19,7 @@ import { AstarAPI } from "./lib/api";
 import { c } from "./lib/ui";
 import { resolve } from "path";
 
-export const VERSION = "0.0.24";
+export const VERSION = "0.0.25";
 
 async function showDashboard() {
   const status = await getAuthStatus();
