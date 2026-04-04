@@ -2,7 +2,6 @@ import type { Command } from "commander";
 import { AstarAPI } from "../lib/api";
 import { c, table } from "../lib/ui";
 import { getToken } from "../lib/auth";
-import { getConfig } from "../lib/config";
 
 async function requireAuth(): Promise<string> {
   try {
@@ -29,18 +28,12 @@ const statusColors: Record<string, string> = {
   failed: c.red,
 };
 
-async function checkCfaHealth(): Promise<{ online: boolean; pending: number }> {
+async function checkCfaHealth(api: AstarAPI): Promise<{ online: boolean; pending: number }> {
   try {
-    const config = await getConfig();
-    const res = await fetch(`${config.apiUrl}/inquiries/health`);
-    if (!res.ok) return { online: false, pending: 0 };
-    const data = await res.json();
+    const data = await api.checkAgentHealth("cfa");
     const hasActivity = data.last_completed_at !== null;
     const stale = data.oldest_pending_age_seconds > 300;
-    return {
-      online: hasActivity || !stale,
-      pending: data.pending_count,
-    };
+    return { online: hasActivity || !stale, pending: data.pending_count };
   } catch {
     return { online: false, pending: 0 };
   }
@@ -55,15 +48,15 @@ async function pollForResponse(api: AstarAPI, id: string, timeoutMs: number = 30
   while (Date.now() - start < timeoutMs) {
     await new Promise((r) => setTimeout(r, interval));
     try {
-      const inquiry = await api.getInquiry(id);
-      if (inquiry.status === "completed") {
+      const msg = await api.getAgentMessage("cfa", id);
+      if (msg.status === "completed") {
         process.stdout.write(`\r${" ".repeat(40)}\r`);
-        console.log(`  ${c.green}✓${c.reset} ${inquiry.response}`);
+        console.log(`  ${c.green}✓${c.reset} ${msg.response}`);
         return;
       }
-      if (inquiry.status === "failed") {
+      if (msg.status === "failed") {
         process.stdout.write(`\r${" ".repeat(40)}\r`);
-        console.log(`  ${c.red}✗${c.reset} CFA error: ${inquiry.response || "Unknown error"}`);
+        console.log(`  ${c.red}✗${c.reset} CFA error: ${msg.response || "Unknown error"}`);
         return;
       }
     } catch {}
@@ -86,7 +79,7 @@ export function registerHoursCommands(program: Command) {
       const token = await requireAuth();
       const api = new AstarAPI(token);
 
-      const health = await checkCfaHealth();
+      const health = await checkCfaHealth(api);
       if (!health.online) {
         console.log(`  ${c.yellow}⚠${c.reset}  CFA appears to be offline${health.pending ? ` (${health.pending} inquiries pending)` : ""}`);
         console.log(`  ${c.dim}Your question will be queued and answered when CFA comes back.${c.reset}`);
@@ -94,7 +87,7 @@ export function registerHoursCommands(program: Command) {
       }
 
       try {
-        const { id } = await api.submitInquiry(question, "question");
+        const { id } = await api.askAgent("cfa", question, "question");
         if (health.online) {
           await pollForResponse(api, id);
         } else {
@@ -114,10 +107,10 @@ export function registerHoursCommands(program: Command) {
       const api = new AstarAPI(token);
 
       try {
-        await api.submitInquiry(description, "log_hours");
+        await api.askAgent("cfa", description, "action");
         console.log(`${c.green}✓${c.reset} Sent to CFA. Will be logged shortly.`);
 
-        const health = await checkCfaHealth();
+        const health = await checkCfaHealth(api);
         if (!health.online) {
           console.log(`  ${c.yellow}⚠${c.reset}  ${c.dim}CFA appears offline — will process when back.${c.reset}`);
         }
@@ -137,8 +130,8 @@ export function registerHoursCommands(program: Command) {
 
       try {
         const [items, health] = await Promise.all([
-          api.listOwnInquiries(opts.status),
-          checkCfaHealth(),
+          api.listAgentMessages("cfa", opts.status),
+          checkCfaHealth(api),
         ]);
 
         if (!items.length) {
@@ -156,15 +149,15 @@ export function registerHoursCommands(program: Command) {
 
         table(
           ["#", "Type", "Inquiry", "Status", "Response", "Date"],
-          items.map((inq, i) => {
-            const sc = statusColors[inq.status] || c.dim;
+          items.map((m, i) => {
+            const sc = statusColors[m.status] || c.dim;
             return [
               `${c.dim}${i + 1}${c.reset}`,
-              `${c.dim}${inq.type}${c.reset}`,
-              truncate(inq.content, 30),
-              `${sc}${inq.status}${c.reset}`,
-              inq.response ? truncate(inq.response, 30) : `${c.dim}—${c.reset}`,
-              `${c.dim}${fmtDate(inq.created_at)}${c.reset}`,
+              `${c.dim}${m.type}${c.reset}`,
+              truncate(m.content, 30),
+              `${sc}${m.status}${c.reset}`,
+              m.response ? truncate(m.response, 30) : `${c.dim}—${c.reset}`,
+              `${c.dim}${fmtDate(m.created_at)}${c.reset}`,
             ];
           })
         );
@@ -183,7 +176,7 @@ export function registerHoursCommands(program: Command) {
       const api = new AstarAPI(token);
       const month = new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
-      const health = await checkCfaHealth();
+      const health = await checkCfaHealth(api);
       if (!health.online) {
         console.log(`  ${c.yellow}⚠${c.reset}  CFA appears to be offline`);
         console.log(`  ${c.dim}Your question will be queued and answered when CFA comes back.${c.reset}`);
@@ -191,7 +184,7 @@ export function registerHoursCommands(program: Command) {
       }
 
       try {
-        const { id } = await api.submitInquiry(`Give me my full monthly hour summary for ${month}`, "question");
+        const { id } = await api.askAgent("cfa", `Give me my full monthly hour summary for ${month}`, "question");
         if (health.online) {
           await pollForResponse(api, id);
         } else {

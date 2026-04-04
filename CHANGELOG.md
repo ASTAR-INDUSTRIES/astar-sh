@@ -5,6 +5,17 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.24] - 2026-04-04
+### Added
+- `agent_inbox` table — unified message queue for all agents
+- `astar ask <agent> "message"` — talk to any registered agent
+- Type inference: questions poll for response, actions fire-and-forget
+- `ask_agent`, `list_inbox`, `read_inbox`, `respond_inbox` MCP tools
+- `POST/GET/PATCH /ask/:agent_slug` API endpoints
+
+### Changed
+- `astar hours` now uses generalized inbox (same UX, new backend)
+
 ## [0.0.23] - 2026-04-04
 ### Added
 - `astar todo --monitor` now shows task descriptions (expanded by default)

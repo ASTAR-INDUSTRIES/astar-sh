@@ -617,49 +617,99 @@ const TOOLS = [
       },
     },
   },
-  // ── Financial Inquiry Tools ─────────────────────────────────────────
+  // ── Agent Inbox Tools ───────────────────────────────────────────────
   {
-    name: "submit_inquiry",
-    description: "Submit a financial inquiry to the CFA (Chief Financial Agent) — log hours, ask about pay, or submit expenses",
+    name: "ask_agent",
+    description: "Send a message to any agent's inbox — log hours, ask questions, request reviews",
     inputSchema: {
       type: "object",
       properties: {
-        content: { type: "string", description: "What do you need? e.g. 'Log 8h on Equinor today' or 'How much have I worked this week?'" },
-        type: { type: "string", enum: ["log_hours", "question", "expense"], description: "Type of inquiry (default: question)" },
+        agent_slug: { type: "string", description: "Agent slug (e.g. cfa, clo, newsbot)" },
+        content: { type: "string", description: "Your message to the agent" },
+        type: { type: "string", enum: ["action", "question", "review"], description: "Message type (auto-inferred if omitted)" },
+      },
+      required: ["agent_slug", "content"],
+    },
+  },
+  {
+    name: "list_inbox",
+    description: "Check your messages to a specific agent and their responses",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_slug: { type: "string", description: "Agent slug" },
+        status: { type: "string", enum: ["pending", "processing", "completed", "failed"], description: "Filter by status" },
+        limit: { type: "number", description: "Max results (default 10)" },
+      },
+      required: ["agent_slug"],
+    },
+  },
+  {
+    name: "read_inbox",
+    description: "Agent: read unclaimed messages from your inbox queue",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_slug: { type: "string", description: "Agent slug to read inbox for" },
+        limit: { type: "number", description: "Max results (default 10)" },
+      },
+      required: ["agent_slug"],
+    },
+  },
+  {
+    name: "respond_inbox",
+    description: "Agent: respond to an inbox message",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Message UUID" },
+        response: { type: "string", description: "The response to the sender" },
+        status: { type: "string", enum: ["completed", "failed"], description: "Outcome" },
+      },
+      required: ["id", "response", "status"],
+    },
+  },
+  // ── Legacy CFA aliases ────────────────────────────────────────────
+  {
+    name: "submit_inquiry",
+    description: "[Alias] Submit a financial inquiry to the CFA — use ask_agent instead",
+    inputSchema: {
+      type: "object",
+      properties: {
+        content: { type: "string", description: "What do you need?" },
+        type: { type: "string", enum: ["log_hours", "question", "expense"], description: "Type of inquiry" },
       },
       required: ["content"],
     },
   },
   {
     name: "list_own_inquiries",
-    description: "Check your financial inquiries and CFA responses",
+    description: "[Alias] Check your CFA inquiries — use list_inbox instead",
     inputSchema: {
       type: "object",
       properties: {
-        status: { type: "string", enum: ["pending", "processing", "completed", "failed"], description: "Filter by status" },
-        limit: { type: "number", description: "Max results (default 10)" },
+        status: { type: "string", enum: ["pending", "processing", "completed", "failed"] },
+        limit: { type: "number" },
       },
     },
   },
   {
     name: "list_pending_inquiries",
-    description: "CFA: read unclaimed financial inquiries from the queue",
+    description: "[Alias] CFA: read queue — use read_inbox instead",
     inputSchema: {
       type: "object",
-      properties: {
-        limit: { type: "number", description: "Max results (default 10)" },
-      },
+      properties: { limit: { type: "number" } },
     },
   },
   {
     name: "respond_inquiry",
-    description: "CFA: respond to a financial inquiry",
+    description: "[Alias] CFA: respond — use respond_inbox instead",
     inputSchema: {
       type: "object",
       properties: {
-        id: { type: "string", description: "Inquiry UUID" },
-        response: { type: "string", description: "The response to the employee" },
-        status: { type: "string", enum: ["completed", "failed"], description: "Outcome" },
+        id: { type: "string" },
+        response: { type: "string" },
+        status: { type: "string", enum: ["completed", "failed"] },
       },
       required: ["id", "response", "status"],
     },
@@ -1225,28 +1275,71 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       return [{ type: "text", text: out }];
     }
 
-    // ── Financial Inquiries ──────────────────────────────────────────
-    case "submit_inquiry": {
+    // ── Agent Inbox ────────────────────────────────────────────────
+    case "ask_agent": {
       const sb = adminClient();
-      const type = args.type || "question";
-      const { data, error } = await sb.from("financial_inquiries").insert({
-        type,
-        content: args.content,
-        author_email: user.email,
-        author_name: user.email.split("@")[0],
+      const slug = args.agent_slug;
+      const { data: agent } = await sb.from("agents").select("slug, status").eq("slug", slug).single();
+      if (!agent) return [{ type: "text", text: `Error: Agent '${slug}' not found.` }];
+      if (agent.status !== "active") return [{ type: "text", text: `Error: Agent '${slug}' is ${agent.status}.` }];
+      const lower = args.content.toLowerCase().trim();
+      const type = args.type || (lower.includes("?") || /^(what|how|why|when|who|where|is |are |can |do |does )/.test(lower) ? "question" : /^review|review this|check this/.test(lower) ? "review" : "action");
+      const { data, error } = await sb.from("agent_inbox").insert({
+        agent_slug: slug, type, content: args.content, author_email: user.email, author_name: user.email.split("@")[0],
       }).select("id").single();
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
-      const label = type === "log_hours" ? "Sent to CFA. Will be logged shortly." : `Inquiry submitted (${data.id.slice(0, 8)}). CFA will respond.`;
+      const label = type === "action" ? `Sent to ${slug}. Will be processed shortly.` : `Message sent to ${slug} (${data.id.slice(0, 8)}). Awaiting response.`;
+      return [{ type: "text", text: `✓ ${label}` }];
+    }
+
+    case "list_inbox": {
+      const sb = adminClient();
+      let query = sb.from("agent_inbox").select("*").eq("agent_slug", args.agent_slug).eq("author_email", user.email).order("created_at", { ascending: false }).limit(args.limit || 10);
+      if (args.status) query = query.eq("status", args.status);
+      const { data, error } = await query;
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      if (!data?.length) return [{ type: "text", text: `No messages to ${args.agent_slug}.` }];
+      const out = data.map((i: any) => {
+        const resp = i.response ? `\n  → ${i.response}` : "";
+        return `[${i.status}] ${i.type}: ${i.content}${resp}`;
+      }).join("\n\n");
+      return [{ type: "text", text: out }];
+    }
+
+    case "read_inbox": {
+      const sb = adminClient();
+      await sb.from("agent_inbox").update({ status: "pending", locked_by: null, locked_at: null }).eq("agent_slug", args.agent_slug).eq("status", "processing").lt("locked_at", new Date(Date.now() - 5 * 60 * 1000).toISOString());
+      const { data, error } = await sb.from("agent_inbox").select("*").eq("agent_slug", args.agent_slug).eq("status", "pending").is("locked_by", null).order("created_at", { ascending: true }).limit(args.limit || 10);
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      if (!data?.length) return [{ type: "text", text: `No pending messages for ${args.agent_slug}.` }];
+      return [{ type: "text", text: JSON.stringify(data, null, 2) }];
+    }
+
+    case "respond_inbox": {
+      const sb = adminClient();
+      const { error } = await sb.from("agent_inbox").update({
+        status: args.status, response: args.response, processed_by: user.email, processed_at: new Date().toISOString(), locked_by: null, locked_at: null,
+      }).eq("id", args.id);
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      return [{ type: "text", text: `✓ Message ${args.id.slice(0, 8)} marked as ${args.status}.` }];
+    }
+
+    // ── Legacy CFA aliases (redirect to agent_inbox) ────────────────
+    case "submit_inquiry": {
+      const sb = adminClient();
+      const typeMap: Record<string, string> = { log_hours: "action", expense: "action", question: "question" };
+      const type = typeMap[args.type] || "question";
+      const { data, error } = await sb.from("agent_inbox").insert({
+        agent_slug: "cfa", type, content: args.content, author_email: user.email, author_name: user.email.split("@")[0],
+      }).select("id").single();
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      const label = type === "action" ? "Sent to CFA. Will be logged shortly." : `Inquiry submitted (${data.id.slice(0, 8)}). CFA will respond.`;
       return [{ type: "text", text: `✓ ${label}` }];
     }
 
     case "list_own_inquiries": {
       const sb = adminClient();
-      let query = sb.from("financial_inquiries")
-        .select("*")
-        .eq("author_email", user.email)
-        .order("created_at", { ascending: false })
-        .limit(args.limit || 10);
+      let query = sb.from("agent_inbox").select("*").eq("agent_slug", "cfa").eq("author_email", user.email).order("created_at", { ascending: false }).limit(args.limit || 10);
       if (args.status) query = query.eq("status", args.status);
       const { data, error } = await query;
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
@@ -1260,18 +1353,8 @@ async function handleTool(name: string, args: any, user: { email: string; userId
 
     case "list_pending_inquiries": {
       const sb = adminClient();
-      // Reclaim stale locks
-      await sb.from("financial_inquiries")
-        .update({ status: "pending", locked_by: null, locked_at: null })
-        .eq("status", "processing")
-        .lt("locked_at", new Date(Date.now() - 5 * 60 * 1000).toISOString());
-
-      const { data, error } = await sb.from("financial_inquiries")
-        .select("*")
-        .eq("status", "pending")
-        .is("locked_by", null)
-        .order("created_at", { ascending: true })
-        .limit(args.limit || 10);
+      await sb.from("agent_inbox").update({ status: "pending", locked_by: null, locked_at: null }).eq("agent_slug", "cfa").eq("status", "processing").lt("locked_at", new Date(Date.now() - 5 * 60 * 1000).toISOString());
+      const { data, error } = await sb.from("agent_inbox").select("*").eq("agent_slug", "cfa").eq("status", "pending").is("locked_by", null).order("created_at", { ascending: true }).limit(args.limit || 10);
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
       if (!data?.length) return [{ type: "text", text: "No pending inquiries." }];
       return [{ type: "text", text: JSON.stringify(data, null, 2) }];
@@ -1279,16 +1362,9 @@ async function handleTool(name: string, args: any, user: { email: string; userId
 
     case "respond_inquiry": {
       const sb = adminClient();
-      const { error } = await sb.from("financial_inquiries")
-        .update({
-          status: args.status,
-          response: args.response,
-          processed_by: user.email,
-          processed_at: new Date().toISOString(),
-          locked_by: null,
-          locked_at: null,
-        })
-        .eq("id", args.id);
+      const { error } = await sb.from("agent_inbox").update({
+        status: args.status, response: args.response, processed_by: user.email, processed_at: new Date().toISOString(), locked_by: null, locked_at: null,
+      }).eq("id", args.id);
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
       return [{ type: "text", text: `✓ Inquiry ${args.id.slice(0, 8)} marked as ${args.status}.` }];
     }

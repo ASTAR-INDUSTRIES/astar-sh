@@ -632,6 +632,183 @@ app.patch("/inquiries/:id", async (c) => {
   return c.json({ error: "status must be processing, completed, or failed" }, 400, corsHeaders);
 });
 
+// ── Agent Inbox ─────────────────────────────────────────────────────
+
+function inferMessageType(content: string): "action" | "question" | "review" {
+  const lower = content.toLowerCase().trim();
+  if (lower.includes("?") || /^(what|how|why|when|who|where|is |are |can |do |does )/.test(lower)) return "question";
+  if (/^review|review this|check this/.test(lower)) return "review";
+  return "action";
+}
+
+app.post("/ask/:agent_slug", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const slug = c.req.param("agent_slug");
+  const sb = getSupabase();
+
+  const { data: agent } = await sb.from("agents").select("slug, status").eq("slug", slug).single();
+  if (!agent) return c.json({ error: `Agent '${slug}' not found` }, 404, corsHeaders);
+  if (agent.status !== "active") return c.json({ error: `Agent '${slug}' is ${agent.status}` }, 400, corsHeaders);
+
+  const body = await c.req.json();
+  if (!body.content) return c.json({ error: "content is required" }, 400, corsHeaders);
+
+  const type = body.type || inferMessageType(body.content);
+  if (!["action", "question", "review"].includes(type)) {
+    return c.json({ error: "type must be action, question, or review" }, 400, corsHeaders);
+  }
+
+  const { data, error } = await sb.from("agent_inbox").insert({
+    agent_slug: slug,
+    type,
+    content: body.content,
+    author_email: user.email,
+    author_name: user.name,
+    delivery_channel: body.delivery_channel || "cli",
+  }).select("id").single();
+
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+  await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "inbox", entity_id: data.id, action: "submitted", channel: "api", state_after: { agent_slug: slug, type } });
+
+  return c.json({ ok: true, id: data.id, type }, 200, corsHeaders);
+});
+
+app.get("/ask/:agent_slug/pending", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const slug = c.req.param("agent_slug");
+  const sb = getSupabase();
+
+  await sb.from("agent_inbox")
+    .update({ status: "pending", locked_by: null, locked_at: null })
+    .eq("agent_slug", slug)
+    .eq("status", "processing")
+    .lt("locked_at", new Date(Date.now() - 5 * 60 * 1000).toISOString());
+
+  const { data, error } = await sb.from("agent_inbox")
+    .select("*")
+    .eq("agent_slug", slug)
+    .eq("status", "pending")
+    .is("locked_by", null)
+    .order("created_at", { ascending: true })
+    .limit(10);
+
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+  return c.json({ messages: data || [] }, 200, corsHeaders);
+});
+
+app.get("/ask/:agent_slug/health", async (c) => {
+  const slug = c.req.param("agent_slug");
+  const sb = getSupabase();
+
+  const { data: pending } = await sb.from("agent_inbox")
+    .select("created_at")
+    .eq("agent_slug", slug)
+    .eq("status", "pending")
+    .order("created_at", { ascending: true })
+    .limit(1);
+
+  const { data: lastDone } = await sb.from("agent_inbox")
+    .select("processed_at")
+    .eq("agent_slug", slug)
+    .eq("status", "completed")
+    .order("processed_at", { ascending: false })
+    .limit(1);
+
+  const { count } = await sb.from("agent_inbox")
+    .select("*", { count: "exact", head: true })
+    .eq("agent_slug", slug)
+    .eq("status", "pending");
+
+  const oldestAge = pending?.[0]?.created_at
+    ? Math.floor((Date.now() - new Date(pending[0].created_at).getTime()) / 1000)
+    : 0;
+
+  return c.json({
+    pending_count: count || 0,
+    oldest_pending_age_seconds: oldestAge,
+    last_completed_at: lastDone?.[0]?.processed_at || null,
+  }, 200, corsHeaders);
+});
+
+app.get("/ask/:agent_slug/:id", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const id = c.req.param("id");
+  const sb = getSupabase();
+  const { data, error } = await sb.from("agent_inbox")
+    .select("*")
+    .eq("id", id)
+    .eq("author_email", user.email)
+    .single();
+
+  if (error || !data) return c.json({ error: "Not found" }, 404, corsHeaders);
+  return c.json({ message: data }, 200, corsHeaders);
+});
+
+app.get("/ask/:agent_slug", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const slug = c.req.param("agent_slug");
+  const status = c.req.query("status");
+  const sb = getSupabase();
+  let query = sb.from("agent_inbox")
+    .select("*")
+    .eq("agent_slug", slug)
+    .eq("author_email", user.email)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  if (status) query = query.eq("status", status);
+
+  const { data, error } = await query;
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+  return c.json({ messages: data || [] }, 200, corsHeaders);
+});
+
+app.patch("/ask/:agent_slug/:id", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const id = c.req.param("id");
+  const body = await c.req.json();
+  const sb = getSupabase();
+
+  if (body.status === "processing") {
+    const { error } = await sb.from("agent_inbox")
+      .update({ status: "processing", locked_by: user.email, locked_at: new Date().toISOString() })
+      .eq("id", id)
+      .in("status", ["pending"]);
+    if (error) return c.json({ error: error.message }, 500, corsHeaders);
+    return c.json({ ok: true }, 200, corsHeaders);
+  }
+
+  if (body.status === "completed" || body.status === "failed") {
+    const { error } = await sb.from("agent_inbox")
+      .update({
+        status: body.status,
+        response: body.response || null,
+        processed_by: user.email,
+        processed_at: new Date().toISOString(),
+        locked_by: null,
+        locked_at: null,
+      })
+      .eq("id", id);
+    if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+    await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "inbox", entity_id: id, action: "processed", channel: "api", state_after: { status: body.status, response: body.response } });
+
+    return c.json({ ok: true }, 200, corsHeaders);
+  }
+
+  return c.json({ error: "status must be processing, completed, or failed" }, 400, corsHeaders);
+});
+
 // ── Task audit helper ────────────────────────────────────────────────
 async function logTaskAudit(taskId: string, taskNumber: string | number, actor: string, actorType: string, action: string, opts: { state_before?: any; state_after?: any; channel?: string } = {}) {
   await logAudit({

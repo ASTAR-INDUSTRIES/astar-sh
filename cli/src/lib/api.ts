@@ -156,6 +156,20 @@ export interface Inquiry {
   processed_at?: string;
 }
 
+export interface InboxMessage {
+  id: string;
+  agent_slug: string;
+  type: string;
+  content: string;
+  author_email: string;
+  author_name: string;
+  status: string;
+  response?: string;
+  processed_by?: string;
+  created_at: string;
+  processed_at?: string;
+}
+
 export interface Milestone {
   id: string;
   title: string;
@@ -331,6 +345,37 @@ export class AstarAPI {
   async getInquiry(id: string): Promise<Inquiry> {
     const data = await this.fetch<{ inquiry: Inquiry }>(`/inquiries/${id}`);
     return data.inquiry;
+  }
+
+  async askAgent(slug: string, content: string, type?: string): Promise<{ ok: boolean; id: string; type: string }> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/ask/${slug}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ content, type }),
+    });
+    if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+    return res.json();
+  }
+
+  async listAgentMessages(slug: string, status?: string): Promise<InboxMessage[]> {
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    const qs = params.toString();
+    const data = await this.fetch<{ messages: InboxMessage[] }>(`/ask/${slug}${qs ? `?${qs}` : ""}`);
+    return data.messages;
+  }
+
+  async getAgentMessage(slug: string, id: string): Promise<InboxMessage> {
+    const data = await this.fetch<{ message: InboxMessage }>(`/ask/${slug}/${id}`);
+    return data.message;
+  }
+
+  async checkAgentHealth(slug: string): Promise<{ pending_count: number; oldest_pending_age_seconds: number; last_completed_at: string | null }> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/ask/${slug}/health`);
+    if (!res.ok) return { pending_count: 0, oldest_pending_age_seconds: 0, last_completed_at: null };
+    return res.json();
   }
 
   async listTasks(filters?: { status?: string; priority?: string; assigned_to?: string; due?: string; search?: string }): Promise<Task[]> {
