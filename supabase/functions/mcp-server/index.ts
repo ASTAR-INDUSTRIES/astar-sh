@@ -1415,6 +1415,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
         parent_task_id: parentId,
         estimated_hours: args.estimated_hours ?? null,
         recurring: args.recurring ? { interval: args.recurring } : null,
+        visibility: args.visibility || "private",
       }).select("task_number, id").single();
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
       if (args.links?.length) {
@@ -1433,7 +1434,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       if (fetchErr || !task) return [{ type: "text", text: "Error: Task not found." }];
       const patch: any = { updated_at: new Date().toISOString() };
       const changes: any = {};
-      for (const f of ["status", "priority", "assigned_to", "due_date", "description"]) {
+      for (const f of ["status", "priority", "assigned_to", "due_date", "description", "visibility"]) {
         if ((args as any)[f] !== undefined) { patch[f] = (args as any)[f]; changes[f] = (args as any)[f]; }
       }
       if (args.status === "completed") { patch.completed_by = user.email; patch.completed_at = new Date().toISOString(); }
@@ -1456,7 +1457,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
 
     case "list_tasks": {
       const sb = adminClient();
-      let query = sb.from("tasks").select("task_number, title, status, priority, assigned_to, due_date, created_at").is("archived_at", null).not("status", "eq", "cancelled").order("created_at", { ascending: false }).limit(args.limit || 20);
+      let query = sb.from("tasks").select("task_number, title, status, priority, assigned_to, due_date, created_at, visibility").is("archived_at", null).not("status", "eq", "cancelled").order("created_at", { ascending: false }).limit(args.limit || 20);
       if (args.assigned_to && args.assigned_to !== "all") query = query.eq("assigned_to", args.assigned_to);
       else if (!args.assigned_to) query = query.eq("assigned_to", user.email);
       if (args.status) query = query.eq("status", args.status);
