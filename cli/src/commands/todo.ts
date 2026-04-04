@@ -94,8 +94,13 @@ async function renderMonitor(api: AstarAPI) {
 
   process.stdout.write("\x1b[2J\x1b[H");
 
+  const cols = process.stdout.columns || 100;
+  const rightWidth = 30;
+  const titleWidth = Math.max(20, cols - rightWidth - 10);
+
   console.log("");
-  console.log(`  ${c.bold}TASKS${c.reset}${" ".repeat(50)}${c.dim}${time}${c.reset}`);
+  const headerPad = Math.max(1, cols - 18);
+  console.log(`  ${c.bold}TASKS${c.reset}${" ".repeat(headerPad)}${c.dim}${time}${c.reset}`);
   console.log("");
 
   for (const t of sorted) {
@@ -104,16 +109,24 @@ async function renderMonitor(api: AstarAPI) {
     const due = t.due_date ? fmtDate(t.due_date) : "—";
     const assignee = t.assigned_to?.split("@")[0] || "—";
     const overdue = t.due_date && t.due_date < todayStr;
+    const num = `#${t.task_number}`;
+    const numPad = num.length < 4 ? " ".repeat(4 - num.length) : "";
+    const title = t.title.length > titleWidth ? t.title.slice(0, titleWidth - 1) + "…" : t.title;
+    const titlePad = " ".repeat(Math.max(1, titleWidth - title.length));
 
-    console.log(`  ${pColor}${bar}${c.reset} ${c.cyan}#${t.task_number}${c.reset}   ${t.title.slice(0, 38)}${" ".repeat(Math.max(1, 40 - t.title.length))}${pColor}${t.priority}${c.reset}  ${overdue ? c.red : c.dim}${due}${c.reset}  ${c.dim}${assignee}${c.reset}`);
+    console.log(`  ${pColor}${bar}${c.reset} ${c.cyan}${num}${c.reset}${numPad}  ${title}${titlePad}${pColor}${t.priority.padEnd(9)}${c.reset}${overdue ? c.red : c.dim}${due.padEnd(8)}${c.reset}${c.dim}${assignee}${c.reset}`);
   }
 
   if (doneToday.length) {
     console.log("");
     console.log(`  ${c.dim}─${c.reset}`);
     for (const t of doneToday) {
-      const time = t.completed_at ? new Date(t.completed_at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "";
-      console.log(`  ${c.green}✓${c.reset} ${c.dim}#${t.task_number}${c.reset}   ${c.dim}${t.title.slice(0, 38)}${c.reset}${" ".repeat(Math.max(1, 40 - t.title.length))}${c.dim}done${c.reset}    ${c.dim}${time}${c.reset}`);
+      const doneTime = t.completed_at ? new Date(t.completed_at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "";
+      const num = `#${t.task_number}`;
+      const numPad = num.length < 4 ? " ".repeat(4 - num.length) : "";
+      const title = t.title.length > titleWidth ? t.title.slice(0, titleWidth - 1) + "…" : t.title;
+      const titlePad = " ".repeat(Math.max(1, titleWidth - title.length));
+      console.log(`  ${c.green}✓${c.reset} ${c.dim}${num}${c.reset}${numPad}  ${c.dim}${title}${titlePad}done${" ".repeat(5)}${doneTime}${c.reset}`);
     }
   }
 

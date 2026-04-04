@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.22] - 2026-04-04
+
 ## [0.0.21] - 2026-04-04
 ### Added
 - `astar todo --monitor` — live-updating task view with priority color bars, auto-refreshes every 10s
