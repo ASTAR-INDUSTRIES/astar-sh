@@ -5,6 +5,10 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.21] - 2026-04-04
+### Added
+- `astar todo --monitor` — live-updating task view with priority color bars, auto-refreshes every 10s
+
 ## [0.0.20] - 2026-04-04
 ### Added
 - Server-side news quality validation (title max 80 chars, 2+ sources, consensus required, entities required)

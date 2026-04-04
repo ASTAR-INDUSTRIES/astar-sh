@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import { AstarAPI, type Task } from "../lib/api";
 import { c, table } from "../lib/ui";
 import { getToken } from "../lib/auth";
+import { getAuthStatus } from "../lib/auth";
 
 async function requireAuth(): Promise<string> {
   try {
@@ -64,6 +65,62 @@ function renderTaskTable(tasks: Task[]) {
   console.log("");
 }
 
+const priorityBars: Record<string, string> = {
+  critical: "█",
+  high: "█",
+  medium: "▓",
+  low: "░",
+};
+
+async function renderMonitor(api: AstarAPI) {
+  const [openTasks, completedTasks] = await Promise.all([
+    api.listTasks({ assigned_to: "all" }).catch(() => []),
+    api.listTasks({ assigned_to: "all", status: "completed" }).catch(() => []),
+  ]);
+
+  const status = await getAuthStatus();
+  const name = status?.name || "Unknown";
+  const now = new Date();
+  const todayStr = now.toISOString().split("T")[0];
+  const time = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+  const doneToday = completedTasks.filter((t) => t.completed_at?.startsWith(todayStr));
+  const open = openTasks.filter((t) => t.status !== "completed" && t.status !== "cancelled");
+
+  const sorted = [...open].sort((a, b) => {
+    const po: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+    return (po[a.priority] ?? 2) - (po[b.priority] ?? 2);
+  });
+
+  process.stdout.write("\x1b[2J\x1b[H");
+
+  console.log("");
+  console.log(`  ${c.bold}TASKS${c.reset}${" ".repeat(50)}${c.dim}${time}${c.reset}`);
+  console.log("");
+
+  for (const t of sorted) {
+    const bar = priorityBars[t.priority] || "░";
+    const pColor = priorityColors[t.priority] || c.dim;
+    const due = t.due_date ? fmtDate(t.due_date) : "—";
+    const assignee = t.assigned_to?.split("@")[0] || "—";
+    const overdue = t.due_date && t.due_date < todayStr;
+
+    console.log(`  ${pColor}${bar}${c.reset} ${c.cyan}#${t.task_number}${c.reset}   ${t.title.slice(0, 38)}${" ".repeat(Math.max(1, 40 - t.title.length))}${pColor}${t.priority}${c.reset}  ${overdue ? c.red : c.dim}${due}${c.reset}  ${c.dim}${assignee}${c.reset}`);
+  }
+
+  if (doneToday.length) {
+    console.log("");
+    console.log(`  ${c.dim}─${c.reset}`);
+    for (const t of doneToday) {
+      const time = t.completed_at ? new Date(t.completed_at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "";
+      console.log(`  ${c.green}✓${c.reset} ${c.dim}#${t.task_number}${c.reset}   ${c.dim}${t.title.slice(0, 38)}${c.reset}${" ".repeat(Math.max(1, 40 - t.title.length))}${c.dim}done${c.reset}    ${c.dim}${time}${c.reset}`);
+    }
+  }
+
+  console.log("");
+  console.log(`  ${c.dim}${sorted.length} open · ${doneToday.length} done today${c.reset}${" ".repeat(30)}${c.dim}ctrl+c quit${c.reset}`);
+}
+
 export function registerTodoCommands(program: Command) {
   const todo = program
     .command("todo [title]")
@@ -77,7 +134,18 @@ export function registerTodoCommands(program: Command) {
     .option("--skill <slug>", "Link to a skill")
     .option("--estimate <hours>", "Estimated hours")
     .option("--recurring <interval>", "Recurring: weekly, monthly, quarterly")
+    .option("--monitor", "Live-updating task view (refreshes every 10s)")
     .action(async (title: string | undefined, opts) => {
+      if (opts.monitor) {
+        const token = await requireAuth();
+        const api = new AstarAPI(token);
+        await renderMonitor(api);
+        const interval = setInterval(() => renderMonitor(api), 10000);
+        process.on("SIGINT", () => { clearInterval(interval); console.log(""); process.exit(0); });
+        await new Promise(() => {});
+        return;
+      }
+
       if (!title) {
         await todo.commands.find((cmd) => cmd.name() === "mine")!.parseAsync([], { from: "user" });
         return;
