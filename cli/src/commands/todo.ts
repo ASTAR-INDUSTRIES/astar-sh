@@ -72,14 +72,14 @@ const priorityBars: Record<string, string> = {
   low: "░",
 };
 
+let monitorExpanded = true;
+
 async function renderMonitor(api: AstarAPI) {
   const [openTasks, completedTasks] = await Promise.all([
     api.listTasks({ assigned_to: "all" }).catch(() => []),
     api.listTasks({ assigned_to: "all", status: "completed" }).catch(() => []),
   ]);
 
-  const status = await getAuthStatus();
-  const name = status?.name || "Unknown";
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
   const time = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -97,6 +97,7 @@ async function renderMonitor(api: AstarAPI) {
   const cols = process.stdout.columns || 100;
   const rightWidth = 30;
   const titleWidth = Math.max(20, cols - rightWidth - 10);
+  const descWidth = Math.max(20, cols - 12);
 
   console.log("");
   const headerPad = Math.max(1, cols - 18);
@@ -115,6 +116,11 @@ async function renderMonitor(api: AstarAPI) {
     const titlePad = " ".repeat(Math.max(1, titleWidth - title.length));
 
     console.log(`  ${pColor}${bar}${c.reset} ${c.cyan}${num}${c.reset}${numPad}  ${title}${titlePad}${pColor}${t.priority.padEnd(9)}${c.reset}${overdue ? c.red : c.dim}${due.padEnd(8)}${c.reset}${c.dim}${assignee}${c.reset}`);
+
+    if (monitorExpanded && t.description) {
+      const desc = t.description.length > descWidth ? t.description.slice(0, descWidth - 1) + "…" : t.description;
+      console.log(`  ${c.dim}  ${" ".repeat(num.length + numPad.length)} ${desc}${c.reset}`);
+    }
   }
 
   if (doneToday.length) {
@@ -131,7 +137,7 @@ async function renderMonitor(api: AstarAPI) {
   }
 
   console.log("");
-  console.log(`  ${c.dim}${sorted.length} open · ${doneToday.length} done today${c.reset}${" ".repeat(30)}${c.dim}ctrl+c quit${c.reset}`);
+  console.log(`  ${c.dim}${sorted.length} open · ${doneToday.length} done today${c.reset}${" ".repeat(Math.max(1, cols - 60))}${c.dim}ctrl+o ${monitorExpanded ? "collapse" : "expand"} · ctrl+c quit${c.reset}`);
 }
 
 export function registerTodoCommands(program: Command) {
@@ -154,7 +160,18 @@ export function registerTodoCommands(program: Command) {
         const api = new AstarAPI(token);
         await renderMonitor(api);
         const interval = setInterval(() => renderMonitor(api), 10000);
-        process.on("SIGINT", () => { clearInterval(interval); console.log(""); process.exit(0); });
+
+        if (process.stdin.isTTY) {
+          process.stdin.setRawMode(true);
+          process.stdin.resume();
+          process.stdin.on("data", (key: Buffer) => {
+            if (key[0] === 0x03) { clearInterval(interval); process.stdin.setRawMode(false); console.log(""); process.exit(0); }
+            if (key[0] === 0x0f) { monitorExpanded = !monitorExpanded; renderMonitor(api); }
+          });
+        } else {
+          process.on("SIGINT", () => { clearInterval(interval); console.log(""); process.exit(0); });
+        }
+
         await new Promise(() => {});
         return;
       }

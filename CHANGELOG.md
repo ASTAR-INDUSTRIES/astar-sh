@@ -5,6 +5,11 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.23] - 2026-04-04
+### Added
+- `astar todo --monitor` now shows task descriptions (expanded by default)
+- `ctrl+o` toggle to expand/collapse descriptions in monitor view
+
 ## [0.0.22] - 2026-04-04
 
 ## [0.0.21] - 2026-04-04
