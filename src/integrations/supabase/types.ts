@@ -14,6 +14,54 @@ export type Database = {
   }
   public: {
     Tables: {
+      agents: {
+        Row: {
+          config: Json | null
+          created_at: string
+          email: string | null
+          id: string
+          last_seen: string | null
+          machine: string | null
+          name: string
+          owner: string
+          role: string | null
+          scopes: string[] | null
+          skill_slug: string | null
+          slug: string
+          status: string
+        }
+        Insert: {
+          config?: Json | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          last_seen?: string | null
+          machine?: string | null
+          name: string
+          owner: string
+          role?: string | null
+          scopes?: string[] | null
+          skill_slug?: string | null
+          slug: string
+          status?: string
+        }
+        Update: {
+          config?: Json | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          last_seen?: string | null
+          machine?: string | null
+          name?: string
+          owner?: string
+          role?: string | null
+          scopes?: string[] | null
+          skill_slug?: string | null
+          slug?: string
+          status?: string
+        }
+        Relationships: []
+      }
       audit_events: {
         Row: {
           action: string
