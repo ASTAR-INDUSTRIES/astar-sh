@@ -5,6 +5,14 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.20] - 2026-04-04
+### Added
+- Server-side news quality validation (title max 80 chars, 2+ sources, consensus required, entities required)
+- Published hardened ai-news-briefing skill to Sanity with strict quality rules
+
+### Changed
+- create_news MCP tool now rejects articles missing consensus, entities, or with titles over 80 chars
+
 ## [0.0.19] - 2026-04-03
 ### Added
 - Agent registry: `agents` table for tracking non-human employees

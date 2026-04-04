@@ -1066,6 +1066,11 @@ async function handleTool(name: string, args: any, user: { email: string; userId
 
     // ── News CRUD ──────────────────────────────────────────────────
     case "create_news": {
+      if (args.title?.length > 80) return [{ type: "text", text: `Error: Title too long (${args.title.length} chars, max 80). Shorten it.` }];
+      if (!args.sources?.length || args.sources.length < 2) return [{ type: "text", text: "Error: Minimum 2 sources required." }];
+      if (!args.consensus?.length) return [{ type: "text", text: "Error: consensus[] required — what do sources agree on?" }];
+      if (!args.entities?.length) return [{ type: "text", text: "Error: entities[] required — include company name + domain for logos." }];
+
       const slug = args.slug || toSlug(args.title);
       const docId = `newsPost-${slug}`;
       const sources = (args.sources || []).map((s: any) => ({

@@ -322,6 +322,22 @@ app.post("/news", async (c) => {
     return c.json({ error: "title and content are required" }, 400, corsHeaders);
   }
 
+  if (title.length > 80) {
+    return c.json({ error: `Title too long (${title.length} chars, max 80). Shorten it.` }, 400, corsHeaders);
+  }
+
+  if (!body.sources?.length || body.sources.length < 2) {
+    return c.json({ error: "Minimum 2 sources required for quality." }, 400, corsHeaders);
+  }
+
+  if (!body.consensus?.length) {
+    return c.json({ error: "consensus[] required — what do sources agree on?" }, 400, corsHeaders);
+  }
+
+  if (!body.entities?.length) {
+    return c.json({ error: "entities[] required — include company name + domain for logos." }, 400, corsHeaders);
+  }
+
   const slug = body.slug || title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const docId = `newsPost-${slug}`;
 
