@@ -14,6 +14,65 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_inbox: {
+        Row: {
+          agent_slug: string
+          author_email: string
+          author_name: string | null
+          content: string
+          created_at: string
+          delivery_channel: string | null
+          id: string
+          locked_at: string | null
+          locked_by: string | null
+          processed_at: string | null
+          processed_by: string | null
+          response: string | null
+          status: string
+          type: string
+        }
+        Insert: {
+          agent_slug: string
+          author_email: string
+          author_name?: string | null
+          content: string
+          created_at?: string
+          delivery_channel?: string | null
+          id?: string
+          locked_at?: string | null
+          locked_by?: string | null
+          processed_at?: string | null
+          processed_by?: string | null
+          response?: string | null
+          status?: string
+          type?: string
+        }
+        Update: {
+          agent_slug?: string
+          author_email?: string
+          author_name?: string | null
+          content?: string
+          created_at?: string
+          delivery_channel?: string | null
+          id?: string
+          locked_at?: string | null
+          locked_by?: string | null
+          processed_at?: string | null
+          processed_by?: string | null
+          response?: string | null
+          status?: string
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_inbox_agent_slug_fkey"
+            columns: ["agent_slug"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["slug"]
+          },
+        ]
+      }
       agents: {
         Row: {
           config: Json | null
