@@ -102,6 +102,22 @@ export interface TaskSuggestion {
   reasons: string[];
 }
 
+export interface Agent {
+  id: string;
+  slug: string;
+  name: string;
+  email?: string;
+  role?: string;
+  owner: string;
+  skill_slug?: string;
+  scopes: string[];
+  status: string;
+  machine?: string;
+  config?: any;
+  last_seen?: string;
+  created_at: string;
+}
+
 export interface AuditEvent {
   id: string;
   timestamp: string;
@@ -411,6 +427,37 @@ export class AstarAPI {
     const qs = params.toString();
     const data = await this.fetch<{ events: AuditEvent[] }>(`/audit${qs ? `?${qs}` : ""}`);
     return data.events;
+  }
+
+  async listAgents(): Promise<Agent[]> {
+    const data = await this.fetch<{ agents: Agent[] }>("/agents");
+    return data.agents;
+  }
+
+  async getAgent(slug: string): Promise<{ agent: Agent; activity: AuditEvent[] }> {
+    return this.fetch(`/agents/${slug}`);
+  }
+
+  async registerAgent(agent: { slug: string; name: string; owner?: string; email?: string; skill_slug?: string; scopes?: string[]; machine?: string }): Promise<{ ok: boolean; slug: string }> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/agents`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(agent),
+    });
+    if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+    return res.json();
+  }
+
+  async updateAgent(slug: string, updates: Record<string, any>): Promise<{ ok: boolean }> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/agents/${slug}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+    return res.json();
   }
 
   async linkTask(num: number, linkType: string, linkRef: string): Promise<{ ok: boolean }> {
