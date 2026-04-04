@@ -1,58 +1,31 @@
 
 
-## Dashboard Layout Redesign
+## Deploy Agent Inbox — Migration + Edge Functions
 
-### New layout
+### What this does
+Sets up a universal agent inbox system so any registered agent can receive and respond to messages from CLI users. Migrates existing financial inquiry data into the new unified inbox.
 
-```text
-┌────────┬──────────┬──────────┬──────────┬─────────┬──────────────┐
-│ 12:34  │ Skills   │ DL       │ Active   │ Hours   │   ASTAR ✦    │
-│ Thu 02 │   47     │  1,247   │   12     │ 187/wk  │   v0.0.7     │
-├────────┴──────────┴──────────┴──────────┴─────────┴──────────────┤
-│  ▓▓▓░░▓▓▓▓░░░▓▓▓░▓▓▓▓▓░░░░▓▓░░░░▓▓▓▓▓░▓▓░░▓▓▓░░▓▓▓▓░░░▓▓▓░   │
-│               Hours Heatmap (compact, 26 weeks)                  │
-├───────────────────────────────┬───────────────────────────────────┤
-│                               │                                   │
-│       Skills Table            │       Thinking Feed               │
-│                               │       (with reactions)            │
-│                               │                                   │
-├───────────────────────────────┼───────────────────────────────────┤
-│                               │                                   │
-│       Shipped Calendar        │       News Feed                   │
-│       (month view)            │       (clickable, auto-scroll)    │
-│                               │                                   │
-└───────────────────────────────┴───────────────────────────────────┘
-```
+### Steps
 
-### Changes to `src/components/PublicDashboard.tsx`
+1. **Run database migration** (`20260405000000_agent_inbox.sql`)
+   - Ensures `cfa` agent exists in `agents` table
+   - Creates `agent_inbox` table with FK to `agents(slug)`, status/type check constraints, RLS policies (public read, authenticated insert/update), and indexes
+   - Migrates all existing `financial_inquiries` rows into `agent_inbox` with `agent_slug = 'cfa'`
 
-**1. Remove Research section** — delete the `articles` query, the Research JSX block (lines 435–468), and the `FlaskConical` import.
+2. **Deploy `skills-api` edge function**
+   - 6 new routes under `/ask/:agent_slug` for submitting messages, listing own messages, reading pending queue, health check, polling single message, and agent responses
+   - Old `/inquiries/*` endpoints remain untouched for backward compatibility
 
-**2. Restructure top bar** into a single row with 6 cells separated by `gap-px`:
-- **Cell 1 — Clock**: shows time (HH:mm:ss.cc), date (Thu Apr 02), and "every second counts" shimmer underneath. Compact vertical stack.
-- **Cells 2–5 — Stats**: Skills count, Downloads count, Active Today count, and a new "Hours" stat (placeholder value or pulled from `financial_inquiries` if available — can default to `—` for now).
-- **Cell 6 — Brand**: "ASTAR ✦" with version number underneath, right-aligned.
+3. **Deploy `mcp-server` edge function**
+   - New MCP tools: `ask_agent`, `list_inbox`, `read_inbox`, `respond_inbox`
+   - Old inquiry tools updated to read/write from `agent_inbox` instead of `financial_inquiries`
 
-**3. Add Hours Heatmap row** — a new thin horizontal strip below the top bar, spanning full width. This is a compact GitHub-style contribution heatmap showing 26 weeks of CLI activity. Each cell is a small square colored by event density for that day (from `audit_events` timestamps). Use shades of accent color. Label: "Hours Heatmap" centered underneath in tiny mono text.
+4. **Verify deployment**
+   - Test `/ask/cfa/health` returns valid JSON (no auth needed)
+   - Test `/ping` still works
 
-**4. Replace 3-column main grid with 2-column, 2-row grid**:
-- Top-left: Skills table (existing, with scroll)
-- Top-right: Thinking feed (existing tweets + reactions, with scroll)
-- Bottom-left: Shipped Calendar (existing component)
-- Bottom-right: News feed (existing posts list, with scroll, clickable for detail dialog)
-- Grid: `grid-cols-2 grid-rows-2`, each quadrant gets `flex-1` with `overflow-hidden`
-
-**5. Move CLI Activity** — remove as a standalone section. The heatmap replaces the raw event list for the public view. (CLI activity data is still fetched for the heatmap and download counts.)
-
-### Technical details
-
-- Heatmap component: inline in PublicDashboard, iterates over last 182 days (26 weeks), counts `audit_events` per day, renders as a grid of small `div`s (4px squares) with opacity/color based on count thresholds.
-- Stats "Hours" cell: show `—` as placeholder (no hours tracking data yet).
-- Brand cell: static text, accent color diamond.
-- Keep all existing data fetches except `articles`.
-- Keep the news detail `Dialog` as-is.
-- Remove `FlaskConical` from imports.
-
-### Files changed
-1. `src/components/PublicDashboard.tsx` — full layout restructure as described above
+### Files affected
+- `supabase/migrations/20260405000000_agent_inbox.sql` (new migration to run)
+- `supabase/functions/skills-api/index.ts` (deploy as-is)
+- `supabase/functions/mcp-server/index.ts` (deploy as-is)
 
