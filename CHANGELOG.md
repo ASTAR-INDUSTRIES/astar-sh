@@ -5,6 +5,10 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+### Added
+- `state_before` captured on task update and complete audit events for full change diffs
+- Optional `reason` parameter on `update_task`, `complete_task`, `comment_task`, `accept_task`, and `dismiss_task` for audit context
+
 ## [0.0.25] - 2026-04-04
 ### Added
 - Scope enforcement on MCP tools — agents can only call tools matching their scopes
