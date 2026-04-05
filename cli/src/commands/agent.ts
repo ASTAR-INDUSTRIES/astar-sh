@@ -72,7 +72,7 @@ async function renderAgentMonitor(api: AstarAPI) {
   const time = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const cols = process.stdout.columns || 100;
 
-  process.stdout.write("\x1b[2J\x1b[H");
+  process.stdout.write("\x1b[H\x1b[J");
   console.log("");
 
   const headerPad = Math.max(1, cols - 18);
@@ -428,6 +428,7 @@ export function registerAgentCommands(program: Command) {
         const toolList = scopesToTools(scopes);
         const runSh = `#!/bin/bash
 export ASTAR_AGENT="${slug}"
+export PATH="$HOME/.local/bin:$HOME/.bun/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 cd "${agentDir}"
 
 claude -p "You are ${opts.name} running in heartbeat mode. Read MEMORY.md for your state. Check your inbox with read_inbox tool (agent_slug: ${slug}). Process any pending messages. Respond with respond_inbox. Update MEMORY.md with any state changes. Then exit." \\
@@ -454,7 +455,8 @@ claude -p "You are ${opts.name} running in heartbeat mode. Read MEMORY.md for yo
   <key>EnvironmentVariables</key>
   <dict>
     <key>ASTAR_AGENT</key><string>${slug}</string>
-    <key>PATH</key><string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${home}/.bun/bin</string>
+    <key>PATH</key><string>${home}/.local/bin:${home}/.bun/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    <key>HOME</key><string>${home}</string>
   </dict>
 </dict>
 </plist>`;
