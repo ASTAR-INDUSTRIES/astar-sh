@@ -745,6 +745,7 @@ const TOOLS = [
         estimated_hours: { type: "number", description: "Estimated hours" },
         recurring: { type: "string", enum: ["weekly", "monthly", "quarterly"], description: "Recurring interval" },
         links: { type: "array", items: { type: "object", properties: { type: { type: "string" }, ref: { type: "string" } }, required: ["type", "ref"] }, description: "Links to skills, news, URLs" },
+        visibility: { type: "string", enum: ["private", "team", "public"], description: "Task visibility (default: private)" },
       },
       required: ["title"],
     },
@@ -761,6 +762,7 @@ const TOOLS = [
         assigned_to: { type: "string", description: "Email of new assignee" },
         due_date: { type: "string", description: "New due date (YYYY-MM-DD)" },
         description: { type: "string" },
+        visibility: { type: "string", enum: ["private", "team", "public"], description: "Task visibility" },
       },
       required: ["task_number"],
     },
@@ -787,6 +789,7 @@ const TOOLS = [
         priority: { type: "string", enum: ["low", "medium", "high", "critical"] },
         search: { type: "string", description: "Search title/description" },
         limit: { type: "number", description: "Max results (default 20)" },
+        include_all: { type: "boolean", description: "Include all tasks regardless of visibility (admin only)" },
       },
     },
   },
@@ -1415,6 +1418,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
         parent_task_id: parentId,
         estimated_hours: args.estimated_hours ?? null,
         recurring: args.recurring ? { interval: args.recurring } : null,
+        visibility: args.visibility || "private",
       }).select("task_number, id").single();
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
       if (args.links?.length) {
@@ -1433,7 +1437,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       if (fetchErr || !task) return [{ type: "text", text: "Error: Task not found." }];
       const patch: any = { updated_at: new Date().toISOString() };
       const changes: any = {};
-      for (const f of ["status", "priority", "assigned_to", "due_date", "description"]) {
+      for (const f of ["status", "priority", "assigned_to", "due_date", "description", "visibility"]) {
         if ((args as any)[f] !== undefined) { patch[f] = (args as any)[f]; changes[f] = (args as any)[f]; }
       }
       if (args.status === "completed") { patch.completed_by = user.email; patch.completed_at = new Date().toISOString(); }
@@ -1462,6 +1466,9 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       if (args.status) query = query.eq("status", args.status);
       if (args.priority) query = query.eq("priority", args.priority);
       if (args.search) query = query.or(`title.ilike.%${args.search}%,description.ilike.%${args.search}%`);
+      if (!args.include_all) {
+        query = query.or(`visibility.eq.public,visibility.eq.team,created_by.eq.${user.email},assigned_to.eq.${user.email}`);
+      }
       const { data, error } = await query;
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
       if (!data?.length) return [{ type: "text", text: "No tasks found." }];

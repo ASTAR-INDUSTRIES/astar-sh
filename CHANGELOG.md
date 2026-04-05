@@ -5,6 +5,12 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+### Added
+- Task visibility control (`private`, `team`, `public`) — tasks default to private
+- RLS policies enforce visibility: private tasks visible only to creator/assignee, team tasks to all authenticated users
+- `visibility` field on `create_task` and `update_task` MCP tools
+- Visibility filtering on `list_tasks` (adminClient bypasses RLS, so explicit filtering added)
+
 ## [0.0.25] - 2026-04-04
 ### Added
 - Scope enforcement on MCP tools — agents can only call tools matching their scopes
