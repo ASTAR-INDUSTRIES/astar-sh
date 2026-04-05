@@ -42,11 +42,123 @@ const statusColors: Record<string, string> = {
   retired: c.dim,
 };
 
+const statusDots: Record<string, string> = {
+  active: "●",
+  paused: "○",
+  retired: "·",
+};
+
+let monitorExpanded = true;
+let lastAgents: Agent[] = [];
+let lastActivity: any[] = [];
+let monitorError = "";
+
+async function renderAgentMonitor(api: AstarAPI) {
+  try {
+    const [agents, activity] = await Promise.all([
+      api.listAgents(),
+      api.queryAudit({ limit: 20 }).catch(() => []),
+    ]);
+    lastAgents = agents;
+    lastActivity = activity;
+    monitorError = "";
+  } catch (e: any) {
+    monitorError = e.message?.includes("401") ? "session expired" : "API unreachable";
+  }
+
+  const agents = lastAgents;
+  const activity = lastActivity;
+  const now = new Date();
+  const time = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const cols = process.stdout.columns || 100;
+
+  process.stdout.write("\x1b[2J\x1b[H");
+  console.log("");
+
+  const headerPad = Math.max(1, cols - 18);
+  console.log(`  ${c.bold}AGENTS${c.reset}${" ".repeat(headerPad)}${c.dim}${time}${c.reset}`);
+  console.log("");
+
+  if (!agents.length) {
+    console.log(`  ${c.dim}No agents registered.${c.reset}`);
+  } else {
+    const nameWidth = Math.min(25, Math.max(...agents.map((a) => a.name.length)));
+    const healthPromises = agents.map((a) => api.checkAgentHealth(a.slug).catch(() => ({ pending_count: 0, oldest_pending_age_seconds: 0, last_completed_at: null })));
+    const healths = await Promise.all(healthPromises);
+
+    for (let i = 0; i < agents.length; i++) {
+      const a = agents[i];
+      const h = healths[i];
+      const sc = statusColors[a.status] || c.dim;
+      const dot = statusDots[a.status] || "·";
+      const seen = relativeTime(a.last_seen);
+      const stale = a.status === "active" && a.last_seen && (Date.now() - new Date(a.last_seen).getTime()) > 300000;
+      const seenStr = stale ? `${c.red}${seen} !!${c.reset}` : seen;
+      const name = a.name.length > nameWidth ? a.name.slice(0, nameWidth - 1) + "…" : a.name.padEnd(nameWidth);
+      const bar = a.status === "active" ? `${c.green}█${c.reset}` : `${c.dim}░${c.reset}`;
+      const pending = h.pending_count > 0 ? `${c.yellow}${h.pending_count} pend${c.reset}` : `${c.dim}—${c.reset}`;
+
+      console.log(`  ${bar} ${c.cyan}${a.slug.padEnd(8)}${c.reset} ${name}   ${sc}${dot} ${a.status.padEnd(7)}${c.reset}  ${c.dim}${seenStr.padEnd(10)}${c.reset}  ${pending}`);
+    }
+  }
+
+  if (monitorExpanded && activity.length) {
+    console.log("");
+    console.log(`  ${c.dim}─ ACTIVITY ${"─".repeat(Math.max(1, cols - 14))}${c.reset}`);
+    console.log("");
+
+    for (const e of activity.slice(0, 12)) {
+      const t = new Date(e.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      const agent = e.actor_agent_id || "?";
+      const detail = e.entity_id ? ` #${e.entity_id}` : "";
+      const response = e.state_after?.response ? ` → "${truncateStr(e.state_after.response, Math.max(20, cols - 55))}"` : "";
+      console.log(`  ${c.dim}${t}${c.reset}  ${c.cyan}${agent.padEnd(8)}${c.reset}  ${e.action} ${e.entity_type}${detail}${c.dim}${response}${c.reset}`);
+    }
+  }
+
+  console.log("");
+  if (monitorError) {
+    console.log(`  ${c.yellow}⚠${c.reset}  ${c.yellow}${monitorError}${c.reset} ${c.dim}— showing last known state${c.reset}`);
+  }
+  const active = agents.filter((a) => a.status === "active").length;
+  console.log(`  ${c.dim}${agents.length} agent(s) · ${active} active${c.reset}${" ".repeat(Math.max(1, cols - 55))}${c.dim}ctrl+o ${monitorExpanded ? "collapse" : "expand"} · ctrl+c quit${c.reset}`);
+}
+
+function truncateStr(s: string, max: number): string {
+  if (!s) return "";
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
+}
+
 export function registerAgentCommands(program: Command) {
   const agent = program
     .command("agent")
     .description("Manage non-human employees")
-    .action(async () => {
+    .option("--monitor", "Live agent operations dashboard")
+    .action(async (opts) => {
+      if (opts.monitor) {
+        const token = await requireAuth();
+        const api = new AstarAPI(token);
+
+        async function tick() {
+          try { await renderAgentMonitor(api); } catch {}
+        }
+        await tick();
+        const interval = setInterval(tick, 10000);
+
+        if (process.stdin.isTTY) {
+          process.stdin.setRawMode(true);
+          process.stdin.resume();
+          process.stdin.on("data", (key: Buffer) => {
+            if (key[0] === 0x03) { clearInterval(interval); process.stdin.setRawMode(false); console.log(""); process.exit(0); }
+            if (key[0] === 0x0f) { monitorExpanded = !monitorExpanded; tick(); }
+          });
+        } else {
+          process.on("SIGINT", () => { clearInterval(interval); console.log(""); process.exit(0); });
+        }
+
+        await new Promise(() => {});
+        return;
+      }
       await agent.commands.find((cmd) => cmd.name() === "list")!.parseAsync([], { from: "user" });
     });
 

@@ -5,6 +5,11 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.31] - 2026-04-05
+### Added
+- `astar agent --monitor` — live agent operations dashboard with status rows, inbox stats, and activity feed
+- `ctrl+o` toggle to expand/collapse activity feed
+
 ## [0.0.30] - 2026-04-05
 
 ## [0.0.29] - 2026-04-05
