@@ -5,6 +5,15 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.27] - 2026-04-05
+### Added
+- Task visibility control (`private`, `team`, `public`) with RLS enforcement
+- `state_before` captured on task update/complete audit events for full change diffs
+- Optional `reason` parameter on task mutation MCP tools for audit accountability
+
+### Fixed
+- Audit events now correctly record `actor_type: "agent"` when MCP tools are called by agents
+
 ## [0.0.26] - 2026-04-05
 ### Fixed
 - `astar todo --monitor` no longer shows 0 tasks when token expires — keeps last known state, shows warning
