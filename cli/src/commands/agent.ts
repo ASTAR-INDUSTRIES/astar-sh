@@ -320,7 +320,8 @@ cd "${agentDir}"
 
 claude -p "You are ${opts.name} running in heartbeat mode. Read MEMORY.md for your state. Check your inbox with read_inbox tool (agent_slug: ${slug}). Process any pending messages. Respond with respond_inbox. Update MEMORY.md with any state changes. Then exit." \\
   --allowedTools "${toolList}" \\
-  --max-turns 20
+  --max-turns 20 \\
+  --dangerously-skip-permissions
 `;
         await Bun.write(join(agentDir, "run.sh"), runSh);
         execSync(`chmod +x "${join(agentDir, "run.sh")}"`);
