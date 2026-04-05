@@ -5,6 +5,9 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+### Fixed
+- Audit events now correctly record `actor_type: "agent"` and `actor_agent_id` when MCP tools are called by agents (previously always hardcoded to `"human"`)
+
 ## [0.0.25] - 2026-04-04
 ### Added
 - Scope enforcement on MCP tools — agents can only call tools matching their scopes
