@@ -35,33 +35,6 @@ const statusColors: Record<string, string> = {
   failed: c.red,
 };
 
-async function pollForResponse(api: AstarAPI, slug: string, id: string, timeoutMs: number = 30000) {
-  const start = Date.now();
-  const interval = 3000;
-
-  process.stdout.write(`  ${c.yellow}⏳${c.reset} Asking ${slug}...`);
-
-  while (Date.now() - start < timeoutMs) {
-    await new Promise((r) => setTimeout(r, interval));
-    try {
-      const msg = await api.getAgentMessage(slug, id);
-      if (msg.status === "completed") {
-        process.stdout.write(`\r${" ".repeat(40)}\r`);
-        console.log(`  ${c.green}✓${c.reset} ${msg.response}`);
-        return;
-      }
-      if (msg.status === "failed") {
-        process.stdout.write(`\r${" ".repeat(40)}\r`);
-        console.log(`  ${c.red}✗${c.reset} ${slug} error: ${msg.response || "Unknown error"}`);
-        return;
-      }
-    } catch {}
-  }
-
-  process.stdout.write(`\r${" ".repeat(40)}\r`);
-  console.log(`  ${c.dim}${slug} hasn't responded yet. Check later with:${c.reset} ${c.cyan}astar ask ${slug} --check${c.reset}`);
-}
-
 export function registerAskCommands(program: Command) {
   program
     .command("ask <agent> [message]")
@@ -107,29 +80,10 @@ export function registerAskCommands(program: Command) {
 
       const type = opts.type || inferType(message);
 
-      const health = await api.checkAgentHealth(agent);
-      const online = health.last_completed_at !== null || health.oldest_pending_age_seconds <= 300;
-      if (!online) {
-        console.log(`  ${c.yellow}⚠${c.reset}  ${agent} appears to be offline${health.pending_count ? ` (${health.pending_count} messages pending)` : ""}`);
-        console.log(`  ${c.dim}Your message will be queued and processed when ${agent} comes back.${c.reset}`);
-        console.log("");
-      }
-
       try {
-        const { id } = await api.askAgent(agent, message, type);
+        await api.askAgent(agent, message, type);
+        console.log(`${c.green}✓${c.reset} Sent to ${c.cyan}${agent}${c.reset}`);
 
-        if (type === "action") {
-          console.log(`${c.green}✓${c.reset} Sent to ${c.cyan}${agent}${c.reset}. Will be processed shortly.`);
-          if (!online) {
-            console.log(`  ${c.dim}Check later with:${c.reset} ${c.cyan}astar ask ${agent} --check${c.reset}`);
-          }
-        } else {
-          if (online) {
-            await pollForResponse(api, agent, id);
-          } else {
-            console.log(`  ${c.green}✓${c.reset} Queued. Check later with: ${c.cyan}astar ask ${agent} --check${c.reset}`);
-          }
-        }
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} ${e.message}`);
         process.exit(1);
