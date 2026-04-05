@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.29] - 2026-04-05
+
 ## [0.0.28] - 2026-04-05
 ### Added
 - Per-agent auth: `ASTAR_AGENT` env var routes CLI to agent-specific MSAL/auth caches

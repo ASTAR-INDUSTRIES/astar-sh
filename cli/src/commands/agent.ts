@@ -273,6 +273,7 @@ export function registerAgentCommands(program: Command) {
     .option("--machine <machine>", "Machine identifier")
     .option("--owner <email>", "Owner email")
     .option("--interval <seconds>", "Heartbeat interval in seconds", "30")
+    .option("--skip-auth", "Skip Microsoft login (authenticate later with astar agent login)")
     .action(async (slug: string, opts) => {
       const token = await requireAuth();
       const api = new AstarAPI(token);
@@ -297,11 +298,15 @@ export function registerAgentCommands(program: Command) {
         console.log(`  ${c.dim}2/6${c.reset} Creating workstation at ${c.dim}${agentDir}${c.reset}`);
         await ensureAgentDir(slug);
 
-        console.log(`  ${c.dim}3/6${c.reset} Authenticating as ${c.cyan}${opts.email}${c.reset}`);
-        const cache = await loginForAgent(slug);
-        if (cache.account.username !== opts.email) {
-          console.error(`  ${c.red}✗${c.reset} Wrong account: signed in as ${cache.account.username}, expected ${opts.email}`);
-          process.exit(1);
+        if (opts.skipAuth) {
+          console.log(`  ${c.dim}3/6${c.reset} Skipping auth ${c.dim}(run ${c.cyan}astar agent login ${slug}${c.dim} later)${c.reset}`);
+        } else {
+          console.log(`  ${c.dim}3/6${c.reset} Authenticating as ${c.cyan}${opts.email}${c.reset}`);
+          const cache = await loginForAgent(slug);
+          if (cache.account.username !== opts.email) {
+            console.error(`  ${c.red}✗${c.reset} Wrong account: signed in as ${cache.account.username}, expected ${opts.email}`);
+            process.exit(1);
+          }
         }
 
         console.log(`  ${c.dim}4/6${c.reset} Creating MEMORY.md`);
