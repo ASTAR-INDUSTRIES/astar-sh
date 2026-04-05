@@ -5,6 +5,10 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.36] - 2026-04-05
+### Added
+- Daily beat circuit breaker — agents auto-stop after 100 beats/day (configurable via `--max-beats`)
+
 ## [0.0.35] - 2026-04-05
 
 ## [0.0.34] - 2026-04-05

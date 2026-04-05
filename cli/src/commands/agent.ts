@@ -434,6 +434,7 @@ export function registerAgentCommands(program: Command) {
     .option("--machine <machine>", "Machine identifier")
     .option("--owner <email>", "Owner email")
     .option("--interval <seconds>", "Heartbeat interval in seconds", "30")
+    .option("--max-beats <number>", "Max heartbeats per day (circuit breaker)", "100")
     .option("--skip-auth", "Skip Microsoft login (authenticate later with astar agent login)")
     .action(async (slug: string, opts) => {
       const token = await requireAuth();
@@ -475,12 +476,30 @@ export function registerAgentCommands(program: Command) {
 
         console.log(`  ${c.dim}5/6${c.reset} Generating heartbeat script`);
         const toolList = scopesToTools(scopes);
+        const maxBeats = opts.maxBeats || "100";
         const runSh = `#!/bin/bash
 export ASTAR_AGENT="${slug}"
 export PATH="$HOME/.local/bin:$HOME/.bun/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 cd "${agentDir}"
 
-claude -p "You are ${opts.name} running in heartbeat mode. Read MEMORY.md for your state. Check your inbox with read_inbox tool (agent_slug: ${slug}). Process any pending messages. Respond with respond_inbox. Update MEMORY.md with any state changes. Then exit." \\
+MAX_DAILY_BEATS=${maxBeats}
+COUNTER_FILE=".beats_$(date +%Y%m%d)"
+
+# Reset counter if it's a new day
+if [ ! -f "$COUNTER_FILE" ]; then
+  rm -f .beats_* 2>/dev/null
+  echo 0 > "$COUNTER_FILE"
+fi
+
+BEATS=$(cat "$COUNTER_FILE")
+if [ "$BEATS" -ge "$MAX_DAILY_BEATS" ]; then
+  echo "$(date +%H:%M:%S) Circuit breaker: $BEATS/$MAX_DAILY_BEATS beats today. Skipping."
+  exit 0
+fi
+
+echo $((BEATS + 1)) > "$COUNTER_FILE"
+
+claude -p "You are ${opts.name} running in heartbeat mode (beat $((BEATS + 1))/${maxBeats} today). Read MEMORY.md for your state. Check your inbox with read_inbox tool (agent_slug: ${slug}). Process any pending messages. Respond with respond_inbox. Update MEMORY.md with any state changes. Then exit." \\
   --allowedTools "${toolList}" \\
   --max-turns 20 \\
   --dangerously-skip-permissions
