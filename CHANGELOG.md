@@ -5,6 +5,14 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.28] - 2026-04-05
+### Added
+- Per-agent auth: `ASTAR_AGENT` env var routes CLI to agent-specific MSAL/auth caches
+- `astar agent login <slug>` — authenticate an agent's Microsoft account
+- `astar agent hire <slug>` — one-command onboarding: register, auth, workstation, launchd heartbeat
+- `astar agent start/stop <slug>` — control agent heartbeat via launchctl
+- Agent workstation dirs at `~/.astar/agents/<slug>/` with MEMORY.md, run.sh, auth
+
 ## [0.0.27] - 2026-04-05
 ### Added
 - Task visibility control (`private`, `team`, `public`) with RLS enforcement

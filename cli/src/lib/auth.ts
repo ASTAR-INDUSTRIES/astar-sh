@@ -1,12 +1,9 @@
 import { PublicClientApplication, DeviceCodeRequest } from "@azure/msal-node";
 import { execSync } from "child_process";
 import { createInterface } from "readline";
-import { homedir } from "os";
-import { join } from "path";
-import { getConfig, getAuthCache, saveAuthCache, clearAuthCache, type AuthCache } from "./config";
+import { getConfig, getAuthCache, saveAuthCache, clearAuthCache, paths, ensureAgentDir, type AuthCache } from "./config";
 
 const SCOPES = ["openid", "profile", "email"];
-const MSAL_CACHE_FILE = join(homedir(), ".astar", "msal-cache.json");
 
 async function getMsalClient() {
   const config = await getConfig();
@@ -17,7 +14,7 @@ async function getMsalClient() {
     },
   });
 
-  const cacheFile = Bun.file(MSAL_CACHE_FILE);
+  const cacheFile = Bun.file(paths.msalCache);
   if (await cacheFile.exists()) {
     const data = await cacheFile.text();
     if (data.trim()) client.getTokenCache().deserialize(data);
@@ -28,7 +25,7 @@ async function getMsalClient() {
 
 async function persistMsalCache(client: PublicClientApplication) {
   const data = client.getTokenCache().serialize();
-  await Bun.write(MSAL_CACHE_FILE, data);
+  await Bun.write(paths.msalCache, data);
 }
 
 function openBrowser(url: string) {
@@ -93,10 +90,67 @@ export async function login(): Promise<AuthCache> {
   return cache;
 }
 
+export async function loginForAgent(slug: string): Promise<AuthCache> {
+  await ensureAgentDir(slug);
+
+  const msalPath = paths.agentDir(slug) + "/msal-cache.json";
+  const authPath = paths.agentDir(slug) + "/auth.json";
+
+  const config = await getConfig();
+  const client = new PublicClientApplication({
+    auth: {
+      clientId: config.clientId,
+      authority: `https://login.microsoftonline.com/${config.tenantId}`,
+    },
+  });
+
+  const request: DeviceCodeRequest = {
+    scopes: SCOPES,
+    deviceCodeCallback: async (response) => {
+      const code = response.userCode;
+      const url = response.verificationUri;
+
+      console.log("");
+      console.log(`  Your code: ${code}`);
+      console.log("");
+      console.log(`  Press Enter to open ${url} in your browser...`);
+
+      await waitForEnter();
+      openBrowser(url);
+
+      console.log("  Waiting for you to sign in...");
+    },
+  };
+
+  const result = await client.acquireTokenByDeviceCode(request);
+  if (!result) throw new Error("Authentication failed");
+
+  const email = result.account?.username ?? "";
+  if (!email.endsWith("@astarconsulting.no")) {
+    throw new Error(`Access denied. Only @astarconsulting.no accounts allowed (got ${email})`);
+  }
+
+  const data = client.getTokenCache().serialize();
+  await Bun.write(msalPath, data);
+
+  const cache: AuthCache = {
+    accessToken: result.accessToken,
+    expiresAt: result.expiresOn?.getTime() ?? Date.now() + 3600_000,
+    homeAccountId: result.account?.homeAccountId,
+    account: {
+      name: result.account?.name ?? "Unknown",
+      username: email,
+    },
+  };
+
+  await Bun.write(authPath, JSON.stringify(cache, null, 2));
+  return cache;
+}
+
 export async function logout() {
   await clearAuthCache();
-  const file = Bun.file(MSAL_CACHE_FILE);
-  if (await file.exists()) await Bun.write(MSAL_CACHE_FILE, "");
+  const file = Bun.file(paths.msalCache);
+  if (await file.exists()) await Bun.write(paths.msalCache, "");
 }
 
 export async function getAuthStatus(): Promise<{ name: string; email: string } | null> {

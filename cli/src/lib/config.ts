@@ -4,11 +4,16 @@ import { join } from "path";
 const ASTAR_DIR = join(homedir(), ".astar");
 const CONFIG_FILE = join(ASTAR_DIR, "config.json");
 const AUTH_FILE = join(ASTAR_DIR, "auth.json");
+const MSAL_CACHE_FILE = join(ASTAR_DIR, "msal-cache.json");
+
+export const AGENT_SLUG = process.env.ASTAR_AGENT || null;
 
 export const paths = {
   dir: ASTAR_DIR,
   config: CONFIG_FILE,
-  auth: AUTH_FILE,
+  auth: AGENT_SLUG ? join(ASTAR_DIR, "agents", AGENT_SLUG, "auth.json") : AUTH_FILE,
+  msalCache: AGENT_SLUG ? join(ASTAR_DIR, "agents", AGENT_SLUG, "msal-cache.json") : MSAL_CACHE_FILE,
+  agentDir: (slug: string) => join(ASTAR_DIR, "agents", slug),
 };
 
 interface Config {
@@ -25,6 +30,11 @@ const DEFAULT_CONFIG: Config = {
 
 async function ensureDir() {
   await Bun.write(join(ASTAR_DIR, ".keep"), "");
+}
+
+export async function ensureAgentDir(slug: string) {
+  const dir = paths.agentDir(slug);
+  await Bun.write(join(dir, ".keep"), "");
 }
 
 export async function getConfig(): Promise<Config> {
@@ -54,7 +64,7 @@ export interface AuthCache {
 }
 
 export async function getAuthCache(): Promise<AuthCache | null> {
-  const file = Bun.file(AUTH_FILE);
+  const file = Bun.file(paths.auth);
   if (await file.exists()) {
     const text = await file.text();
     if (!text.trim()) return null;
@@ -64,13 +74,14 @@ export async function getAuthCache(): Promise<AuthCache | null> {
 }
 
 export async function saveAuthCache(cache: AuthCache) {
-  await ensureDir();
-  await Bun.write(AUTH_FILE, JSON.stringify(cache, null, 2));
+  if (AGENT_SLUG) await ensureAgentDir(AGENT_SLUG);
+  else await ensureDir();
+  await Bun.write(paths.auth, JSON.stringify(cache, null, 2));
 }
 
 export async function clearAuthCache() {
-  const file = Bun.file(AUTH_FILE);
+  const file = Bun.file(paths.auth);
   if (await file.exists()) {
-    await Bun.write(AUTH_FILE, "");
+    await Bun.write(paths.auth, "");
   }
 }
