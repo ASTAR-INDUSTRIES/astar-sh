@@ -159,14 +159,16 @@ async function renderAgentMonitor(api: AstarAPI) {
   const active = agents.filter((a) => a.status === "active").length;
   lines.push(`  ${c.dim}${agents.length} agent(s) · ${active} active${c.reset}${" ".repeat(Math.max(1, cols - 55))}${c.dim}ctrl+o ${monitorExpanded ? "collapse" : "expand"} · ctrl+c quit${c.reset}`);
 
-  process.stdout.write("\x1b[H");
+  let buf = "\x1b[?25l\x1b[H";
   for (const line of lines) {
-    process.stdout.write(line + "\x1b[K\n");
+    buf += line + "\x1b[K\n";
   }
   const remaining = rows - lines.length;
   for (let i = 0; i < remaining; i++) {
-    process.stdout.write("\x1b[K\n");
+    buf += "\x1b[K\n";
   }
+  buf += "\x1b[?25h";
+  process.stdout.write(buf);
 }
 
 function truncateStr(s: string, max: number): string {
@@ -184,6 +186,8 @@ export function registerAgentCommands(program: Command) {
         const token = await requireAuth();
         const api = new AstarAPI(token);
 
+        process.stdout.write("\x1b[2J\x1b[H");
+
         async function tick() {
           try { await renderAgentMonitor(api); } catch {}
         }
@@ -194,11 +198,11 @@ export function registerAgentCommands(program: Command) {
           process.stdin.setRawMode(true);
           process.stdin.resume();
           process.stdin.on("data", (key: Buffer) => {
-            if (key[0] === 0x03) { clearInterval(interval); process.stdin.setRawMode(false); console.log(""); process.exit(0); }
+            if (key[0] === 0x03) { clearInterval(interval); process.stdin.setRawMode(false); process.stdout.write("\x1b[?25h\n"); process.exit(0); }
             if (key[0] === 0x0f) { monitorExpanded = !monitorExpanded; tick(); }
           });
         } else {
-          process.on("SIGINT", () => { clearInterval(interval); console.log(""); process.exit(0); });
+          process.on("SIGINT", () => { clearInterval(interval); process.stdout.write("\x1b[?25h\n"); process.exit(0); });
         }
 
         await new Promise(() => {});
