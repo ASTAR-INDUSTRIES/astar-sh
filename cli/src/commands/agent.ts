@@ -50,39 +50,57 @@ const statusDots: Record<string, string> = {
 
 let monitorExpanded = true;
 let lastAgents: Agent[] = [];
-let lastActivity: any[] = [];
+let lastInboxItems: any[] = [];
 let monitorError = "";
+
+interface InboxItem {
+  agent_slug: string;
+  content: string;
+  status: string;
+  response?: string;
+  author_email: string;
+  created_at: string;
+  processed_at?: string;
+}
 
 async function renderAgentMonitor(api: AstarAPI) {
   try {
-    const [agents, activity] = await Promise.all([
-      api.listAgents(),
-      api.queryAudit({ limit: 20 }).catch(() => []),
-    ]);
+    const agents = await api.listAgents();
     lastAgents = agents;
-    lastActivity = activity;
+
+    const activeAgents = agents.filter((a) => a.status !== "retired");
+    const inboxPromises = activeAgents.map((a) =>
+      api.listAgentMessages(a.slug).catch(() => [])
+    );
+    const inboxResults = await Promise.all(inboxPromises);
+    const allItems: InboxItem[] = [];
+    for (const msgs of inboxResults) {
+      for (const m of msgs) allItems.push(m);
+    }
+    allItems.sort((a, b) => new Date(b.processed_at || b.created_at).getTime() - new Date(a.processed_at || a.created_at).getTime());
+    lastInboxItems = allItems;
     monitorError = "";
   } catch (e: any) {
     monitorError = e.message?.includes("401") ? "session expired" : "API unreachable";
   }
 
   const agents = lastAgents;
-  const activity = lastActivity;
+  const items = lastInboxItems;
   const now = new Date();
   const time = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const cols = process.stdout.columns || 100;
+  const rows = process.stdout.rows || 30;
 
-  process.stdout.write("\x1b[H\x1b[J");
-  console.log("");
+  const lines: string[] = [];
+  lines.push("");
 
   const headerPad = Math.max(1, cols - 18);
-  console.log(`  ${c.bold}AGENTS${c.reset}${" ".repeat(headerPad)}${c.dim}${time}${c.reset}`);
-  console.log("");
+  lines.push(`  ${c.bold}AGENTS${c.reset}${" ".repeat(headerPad)}${c.dim}${time}${c.reset}`);
+  lines.push("");
 
   if (!agents.length) {
-    console.log(`  ${c.dim}No agents registered.${c.reset}`);
+    lines.push(`  ${c.dim}No agents registered.${c.reset}`);
   } else {
-    const nameWidth = Math.min(25, Math.max(...agents.map((a) => a.name.length)));
     const healthPromises = agents.map((a) => api.checkAgentHealth(a.slug).catch(() => ({ pending_count: 0, oldest_pending_age_seconds: 0, last_completed_at: null })));
     const healths = await Promise.all(healthPromises);
 
@@ -94,34 +112,61 @@ async function renderAgentMonitor(api: AstarAPI) {
       const seen = relativeTime(a.last_seen);
       const stale = a.status === "active" && a.last_seen && (Date.now() - new Date(a.last_seen).getTime()) > 300000;
       const seenStr = stale ? `${c.red}${seen} !!${c.reset}` : seen;
-      const name = a.name.length > nameWidth ? a.name.slice(0, nameWidth - 1) + "…" : a.name.padEnd(nameWidth);
       const bar = a.status === "active" ? `${c.green}█${c.reset}` : `${c.dim}░${c.reset}`;
-      const pending = h.pending_count > 0 ? `${c.yellow}${h.pending_count} pend${c.reset}` : `${c.dim}—${c.reset}`;
+      const pending = h.pending_count > 0 ? `${c.yellow}${h.pending_count} pending${c.reset}` : `${c.dim}0 pending${c.reset}`;
+      const lastDone = h.last_completed_at ? relativeTime(h.last_completed_at) : "never";
 
-      console.log(`  ${bar} ${c.cyan}${a.slug.padEnd(8)}${c.reset} ${name}   ${sc}${dot} ${a.status.padEnd(7)}${c.reset}  ${c.dim}${seenStr.padEnd(10)}${c.reset}  ${pending}`);
+      lines.push(`  ${bar} ${c.cyan}${a.slug.padEnd(8)}${c.reset} ${a.name}`);
+      lines.push(`    ${sc}${dot} ${a.status}${c.reset}  ${c.dim}seen ${seenStr}${c.reset}  ${pending}  ${c.dim}last response ${lastDone}${c.reset}`);
     }
   }
 
-  if (monitorExpanded && activity.length) {
-    console.log("");
-    console.log(`  ${c.dim}─ ACTIVITY ${"─".repeat(Math.max(1, cols - 14))}${c.reset}`);
-    console.log("");
+  const agentLines = lines.length;
+  const footerLines = monitorError ? 3 : 2;
+  const availableForActivity = rows - agentLines - footerLines - 3;
 
-    for (const e of activity.slice(0, 12)) {
-      const t = new Date(e.timestamp).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-      const agent = e.actor_agent_id || "?";
-      const detail = e.entity_id ? ` #${e.entity_id}` : "";
-      const response = e.state_after?.response ? ` → "${truncateStr(e.state_after.response, Math.max(20, cols - 55))}"` : "";
-      console.log(`  ${c.dim}${t}${c.reset}  ${c.cyan}${agent.padEnd(8)}${c.reset}  ${e.action} ${e.entity_type}${detail}${c.dim}${response}${c.reset}`);
+  if (monitorExpanded && items.length && availableForActivity > 2) {
+    lines.push("");
+    lines.push(`  ${c.dim}─ INBOX ACTIVITY ${"─".repeat(Math.max(1, cols - 20))}${c.reset}`);
+    lines.push("");
+
+    const maxItems = Math.min(items.length, Math.max(3, availableForActivity));
+    for (const m of items.slice(0, maxItems)) {
+      const ts = new Date(m.processed_at || m.created_at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+      const from = m.author_email?.split("@")[0] || "?";
+      const msgWidth = Math.max(20, Math.floor((cols - 30) * 0.4));
+      const respWidth = Math.max(20, Math.floor((cols - 30) * 0.5));
+      const msg = truncateStr(m.content, msgWidth);
+
+      if (m.status === "completed" && m.response) {
+        const resp = truncateStr(m.response, respWidth);
+        lines.push(`  ${c.dim}${ts}${c.reset}  ${c.cyan}${m.agent_slug.padEnd(6)}${c.reset}  ${c.green}✓${c.reset} ${c.dim}${from}:${c.reset} ${msg}  ${c.dim}→${c.reset} ${resp}`);
+      } else if (m.status === "failed") {
+        const resp = truncateStr(m.response || "error", respWidth);
+        lines.push(`  ${c.dim}${ts}${c.reset}  ${c.cyan}${m.agent_slug.padEnd(6)}${c.reset}  ${c.red}✗${c.reset} ${c.dim}${from}:${c.reset} ${msg}  ${c.dim}→${c.reset} ${c.red}${resp}${c.reset}`);
+      } else if (m.status === "pending") {
+        lines.push(`  ${c.dim}${ts}${c.reset}  ${c.cyan}${m.agent_slug.padEnd(6)}${c.reset}  ${c.yellow}⏳${c.reset} ${c.dim}${from}:${c.reset} ${msg}  ${c.dim}waiting…${c.reset}`);
+      } else {
+        lines.push(`  ${c.dim}${ts}${c.reset}  ${c.cyan}${m.agent_slug.padEnd(6)}${c.reset}  ${c.yellow}⚙${c.reset} ${c.dim}${from}:${c.reset} ${msg}  ${c.dim}processing…${c.reset}`);
+      }
     }
   }
 
-  console.log("");
+  lines.push("");
   if (monitorError) {
-    console.log(`  ${c.yellow}⚠${c.reset}  ${c.yellow}${monitorError}${c.reset} ${c.dim}— showing last known state${c.reset}`);
+    lines.push(`  ${c.yellow}⚠${c.reset}  ${c.yellow}${monitorError}${c.reset} ${c.dim}— showing last known state${c.reset}`);
   }
   const active = agents.filter((a) => a.status === "active").length;
-  console.log(`  ${c.dim}${agents.length} agent(s) · ${active} active${c.reset}${" ".repeat(Math.max(1, cols - 55))}${c.dim}ctrl+o ${monitorExpanded ? "collapse" : "expand"} · ctrl+c quit${c.reset}`);
+  lines.push(`  ${c.dim}${agents.length} agent(s) · ${active} active${c.reset}${" ".repeat(Math.max(1, cols - 55))}${c.dim}ctrl+o ${monitorExpanded ? "collapse" : "expand"} · ctrl+c quit${c.reset}`);
+
+  process.stdout.write("\x1b[H");
+  for (const line of lines) {
+    process.stdout.write(line + "\x1b[K\n");
+  }
+  const remaining = rows - lines.length;
+  for (let i = 0; i < remaining; i++) {
+    process.stdout.write("\x1b[K\n");
+  }
 }
 
 function truncateStr(s: string, max: number): string {
