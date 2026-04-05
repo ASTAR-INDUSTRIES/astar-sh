@@ -73,12 +73,24 @@ const priorityBars: Record<string, string> = {
 };
 
 let monitorExpanded = true;
+let lastOpenTasks: Task[] = [];
+let lastCompletedTasks: Task[] = [];
+let monitorError = "";
 
 async function renderMonitor(api: AstarAPI) {
-  const [openTasks, completedTasks] = await Promise.all([
-    api.listTasks({ assigned_to: "all" }).catch(() => []),
-    api.listTasks({ assigned_to: "all", status: "completed" }).catch(() => []),
-  ]);
+  try {
+    const [open, done] = await Promise.all([
+      api.listTasks({ assigned_to: "all" }),
+      api.listTasks({ assigned_to: "all", status: "completed" }),
+    ]);
+    lastOpenTasks = open;
+    lastCompletedTasks = done;
+    monitorError = "";
+  } catch (e: any) {
+    monitorError = e.message?.includes("401") ? "session expired — re-run astar login" : "API unreachable";
+  }
+  const openTasks = lastOpenTasks;
+  const completedTasks = lastCompletedTasks;
 
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
@@ -137,6 +149,9 @@ async function renderMonitor(api: AstarAPI) {
   }
 
   console.log("");
+  if (monitorError) {
+    console.log(`  ${c.yellow}⚠${c.reset}  ${c.yellow}${monitorError}${c.reset} ${c.dim}— showing last known state${c.reset}`);
+  }
   console.log(`  ${c.dim}${sorted.length} open · ${doneToday.length} done today${c.reset}${" ".repeat(Math.max(1, cols - 60))}${c.dim}ctrl+o ${monitorExpanded ? "collapse" : "expand"} · ctrl+c quit${c.reset}`);
 }
 
@@ -156,17 +171,22 @@ export function registerTodoCommands(program: Command) {
     .option("--monitor", "Live-updating task view (refreshes every 10s)")
     .action(async (title: string | undefined, opts) => {
       if (opts.monitor) {
-        const token = await requireAuth();
-        const api = new AstarAPI(token);
-        await renderMonitor(api);
-        const interval = setInterval(() => renderMonitor(api), 10000);
+        async function freshApi(): Promise<AstarAPI> {
+          const token = await getToken();
+          return new AstarAPI(token);
+        }
+        async function tick() {
+          try { const api = await freshApi(); await renderMonitor(api); } catch { /* token dead, renderMonitor handles display */ }
+        }
+        await tick();
+        const interval = setInterval(tick, 10000);
 
         if (process.stdin.isTTY) {
           process.stdin.setRawMode(true);
           process.stdin.resume();
           process.stdin.on("data", (key: Buffer) => {
             if (key[0] === 0x03) { clearInterval(interval); process.stdin.setRawMode(false); console.log(""); process.exit(0); }
-            if (key[0] === 0x0f) { monitorExpanded = !monitorExpanded; renderMonitor(api); }
+            if (key[0] === 0x0f) { monitorExpanded = !monitorExpanded; tick(); }
           });
         } else {
           process.on("SIGINT", () => { clearInterval(interval); console.log(""); process.exit(0); });

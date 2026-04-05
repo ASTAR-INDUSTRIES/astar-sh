@@ -5,6 +5,11 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.26] - 2026-04-05
+### Fixed
+- `astar todo --monitor` no longer shows 0 tasks when token expires — keeps last known state, shows warning
+- Monitor now refreshes auth token each cycle instead of reusing stale token
+
 ## [0.0.25] - 2026-04-04
 ### Added
 - Scope enforcement on MCP tools — agents can only call tools matching their scopes
