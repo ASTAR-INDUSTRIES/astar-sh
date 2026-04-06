@@ -103,6 +103,7 @@ let monitorExpanded = true;
 let monitorError = "";
 let lastFunds: EtfFund[] = [];
 let lastDetail: { fund: EtfFund; holdings: EtfHolding[]; performance: any; benchmark: any; news: any[]; perfHistory: any[]; benchHistory: any[] } | null = null;
+const intradayNavPoints: { time: string; nav: number }[] = [];
 
 async function renderMonitorAll(api: AstarAPI) {
   try {
@@ -155,6 +156,10 @@ async function renderMonitorSingle(api: AstarAPI, ticker: string) {
       api.getEtfPerformanceFull(ticker, "all").catch(() => ({ data: [], benchmark: [] })),
     ]);
     lastDetail = { ...detail, news, perfHistory: perfFull.data || [], benchHistory: perfFull.benchmark || [] };
+    const currentNav = detail.performance?.nav ?? detail.fund.base_nav;
+    const now = new Date();
+    intradayNavPoints.push({ time: now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }), nav: currentNav });
+    if (intradayNavPoints.length > 120) intradayNavPoints.shift();
     monitorError = "";
   } catch (e: any) {
     monitorError = e.message?.includes("401") ? "session expired — re-run astar login" : "API unreachable";
@@ -189,14 +194,28 @@ async function renderMonitorSingle(api: AstarAPI, ticker: string) {
     console.log(`  ${c.dim}SPY${c.reset} ${fmtPct(benchmark.daily_return)} daily  ${fmtPct(benchmark.cumulative_return)} cumul  ${c.dim}α${c.reset} ${alphaColor}${alphaSign}${(alpha * 100).toFixed(2)}%${c.reset}`);
   }
 
-  if (perfHistory.length >= 2) {
+  const hasHistory = perfHistory.length >= 2;
+  const hasIntraday = intradayNavPoints.length >= 2;
+
+  if (hasHistory || hasIntraday) {
     const chartWidth = Math.min(60, cols - 15);
-    const chartData = perfHistory.map((p: any) => ({ date: p.date, value: p.nav }));
-    const benchData = benchHistory.length >= 2
-      ? benchHistory.map((b: any) => ({ date: b.date, value: 100 * (1 + b.cumulative_return) }))
-      : undefined;
+    let chartData: { date: string; value: number }[];
+    let benchData: { date: string; value: number }[] | undefined;
+    let chartLabel: string;
+
+    if (hasHistory) {
+      chartData = perfHistory.map((p: any) => ({ date: p.date, value: p.nav }));
+      benchData = benchHistory.length >= 2
+        ? benchHistory.map((b: any) => ({ date: b.date, value: 100 * (1 + b.cumulative_return) }))
+        : undefined;
+      chartLabel = `${c.bold}NAV${c.reset}`;
+    } else {
+      chartData = intradayNavPoints.map(p => ({ date: p.time, value: p.nav }));
+      chartLabel = `${c.bold}NAV${c.reset} ${c.dim}intraday${c.reset}`;
+    }
+
     console.log("");
-    console.log(asciiChart(chartData, { width: chartWidth, height: 8, label: `${c.bold}NAV${c.reset}`, benchmarkData: benchData }));
+    console.log(asciiChart(chartData, { width: chartWidth, height: 8, label: chartLabel, benchmarkData: benchData }));
   }
 
   console.log("");
