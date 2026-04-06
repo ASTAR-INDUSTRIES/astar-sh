@@ -85,6 +85,7 @@ export interface Task {
   estimated_hours?: number;
   created_at: string;
   updated_at: string;
+  subtasks?: Task[];
 }
 
 export interface VelocityStats {
@@ -378,13 +379,14 @@ export class AstarAPI {
     return res.json();
   }
 
-  async listTasks(filters?: { status?: string; priority?: string; assigned_to?: string; due?: string; search?: string }): Promise<Task[]> {
+  async listTasks(filters?: { status?: string; priority?: string; assigned_to?: string; due?: string; search?: string; include_subtasks?: boolean }): Promise<Task[]> {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
     if (filters?.priority) params.set("priority", filters.priority);
     if (filters?.assigned_to) params.set("assigned_to", filters.assigned_to);
     if (filters?.due) params.set("due", filters.due);
     if (filters?.search) params.set("search", filters.search);
+    if (filters?.include_subtasks) params.set("include_subtasks", "true");
     const qs = params.toString();
     const data = await this.fetch<{ tasks: Task[] }>(`/tasks${qs ? `?${qs}` : ""}`);
     return data.tasks;
