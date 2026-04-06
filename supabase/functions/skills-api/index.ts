@@ -1484,16 +1484,26 @@ app.get("/etf/:ticker", async (c) => {
 
   const symbols = (holdings || []).map((h: any) => h.symbol);
   const priceMap: Record<string, any> = {};
+  const entryPriceMap: Record<string, number> = {};
   for (const sym of symbols) {
     const { data: latest } = await sb.from("etf_prices").select("close_price, change_pct, date").eq("symbol", sym).order("date", { ascending: false }).limit(1);
     if (latest?.[0]) priceMap[sym] = latest[0];
+    const { data: entry } = await sb.from("etf_prices").select("close_price").eq("symbol", sym).lte("date", fund.inception_date).order("date", { ascending: false }).limit(1);
+    if (entry?.[0]) entryPriceMap[sym] = entry[0].close_price;
   }
 
-  const enrichedHoldings = (holdings || []).map((h: any) => ({
-    ...h,
-    latest_price: priceMap[h.symbol]?.close_price ?? null,
-    daily_change_pct: priceMap[h.symbol]?.change_pct ?? null,
-  }));
+  const enrichedHoldings = (holdings || []).map((h: any) => {
+    const latest = priceMap[h.symbol];
+    const entryPrice = entryPriceMap[h.symbol];
+    const sinceEntry = latest && entryPrice ? ((latest.close_price - entryPrice) / entryPrice) * 100 : null;
+    return {
+      ...h,
+      latest_price: latest?.close_price ?? null,
+      daily_change_pct: latest?.change_pct ?? null,
+      entry_price: entryPrice ?? null,
+      since_entry_pct: sinceEntry != null ? Math.round(sinceEntry * 100) / 100 : null,
+    };
+  });
 
   const latest = perf?.[0];
 

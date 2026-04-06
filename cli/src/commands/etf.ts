@@ -122,8 +122,9 @@ async function renderMonitorSingle(api: AstarAPI, ticker: string) {
     const price = h.latest_price != null ? `$${h.latest_price.toFixed(2)}`.padStart(10) : `${c.dim}${"—".padStart(10)}${c.reset}`;
     const change = h.daily_change_pct != null ? fmtPct(h.daily_change_pct / 100) : `${c.dim}—${c.reset}`;
     const changeColor = h.daily_change_pct != null && h.daily_change_pct > 0 ? c.green : h.daily_change_pct != null && h.daily_change_pct < 0 ? c.red : c.dim;
+    const entry = (h as any).since_entry_pct != null ? fmtPct((h as any).since_entry_pct / 100) : `${c.dim}—${c.reset}`;
     const bar = h.daily_change_pct != null && h.daily_change_pct > 0 ? `${c.green}▲${c.reset}` : h.daily_change_pct != null && h.daily_change_pct < 0 ? `${c.red}▼${c.reset}` : `${c.dim}·${c.reset}`;
-    console.log(`  ${bar} ${c.cyan}${sym}${c.reset} ${c.dim}${name}${c.reset} ${weight}  ${price}  ${change}`);
+    console.log(`  ${bar} ${c.cyan}${sym}${c.reset} ${c.dim}${name}${c.reset} ${weight}  ${price}  ${change}  ${entry}`);
   }
 
   if (monitorExpanded && news.length) {
@@ -246,13 +247,15 @@ export function registerEtfCommands(program: Command) {
         console.log("");
         console.log(`  ${c.bold}HOLDINGS${c.reset}`);
         table(
-          ["Symbol", "Name", "Weight", "Price", "Change"],
-          holdings.map((h) => [
+          ["Symbol", "Name", "Weight", "Price", "Daily", "Entry", "Since Entry"],
+          holdings.map((h: any) => [
             `${c.cyan}${h.symbol}${c.reset}`,
             h.name,
             `${(h.weight * 100).toFixed(1)}%`,
             h.latest_price != null ? `$${h.latest_price.toFixed(2)}` : `${c.dim}—${c.reset}`,
             h.daily_change_pct != null ? fmtPct(h.daily_change_pct / 100) : `${c.dim}—${c.reset}`,
+            h.entry_price != null ? `$${h.entry_price.toFixed(2)}` : `${c.dim}—${c.reset}`,
+            h.since_entry_pct != null ? fmtPct(h.since_entry_pct / 100) : `${c.dim}—${c.reset}`,
           ])
         );
 
