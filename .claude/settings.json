@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "postToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$CLAUDE_TOOL_INPUT\" | grep -qE 'git (commit|push)'; then echo ''; echo '📡 WIKI CHECK — Does this change affect any wiki pages?'; echo '   Review: wiki/index.md → auth/ agents/ tasks/ audit/ news/ skills/ mcp/ cli/'; echo '   If a subsystem\\'s behavior, data model, or API surface changed, update the wiki.'; echo ''; fi"
+          }
+        ]
+      }
+    ]
+  }
+}
