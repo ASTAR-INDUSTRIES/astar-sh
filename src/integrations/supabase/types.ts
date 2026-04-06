@@ -202,6 +202,157 @@ export type Database = {
         }
         Relationships: []
       }
+      etf_funds: {
+        Row: {
+          base_nav: number | null
+          created_at: string | null
+          created_by: string
+          description: string | null
+          id: string
+          inception_date: string
+          name: string
+          status: string | null
+          strategy: string | null
+          ticker: string
+          updated_at: string | null
+        }
+        Insert: {
+          base_nav?: number | null
+          created_at?: string | null
+          created_by: string
+          description?: string | null
+          id?: string
+          inception_date?: string
+          name: string
+          status?: string | null
+          strategy?: string | null
+          ticker: string
+          updated_at?: string | null
+        }
+        Update: {
+          base_nav?: number | null
+          created_at?: string | null
+          created_by?: string
+          description?: string | null
+          id?: string
+          inception_date?: string
+          name?: string
+          status?: string | null
+          strategy?: string | null
+          ticker?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      etf_holdings: {
+        Row: {
+          added_at: string | null
+          domain: string | null
+          fund_id: string
+          id: string
+          name: string
+          sector: string | null
+          symbol: string
+          weight: number
+        }
+        Insert: {
+          added_at?: string | null
+          domain?: string | null
+          fund_id: string
+          id?: string
+          name: string
+          sector?: string | null
+          symbol: string
+          weight: number
+        }
+        Update: {
+          added_at?: string | null
+          domain?: string | null
+          fund_id?: string
+          id?: string
+          name?: string
+          sector?: string | null
+          symbol?: string
+          weight?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "etf_holdings_fund_id_fkey"
+            columns: ["fund_id"]
+            isOneToOne: false
+            referencedRelation: "etf_funds"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      etf_performance: {
+        Row: {
+          calculated_at: string | null
+          cumulative_return: number | null
+          daily_return: number | null
+          date: string
+          fund_id: string
+          holdings_snapshot: Json | null
+          id: string
+          nav: number
+        }
+        Insert: {
+          calculated_at?: string | null
+          cumulative_return?: number | null
+          daily_return?: number | null
+          date: string
+          fund_id: string
+          holdings_snapshot?: Json | null
+          id?: string
+          nav: number
+        }
+        Update: {
+          calculated_at?: string | null
+          cumulative_return?: number | null
+          daily_return?: number | null
+          date?: string
+          fund_id?: string
+          holdings_snapshot?: Json | null
+          id?: string
+          nav?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "etf_performance_fund_id_fkey"
+            columns: ["fund_id"]
+            isOneToOne: false
+            referencedRelation: "etf_funds"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      etf_prices: {
+        Row: {
+          change_pct: number | null
+          close_price: number
+          date: string
+          fetched_at: string | null
+          id: string
+          symbol: string
+        }
+        Insert: {
+          change_pct?: number | null
+          close_price: number
+          date: string
+          fetched_at?: string | null
+          id?: string
+          symbol: string
+        }
+        Update: {
+          change_pct?: number | null
+          close_price?: number
+          date?: string
+          fetched_at?: string | null
+          id?: string
+          symbol?: string
+        }
+        Relationships: []
+      }
       feedback: {
         Row: {
           author_email: string
