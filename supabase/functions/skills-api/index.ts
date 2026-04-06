@@ -1712,12 +1712,21 @@ app.post("/etf/refresh-prices", async (c) => {
   }
 
   let navsCalculated = 0;
+  const todayStr = new Date().toISOString().split("T")[0];
+
   for (const f of funds) {
     const holdings = fundHoldings[f.id];
     if (!holdings?.length) continue;
 
     const symbols = holdings.map((h: any) => h.symbol);
-    const { data: allPrices } = await sb.from("etf_prices").select("symbol, date, change_pct").in("symbol", symbols).gte("date", f.inception_date).order("date", { ascending: true });
+
+    const { data: entryPrices } = await sb.from("etf_prices").select("symbol, close_price").in("symbol", symbols).lte("date", f.inception_date).order("date", { ascending: false });
+    const entryPriceMap: Record<string, number> = {};
+    for (const p of (entryPrices || [])) {
+      if (!entryPriceMap[p.symbol]) entryPriceMap[p.symbol] = p.close_price;
+    }
+
+    const { data: allPrices } = await sb.from("etf_prices").select("symbol, date, close_price, change_pct").in("symbol", symbols).gte("date", f.inception_date).order("date", { ascending: true });
     if (!allPrices?.length) continue;
 
     const tradingDates = [...new Set(allPrices.map((p: any) => p.date))].sort();
@@ -1725,21 +1734,20 @@ app.post("/etf/refresh-prices", async (c) => {
     const { data: existingPerf } = await sb.from("etf_performance").select("date").eq("fund_id", f.id);
     const existingDates = new Set((existingPerf || []).map((p: any) => p.date));
 
-    let prevNav = f.base_nav;
-    const { data: lastPerf } = await sb.from("etf_performance").select("nav, date").eq("fund_id", f.id).order("date", { ascending: false }).limit(1);
-    if (lastPerf?.[0]) prevNav = lastPerf[0].nav;
-
-    const pricesByDate: Record<string, Record<string, number>> = {};
+    const pricesByDate: Record<string, Record<string, { close: number; change: number }>> = {};
     for (const p of allPrices) {
       if (!pricesByDate[p.date]) pricesByDate[p.date] = {};
-      pricesByDate[p.date][p.symbol] = p.change_pct / 100;
+      pricesByDate[p.date][p.symbol] = { close: p.close_price, change: p.change_pct / 100 };
     }
 
-    const datesToCalc = tradingDates.filter(d => !existingDates.has(d));
-    if (!datesToCalc.length && lastPerf?.[0]) {
-      const latestDate = tradingDates[tradingDates.length - 1];
-      if (latestDate && existingDates.has(latestDate)) continue;
-      if (latestDate) datesToCalc.push(latestDate);
+    const datesToCalc = tradingDates.filter(d => !existingDates.has(d) || d === todayStr);
+
+    let prevNav = f.base_nav;
+    const prevDates = tradingDates.filter(d => !datesToCalc.includes(d));
+    if (prevDates.length) {
+      const lastPrevDate = prevDates[prevDates.length - 1];
+      const { data: lp } = await sb.from("etf_performance").select("nav").eq("fund_id", f.id).eq("date", lastPrevDate).single();
+      if (lp) prevNav = lp.nav;
     }
 
     for (const date of datesToCalc) {
@@ -1747,13 +1755,23 @@ app.post("/etf/refresh-prices", async (c) => {
       if (!dayPrices) continue;
 
       let dailyReturn = 0;
-      for (const h of holdings) {
-        dailyReturn += h.weight * (dayPrices[h.symbol] ?? 0);
+      if (date === f.inception_date) {
+        for (const h of holdings) {
+          const entry = entryPriceMap[h.symbol];
+          const current = dayPrices[h.symbol]?.close;
+          if (entry && current) {
+            dailyReturn += h.weight * ((current - entry) / entry);
+          }
+        }
+      } else {
+        for (const h of holdings) {
+          dailyReturn += h.weight * (dayPrices[h.symbol]?.change ?? 0);
+        }
       }
 
       const nav = Math.round(prevNav * (1 + dailyReturn) * 10000) / 10000;
       const cumulativeReturn = Math.round(((nav / f.base_nav) - 1) * 1000000) / 1000000;
-      const snapshot = holdings.map((h: any) => ({ symbol: h.symbol, weight: h.weight, return: dayPrices[h.symbol] ?? 0 }));
+      const snapshot = holdings.map((h: any) => ({ symbol: h.symbol, weight: h.weight, return: dayPrices[h.symbol]?.change ?? 0 }));
 
       await sb.from("etf_performance").upsert({
         fund_id: f.id, date, nav,
