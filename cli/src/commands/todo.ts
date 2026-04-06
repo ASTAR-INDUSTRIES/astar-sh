@@ -94,11 +94,11 @@ let lastOpenTasks: Task[] = [];
 let lastCompletedTasks: Task[] = [];
 let monitorError = "";
 
-async function renderMonitor(api: AstarAPI) {
+async function renderMonitor(api: AstarAPI, opts: { mineOnly?: boolean; myEmail?: string } = {}) {
   try {
     const [open, done] = await Promise.all([
-      api.listTasks({ assigned_to: "all", include_subtasks: true }),
-      api.listTasks({ assigned_to: "all", status: "completed" }),
+      api.listTasks({ assigned_to: opts.mineOnly ? undefined : "all", include_subtasks: true }),
+      api.listTasks({ assigned_to: opts.mineOnly ? undefined : "all", status: "completed" }),
     ]);
     lastOpenTasks = open;
     lastCompletedTasks = done;
@@ -129,8 +129,9 @@ async function renderMonitor(api: AstarAPI) {
   const descWidth = Math.max(20, cols - 12);
 
   console.log("");
-  const headerPad = Math.max(1, cols - 18);
-  console.log(`  ${c.bold}TASKS${c.reset}${" ".repeat(headerPad)}${c.dim}${time}${c.reset}`);
+  const headerLabel = opts.mineOnly ? "MY TASKS" : "TASKS";
+  const headerPad = Math.max(1, cols - 13 - headerLabel.length);
+  console.log(`  ${c.bold}${headerLabel}${c.reset}${" ".repeat(headerPad)}${c.dim}${time}${c.reset}`);
   console.log("");
 
   for (const t of sorted) {
@@ -147,8 +148,12 @@ async function renderMonitor(api: AstarAPI) {
     const subCount = t.subtasks?.length || 0;
     const subDone = t.subtasks?.filter((s) => s.status === "completed").length || 0;
     const subLabel = subCount > 0 ? ` ${c.dim}[${subDone}/${subCount}]${c.reset}` : "";
+    const isMine = opts.myEmail && t.assigned_to === opts.myEmail;
+    const titleColor = isMine && !opts.mineOnly ? c.white : "";
+    const titleReset = isMine && !opts.mineOnly ? c.reset : "";
+    const assigneeColor = isMine && !opts.mineOnly ? c.white : c.dim;
 
-    console.log(`  ${pColor}${bar}${c.reset} ${c.cyan}${num}${c.reset}${numPad}  ${title}${subLabel}${titlePad}${pColor}${t.priority.padEnd(9)}${c.reset}${overdue ? c.red : c.dim}${due.padEnd(8)}${c.reset}${c.dim}${assignee}${c.reset}`);
+    console.log(`  ${pColor}${bar}${c.reset} ${c.cyan}${num}${c.reset}${numPad}  ${titleColor}${title}${titleReset}${subLabel}${titlePad}${pColor}${t.priority.padEnd(9)}${c.reset}${overdue ? c.red : c.dim}${due.padEnd(8)}${c.reset}${assigneeColor}${assignee}${c.reset}`);
 
     if (monitorExpanded && t.description) {
       const desc = t.description.length > descWidth ? t.description.slice(0, descWidth - 1) + "…" : t.description;
@@ -200,12 +205,14 @@ export function registerTodoCommands(program: Command) {
     .option("--monitor", "Live-updating task view (refreshes every 10s)")
     .action(async (title: string | undefined, opts) => {
       if (opts.monitor) {
+        const authStatus = await getAuthStatus();
+        const myEmail = authStatus?.email;
         async function freshApi(): Promise<AstarAPI> {
           const token = await getToken();
           return new AstarAPI(token);
         }
         async function tick() {
-          try { const api = await freshApi(); await renderMonitor(api); } catch { /* token dead, renderMonitor handles display */ }
+          try { const api = await freshApi(); await renderMonitor(api, { myEmail }); } catch { /* token dead, renderMonitor handles display */ }
         }
         await tick();
         const interval = setInterval(tick, 10000);
@@ -341,7 +348,33 @@ export function registerTodoCommands(program: Command) {
   todo
     .command("mine")
     .description("List your open tasks")
-    .action(async () => {
+    .option("--monitor", "Live-updating view of your tasks")
+    .action(async (opts) => {
+      if (opts.monitor) {
+        const authStatus = await getAuthStatus();
+        const myEmail = authStatus?.email;
+        async function freshApi(): Promise<AstarAPI> {
+          const token = await getToken();
+          return new AstarAPI(token);
+        }
+        async function tick() {
+          try { const api = await freshApi(); await renderMonitor(api, { mineOnly: true, myEmail }); } catch { /* token dead, renderMonitor handles display */ }
+        }
+        await tick();
+        const interval = setInterval(tick, 10000);
+        if (process.stdin.isTTY) {
+          process.stdin.setRawMode(true);
+          process.stdin.resume();
+          process.stdin.on("data", (key: Buffer) => {
+            if (key[0] === 0x03) { clearInterval(interval); process.stdin.setRawMode(false); console.log(""); process.exit(0); }
+            if (key[0] === 0x0f) { monitorExpanded = !monitorExpanded; tick(); }
+          });
+        } else {
+          process.on("SIGINT", () => { clearInterval(interval); console.log(""); process.exit(0); });
+        }
+        await new Promise(() => {});
+        return;
+      }
       const token = await requireAuth();
       const api = new AstarAPI(token);
       try {
