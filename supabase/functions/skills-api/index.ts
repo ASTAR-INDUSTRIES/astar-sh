@@ -1672,6 +1672,20 @@ async function fetchYahooPrices(symbol: string, range = "1mo"): Promise<{ date: 
   return points;
 }
 
+async function fetchLatestPrice(symbol: string): Promise<number | null> {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1d&interval=5m`;
+  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; AstarETF/1.0)" } });
+  if (!res.ok) return null;
+  const json = await res.json();
+  const result = json.chart?.result?.[0];
+  if (!result) return null;
+  const closes = result.indicators?.quote?.[0]?.close || [];
+  for (let i = closes.length - 1; i >= 0; i--) {
+    if (closes[i] != null) return Math.round(closes[i] * 10000) / 10000;
+  }
+  return null;
+}
+
 // ── ETF: refresh prices + recalculate NAV (MUST be before /:ticker routes) ──
 app.post("/etf/refresh-prices", async (c) => {
   const user = await validateMsToken(c.req.raw);
@@ -1696,6 +1710,7 @@ app.post("/etf/refresh-prices", async (c) => {
 
   let pricesFetched = 0;
   const errors: string[] = [];
+  const todayStr = new Date().toISOString().split("T")[0];
 
   for (const symbol of allSymbols) {
     try {
@@ -1711,8 +1726,20 @@ app.post("/etf/refresh-prices", async (c) => {
     }
   }
 
+  for (const symbol of allSymbols) {
+    try {
+      const livePrice = await fetchLatestPrice(symbol);
+      if (livePrice == null) continue;
+      const { data: prevDay } = await sb.from("etf_prices").select("close_price").eq("symbol", symbol).lt("date", todayStr).order("date", { ascending: false }).limit(1);
+      const prevClose = prevDay?.[0]?.close_price ?? livePrice;
+      const changePct = Math.round(((livePrice - prevClose) / prevClose) * 10000) / 100;
+      await sb.from("etf_prices").upsert({
+        symbol, date: todayStr, close_price: livePrice, change_pct: changePct,
+      }, { onConflict: "symbol,date" });
+    } catch {}
+  }
+
   let navsCalculated = 0;
-  const todayStr = new Date().toISOString().split("T")[0];
 
   for (const f of funds) {
     const holdings = fundHoldings[f.id];
