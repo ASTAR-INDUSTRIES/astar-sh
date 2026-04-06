@@ -39,6 +39,7 @@ const TOOL_SCOPES: Record<string, string> = {
   create_task: "task.create", update_task: "task.write", complete_task: "task.write", list_tasks: "task.read", get_task: "task.read", comment_task: "task.write", link_task: "task.write", triage_tasks: "task.read", accept_task: "task.write", dismiss_task: "task.write", get_velocity: "task.read", suggest_next_task: "task.read",
   query_audit: "audit.read",
   list_agents: "agent.read", get_agent: "agent.read", register_agent: "agent.create",
+  list_etf: "etf.read", get_etf: "etf.read", create_etf: "etf.create", update_etf: "etf.write", rebalance_etf: "etf.write", refresh_etf_prices: "etf.write",
 };
 
 function sanityToken(): string {
@@ -934,6 +935,100 @@ const TOOLS = [
       required: ["slug", "name"],
     },
   },
+  {
+    name: "list_etf",
+    description: "List all active ETF funds with latest NAV and performance",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "get_etf",
+    description: "Get ETF fund details — holdings, performance, and benchmark comparison",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ticker: { type: "string", description: "ETF ticker (e.g. ASTX)" },
+      },
+      required: ["ticker"],
+    },
+  },
+  {
+    name: "create_etf",
+    description: "Create a new simulated ETF fund with holdings",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ticker: { type: "string", description: "Unique ticker symbol (e.g. ASTX)" },
+        name: { type: "string", description: "Fund name" },
+        description: { type: "string" },
+        strategy: { type: "string" },
+        holdings: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              symbol: { type: "string" },
+              name: { type: "string" },
+              domain: { type: "string", description: "Company domain for news matching" },
+              sector: { type: "string" },
+              weight: { type: "number", description: "Allocation weight (decimal 0-1, all must sum to 1.0)" },
+            },
+            required: ["symbol", "name", "weight"],
+          },
+        },
+      },
+      required: ["ticker", "name", "holdings"],
+    },
+  },
+  {
+    name: "update_etf",
+    description: "Update ETF fund metadata or status",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ticker: { type: "string" },
+        name: { type: "string" },
+        description: { type: "string" },
+        strategy: { type: "string" },
+        status: { type: "string", enum: ["active", "paused", "closed"] },
+      },
+      required: ["ticker"],
+    },
+  },
+  {
+    name: "rebalance_etf",
+    description: "Update ETF holdings and weights — replaces all current holdings",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ticker: { type: "string" },
+        holdings: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              symbol: { type: "string" },
+              name: { type: "string" },
+              domain: { type: "string" },
+              sector: { type: "string" },
+              weight: { type: "number" },
+            },
+            required: ["symbol", "weight"],
+          },
+        },
+      },
+      required: ["ticker", "holdings"],
+    },
+  },
+  {
+    name: "refresh_etf_prices",
+    description: "Fetch latest stock prices from Yahoo Finance and recalculate NAV for all active ETFs",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ticker: { type: "string", description: "Optional: refresh only this fund" },
+      },
+    },
+  },
 ];
 
 // ── News Helper: resolve slug to ID ──────────────────────────────────
@@ -1654,6 +1749,88 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       });
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
       return [{ type: "text", text: `✓ Agent "${args.name}" registered (slug: ${args.slug})` }];
+    }
+
+    case "list_etf": {
+      const sb = adminClient();
+      const { data: funds } = await sb.from("etf_funds").select("id, ticker, name, status, base_nav").eq("status", "active").order("ticker");
+      if (!funds?.length) return [{ type: "text", text: "No active ETF funds." }];
+      const lines = [];
+      for (const f of funds) {
+        const { data: perf } = await sb.from("etf_performance").select("nav, daily_return, cumulative_return").eq("fund_id", f.id).order("date", { ascending: false }).limit(1);
+        const p = perf?.[0];
+        const nav = p?.nav ?? f.base_nav;
+        const daily = p ? `${(p.daily_return * 100).toFixed(2)}%` : "—";
+        const cumul = p ? `${(p.cumulative_return * 100).toFixed(2)}%` : "—";
+        lines.push(`${f.ticker} — ${f.name} | NAV: ${nav} | Daily: ${daily} | Cumul: ${cumul}`);
+      }
+      return [{ type: "text", text: lines.join("\n") }];
+    }
+
+    case "get_etf": {
+      const sb = adminClient();
+      const { data: fund } = await sb.from("etf_funds").select("*").eq("ticker", args.ticker.toUpperCase()).single();
+      if (!fund) return [{ type: "text", text: "Error: Fund not found." }];
+      const { data: holdings } = await sb.from("etf_holdings").select("symbol, name, sector, weight").eq("fund_id", fund.id).order("weight", { ascending: false });
+      const { data: perf } = await sb.from("etf_performance").select("nav, daily_return, cumulative_return, date").eq("fund_id", fund.id).order("date", { ascending: false }).limit(1);
+      const p = perf?.[0];
+      let out = `${fund.ticker} — ${fund.name}\nStatus: ${fund.status} | Inception: ${fund.inception_date}`;
+      if (fund.description) out += `\n${fund.description}`;
+      out += `\n\nNAV: ${p?.nav ?? fund.base_nav} | Daily: ${p ? (p.daily_return * 100).toFixed(2) + "%" : "—"} | Since inception: ${p ? (p.cumulative_return * 100).toFixed(2) + "%" : "—"}`;
+      out += `\n\nHoldings (${(holdings || []).length}):`;
+      for (const h of (holdings || [])) {
+        out += `\n  ${h.symbol.padEnd(6)} ${(h.weight * 100).toFixed(1).padStart(5)}%  ${h.name}${h.sector ? ` [${h.sector}]` : ""}`;
+      }
+      return [{ type: "text", text: out }];
+    }
+
+    case "create_etf": {
+      const sb = adminClient();
+      if (!args.holdings?.length) return [{ type: "text", text: "Error: holdings required." }];
+      const weightSum = args.holdings.reduce((s: number, h: any) => s + (h.weight || 0), 0);
+      if (Math.abs(weightSum - 1.0) > 0.001) return [{ type: "text", text: `Error: weights must sum to 1.0 (got ${weightSum.toFixed(4)})` }];
+      const { data: fund, error } = await sb.from("etf_funds").insert({
+        ticker: args.ticker.toUpperCase(), name: args.name,
+        description: args.description || null, strategy: args.strategy || null,
+        inception_date: new Date().toISOString().split("T")[0], created_by: user.email,
+      }).select("id, ticker").single();
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      const rows = args.holdings.map((h: any) => ({ fund_id: fund.id, symbol: h.symbol.toUpperCase(), name: h.name, domain: h.domain || null, sector: h.sector || null, weight: h.weight }));
+      await sb.from("etf_holdings").insert(rows);
+      await sb.from("audit_events").insert({ actor_email: user.email, actor_type: actorType, entity_type: "etf", entity_id: fund.ticker, action: "created", channel: "mcp", state_after: { ticker: fund.ticker, holdings: args.holdings.length } });
+      return [{ type: "text", text: `✓ ETF ${fund.ticker} created with ${args.holdings.length} holdings.` }];
+    }
+
+    case "update_etf": {
+      const sb = adminClient();
+      const patch: any = { updated_at: new Date().toISOString() };
+      for (const f of ["name", "description", "strategy", "status"]) {
+        if ((args as any)[f] !== undefined) patch[f] = (args as any)[f];
+      }
+      const { error } = await sb.from("etf_funds").update(patch).eq("ticker", args.ticker.toUpperCase());
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      await sb.from("audit_events").insert({ actor_email: user.email, actor_type: actorType, entity_type: "etf", entity_id: args.ticker.toUpperCase(), action: "updated", channel: "mcp", state_after: patch });
+      return [{ type: "text", text: `✓ ETF ${args.ticker.toUpperCase()} updated.` }];
+    }
+
+    case "rebalance_etf": {
+      const sb = adminClient();
+      if (!args.holdings?.length) return [{ type: "text", text: "Error: holdings required." }];
+      const weightSum = args.holdings.reduce((s: number, h: any) => s + (h.weight || 0), 0);
+      if (Math.abs(weightSum - 1.0) > 0.001) return [{ type: "text", text: `Error: weights must sum to 1.0 (got ${weightSum.toFixed(4)})` }];
+      const { data: fund } = await sb.from("etf_funds").select("id").eq("ticker", args.ticker.toUpperCase()).single();
+      if (!fund) return [{ type: "text", text: "Error: Fund not found." }];
+      await sb.from("etf_holdings").delete().eq("fund_id", fund.id);
+      const rows = args.holdings.map((h: any) => ({ fund_id: fund.id, symbol: h.symbol.toUpperCase(), name: h.name || h.symbol, domain: h.domain || null, sector: h.sector || null, weight: h.weight }));
+      await sb.from("etf_holdings").insert(rows);
+      await sb.from("audit_events").insert({ actor_email: user.email, actor_type: actorType, entity_type: "etf", entity_id: args.ticker.toUpperCase(), action: "rebalanced", channel: "mcp", state_after: { holdings: args.holdings.length } });
+      return [{ type: "text", text: `✓ ETF ${args.ticker.toUpperCase()} rebalanced with ${args.holdings.length} holdings.` }];
+    }
+
+    case "refresh_etf_prices": {
+      const sb = adminClient();
+      const apiUrl = env("SUPABASE_URL") + "/functions/v1/skills-api";
+      return [{ type: "text", text: "Use `astar etf refresh` CLI command or POST /etf/refresh-prices to trigger price refresh. This tool cannot call external APIs directly from MCP context." }];
     }
 
     default:

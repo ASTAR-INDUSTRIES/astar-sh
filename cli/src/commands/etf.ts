@@ -69,7 +69,7 @@ export function registerEtfCommands(program: Command) {
       const token = await requireAuth();
       const api = new AstarAPI(token);
       try {
-        const { fund, holdings, performance } = await api.getEtf(ticker);
+        const { fund, holdings, performance, benchmark } = await api.getEtf(ticker);
 
         console.log("");
         console.log(`  ${c.bold}${fund.name}${c.reset} (${c.cyan}${fund.ticker}${c.reset})`);
@@ -80,6 +80,11 @@ export function registerEtfCommands(program: Command) {
         console.log("");
         console.log(`  ${c.bold}PERFORMANCE${c.reset}`);
         console.log(`  NAV: ${c.bold}${fmtNav(performance.nav)}${c.reset}  Daily: ${fmtPct(performance.daily_return)}  Since inception: ${fmtPct(performance.cumulative_return)}`);
+        if (benchmark) {
+          const alpha = performance.cumulative_return - benchmark.cumulative_return;
+          const alphaColor = alpha > 0 ? c.green : alpha < 0 ? c.red : c.dim;
+          console.log(`  ${c.dim}SPY:${c.reset}  Daily: ${fmtPct(benchmark.daily_return)}  Since inception: ${fmtPct(benchmark.cumulative_return)}  ${c.dim}Alpha:${c.reset} ${alphaColor}${alpha > 0 ? "+" : ""}${(alpha * 100).toFixed(2)}%${c.reset}`);
+        }
 
         console.log("");
         console.log(`  ${c.bold}HOLDINGS${c.reset}`);

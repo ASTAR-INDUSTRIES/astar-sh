@@ -1495,6 +1495,20 @@ app.get("/etf/:ticker", async (c) => {
   }));
 
   const latest = perf?.[0];
+
+  let benchmark = null;
+  if (latest?.date) {
+    const { data: spyToday } = await sb.from("etf_prices").select("close_price, change_pct").eq("symbol", "SPY").eq("date", latest.date).single();
+    const { data: spyInception } = await sb.from("etf_prices").select("close_price").eq("symbol", "SPY").eq("date", fund.inception_date).single();
+    if (spyToday && spyInception) {
+      benchmark = {
+        symbol: "SPY",
+        daily_return: spyToday.change_pct / 100,
+        cumulative_return: (spyToday.close_price - spyInception.close_price) / spyInception.close_price,
+      };
+    }
+  }
+
   return c.json({
     fund,
     holdings: enrichedHoldings,
@@ -1504,6 +1518,7 @@ app.get("/etf/:ticker", async (c) => {
       cumulative_return: latest?.cumulative_return ?? 0,
       date: latest?.date ?? fund.inception_date,
     },
+    benchmark,
   }, 200, corsHeaders);
 });
 
@@ -1521,7 +1536,20 @@ app.get("/etf/:ticker/performance", async (c) => {
 
   const { data } = await sb.from("etf_performance").select("date, nav, daily_return, cumulative_return").eq("fund_id", fund.id).gte("date", since).order("date", { ascending: true });
 
-  return c.json({ ticker, range, data: data || [] }, 200, corsHeaders);
+  const { data: fundFull } = await sb.from("etf_funds").select("inception_date").eq("id", fund.id).single();
+  let spyBenchmark: any[] = [];
+  if (fundFull) {
+    const { data: spyInception } = await sb.from("etf_prices").select("close_price").eq("symbol", "SPY").eq("date", fundFull.inception_date).single();
+    if (spyInception) {
+      const { data: spyPrices } = await sb.from("etf_prices").select("date, close_price").eq("symbol", "SPY").gte("date", since).order("date", { ascending: true });
+      spyBenchmark = (spyPrices || []).map((p: any) => ({
+        date: p.date,
+        cumulative_return: (p.close_price - spyInception.close_price) / spyInception.close_price,
+      }));
+    }
+  }
+
+  return c.json({ ticker, range, data: data || [], benchmark: spyBenchmark }, 200, corsHeaders);
 });
 
 // ── ETF: linked news ────────────────────────────────────────────────
@@ -1635,6 +1663,29 @@ app.post("/etf/:ticker/rebalance", async (c) => {
   return c.json({ ok: true }, 200, corsHeaders);
 });
 
+// ── ETF: fetch Yahoo Finance prices for a symbol ────────────────────
+async function fetchYahooPrices(symbol: string, range = "1mo"): Promise<{ date: string; close: number; changePct: number }[]> {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=${range}&interval=1d`;
+  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; AstarETF/1.0)" } });
+  if (!res.ok) throw new Error(`Yahoo ${res.status}`);
+  const json = await res.json();
+  const result = json.chart?.result?.[0];
+  if (!result) throw new Error("No chart data");
+
+  const timestamps = result.timestamp || [];
+  const closes = result.indicators?.quote?.[0]?.close || [];
+  const points: { date: string; close: number; changePct: number }[] = [];
+
+  for (let i = 0; i < timestamps.length; i++) {
+    if (closes[i] == null) continue;
+    const date = new Date(timestamps[i] * 1000).toISOString().split("T")[0];
+    const prevClose = i > 0 && closes[i - 1] != null ? closes[i - 1] : closes[i];
+    const changePct = prevClose ? ((closes[i] - prevClose) / prevClose) * 100 : 0;
+    points.push({ date, close: Math.round(closes[i] * 10000) / 10000, changePct: Math.round(changePct * 10000) / 10000 });
+  }
+  return points;
+}
+
 // ── ETF: refresh prices + recalculate NAV ───────────────────────────
 app.post("/etf/refresh-prices", async (c) => {
   const user = await validateMsToken(c.req.raw);
@@ -1643,7 +1694,7 @@ app.post("/etf/refresh-prices", async (c) => {
   const sb = getSupabase();
   const targetTicker = c.req.query("ticker");
 
-  let fundsQuery = sb.from("etf_funds").select("id, ticker, base_nav").eq("status", "active");
+  let fundsQuery = sb.from("etf_funds").select("id, ticker, base_nav, inception_date").eq("status", "active");
   if (targetTicker) fundsQuery = fundsQuery.eq("ticker", targetTicker.toUpperCase());
   const { data: funds } = await fundsQuery;
   if (!funds?.length) return c.json({ error: "No active funds" }, 404, corsHeaders);
@@ -1655,36 +1706,23 @@ app.post("/etf/refresh-prices", async (c) => {
     fundHoldings[f.id] = h || [];
     for (const hh of (h || [])) allSymbols.add(hh.symbol);
   }
+  allSymbols.add("SPY");
 
-  const today = new Date().toISOString().split("T")[0];
   let pricesFetched = 0;
+  const errors: string[] = [];
 
   for (const symbol of allSymbols) {
     try {
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=1d`;
-      const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
-      const json = await res.json();
-      const result = json.chart?.result?.[0];
-      if (!result) continue;
-
-      const timestamps = result.timestamp || [];
-      const closes = result.indicators?.quote?.[0]?.close || [];
-
-      for (let i = 0; i < timestamps.length; i++) {
-        if (closes[i] == null) continue;
-        const date = new Date(timestamps[i] * 1000).toISOString().split("T")[0];
-        const prevClose = i > 0 && closes[i - 1] ? closes[i - 1] : closes[i];
-        const changePct = prevClose ? ((closes[i] - prevClose) / prevClose) * 100 : 0;
-
+      const points = await fetchYahooPrices(symbol, "1mo");
+      for (const p of points) {
         await sb.from("etf_prices").upsert({
-          symbol,
-          date,
-          close_price: Math.round(closes[i] * 10000) / 10000,
-          change_pct: Math.round(changePct * 10000) / 10000,
+          symbol, date: p.date, close_price: p.close, change_pct: p.changePct,
         }, { onConflict: "symbol,date" });
       }
       pricesFetched++;
-    } catch { /* skip failed symbol */ }
+    } catch (e: any) {
+      errors.push(`${symbol}: ${e.message}`);
+    }
   }
 
   let navsCalculated = 0;
@@ -1692,42 +1730,59 @@ app.post("/etf/refresh-prices", async (c) => {
     const holdings = fundHoldings[f.id];
     if (!holdings?.length) continue;
 
-    const { data: prevPerf } = await sb.from("etf_performance").select("nav, date").eq("fund_id", f.id).order("date", { ascending: false }).limit(1);
-    const prevNav = prevPerf?.[0]?.nav ?? f.base_nav;
-
     const symbols = holdings.map((h: any) => h.symbol);
-    const { data: todayPrices } = await sb.from("etf_prices").select("symbol, change_pct").in("symbol", symbols).eq("date", today);
+    const { data: allPrices } = await sb.from("etf_prices").select("symbol, date, change_pct").in("symbol", symbols).gte("date", f.inception_date).order("date", { ascending: true });
+    if (!allPrices?.length) continue;
 
-    if (!todayPrices?.length) continue;
+    const tradingDates = [...new Set(allPrices.map((p: any) => p.date))].sort();
 
-    const priceMap: Record<string, number> = {};
-    for (const p of todayPrices) priceMap[p.symbol] = p.change_pct / 100;
+    const { data: existingPerf } = await sb.from("etf_performance").select("date").eq("fund_id", f.id);
+    const existingDates = new Set((existingPerf || []).map((p: any) => p.date));
 
-    let dailyReturn = 0;
-    for (const h of holdings) {
-      const ret = priceMap[h.symbol] ?? 0;
-      dailyReturn += h.weight * ret;
+    let prevNav = f.base_nav;
+    const { data: lastPerf } = await sb.from("etf_performance").select("nav, date").eq("fund_id", f.id).order("date", { ascending: false }).limit(1);
+    if (lastPerf?.[0]) prevNav = lastPerf[0].nav;
+
+    const pricesByDate: Record<string, Record<string, number>> = {};
+    for (const p of allPrices) {
+      if (!pricesByDate[p.date]) pricesByDate[p.date] = {};
+      pricesByDate[p.date][p.symbol] = p.change_pct / 100;
     }
 
-    const nav = Math.round(prevNav * (1 + dailyReturn) * 10000) / 10000;
-    const cumulativeReturn = Math.round(((nav / f.base_nav) - 1) * 1000000) / 1000000;
+    const datesToCalc = tradingDates.filter(d => !existingDates.has(d));
+    if (!datesToCalc.length && lastPerf?.[0]) {
+      const latestDate = tradingDates[tradingDates.length - 1];
+      if (latestDate && existingDates.has(latestDate)) continue;
+      if (latestDate) datesToCalc.push(latestDate);
+    }
 
-    const snapshot = holdings.map((h: any) => ({ symbol: h.symbol, weight: h.weight, return: priceMap[h.symbol] ?? 0 }));
+    for (const date of datesToCalc) {
+      const dayPrices = pricesByDate[date];
+      if (!dayPrices) continue;
 
-    await sb.from("etf_performance").upsert({
-      fund_id: f.id,
-      date: today,
-      nav,
-      daily_return: Math.round(dailyReturn * 1000000) / 1000000,
-      cumulative_return: cumulativeReturn,
-      holdings_snapshot: snapshot,
-    }, { onConflict: "fund_id,date" });
+      let dailyReturn = 0;
+      for (const h of holdings) {
+        dailyReturn += h.weight * (dayPrices[h.symbol] ?? 0);
+      }
+
+      const nav = Math.round(prevNav * (1 + dailyReturn) * 10000) / 10000;
+      const cumulativeReturn = Math.round(((nav / f.base_nav) - 1) * 1000000) / 1000000;
+      const snapshot = holdings.map((h: any) => ({ symbol: h.symbol, weight: h.weight, return: dayPrices[h.symbol] ?? 0 }));
+
+      await sb.from("etf_performance").upsert({
+        fund_id: f.id, date, nav,
+        daily_return: Math.round(dailyReturn * 1000000) / 1000000,
+        cumulative_return: cumulativeReturn,
+        holdings_snapshot: snapshot,
+      }, { onConflict: "fund_id,date" });
+      prevNav = nav;
+    }
     navsCalculated++;
   }
 
-  await logAudit({ actor_email: user.email, actor_type: "human", entity_type: "etf", action: "prices_refreshed", channel: "api", state_after: { prices_fetched: pricesFetched, navs_calculated: navsCalculated } });
+  await logAudit({ actor_email: user.email, actor_type: "human", entity_type: "etf", action: "prices_refreshed", channel: "api", state_after: { prices_fetched: pricesFetched, navs_calculated: navsCalculated, errors: errors.length } });
 
-  return c.json({ ok: true, prices_fetched: pricesFetched, navs_calculated: navsCalculated }, 200, corsHeaders);
+  return c.json({ ok: true, prices_fetched: pricesFetched, navs_calculated: navsCalculated, errors: errors.length ? errors : undefined }, 200, corsHeaders);
 });
 
 // ── Health ─────────────────────────────────────────────────────────────
