@@ -1784,8 +1784,6 @@ app.post("/etf/refresh-prices", async (c) => {
       cumulative_return: Math.round(cumulativeReturn * 1000000) / 1000000,
       holdings_snapshot: snapshot,
     }, { onConflict: "fund_id,date" });
-    prevNav;
-    }
     navsCalculated++;
   }
 
