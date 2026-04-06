@@ -5,8 +5,9 @@ import { sanityClient } from "@/lib/sanity";
 import { format, subDays, startOfDay, startOfWeek, addDays } from "date-fns";
 import {
   FileText, MessageCircle,
-  BookOpen, Download, ExternalLink,
+  BookOpen, Download, ExternalLink, TrendingUp,
 } from "lucide-react";
+import { AreaChart, Area, ResponsiveContainer, Tooltip } from "recharts";
 
 const REACTION_EMOJIS = ["🔥", "👏", "🧠", "💡", "🎯"];
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -171,6 +172,33 @@ const PublicDashboard = () => {
       if (error) throw error;
       return data;
     },
+    refetchInterval: 30000,
+  });
+
+  const { data: etfFunds = [] } = useQuery({
+    queryKey: ["etf-funds"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("etf_funds").select("*").eq("status", "active");
+      if (error) throw error;
+      return data;
+    },
+    refetchInterval: 30000,
+  });
+
+  const { data: etfPerformance = [] } = useQuery({
+    queryKey: ["etf-performance", etfFunds?.[0]?.id],
+    queryFn: async () => {
+      if (!etfFunds?.[0]?.id) return [];
+      const { data, error } = await supabase
+        .from("etf_performance")
+        .select("date, nav, daily_return, cumulative_return")
+        .eq("fund_id", etfFunds[0].id)
+        .order("date", { ascending: true })
+        .limit(90);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!etfFunds?.[0]?.id,
     refetchInterval: 30000,
   });
 
@@ -411,9 +439,60 @@ const PublicDashboard = () => {
             </p>
           </div>
 
+          {/* ETF Panel */}
+          {etfFunds.length > 0 && (() => {
+            const fund = etfFunds[0];
+            const latest = etfPerformance[etfPerformance.length - 1];
+            const nav = latest?.nav ?? fund.base_nav ?? 100;
+            const dailyReturn = latest?.daily_return ?? 0;
+            const cumulReturn = latest?.cumulative_return ?? 0;
+            const isUp = cumulReturn >= 0;
+            return (
+              <div className="flex-shrink-0 border-b border-border/50">
+                <div className="flex items-center gap-2 px-4 py-2 border-b border-border/50">
+                  <TrendingUp className="h-3.5 w-3.5 text-foreground/40" />
+                  <span className="text-[10px] font-mono uppercase tracking-[1.17px] text-foreground/40">{fund.ticker}</span>
+                  <span className="text-[10px] font-mono text-foreground/20 ml-auto">{fund.name}</span>
+                </div>
+                <div className="px-4 py-2">
+                  <div className="flex items-baseline gap-3">
+                    <span className="text-lg font-mono font-bold text-foreground tabular-nums">{nav.toFixed(2)}</span>
+                    <span className={`text-xs font-mono tabular-nums ${dailyReturn >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      {dailyReturn >= 0 ? "+" : ""}{(dailyReturn * 100).toFixed(2)}%
+                    </span>
+                    <span className={`text-[10px] font-mono tabular-nums ${isUp ? "text-green-400/60" : "text-red-400/60"}`}>
+                      {cumulReturn >= 0 ? "+" : ""}{(cumulReturn * 100).toFixed(2)}% cumul
+                    </span>
+                  </div>
+                  {etfPerformance.length >= 2 && (
+                    <div className="mt-2 h-[60px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={etfPerformance} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                          <defs>
+                            <linearGradient id="navGrad" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor={isUp ? "#4ade80" : "#f87171"} stopOpacity={0.3} />
+                              <stop offset="100%" stopColor={isUp ? "#4ade80" : "#f87171"} stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <Tooltip
+                            contentStyle={{ background: "#111", border: "1px solid rgba(240,240,250,0.1)", borderRadius: 6, fontSize: 11, fontFamily: "JetBrains Mono" }}
+                            labelStyle={{ color: "rgba(240,240,250,0.4)" }}
+                            formatter={(value: number) => [`${value.toFixed(2)}`, "NAV"]}
+                            labelFormatter={(label: string) => label}
+                          />
+                          <Area type="monotone" dataKey="nav" stroke={isUp ? "#4ade80" : "#f87171"} strokeWidth={1.5} fill="url(#navGrad)" dot={false} />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Skills */}
           <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-            <div className="flex-shrink-0 flex items-center justify-between px-4 py-2 border-b border-border">
+            <div className="flex-shrink-0 flex items-center justify-between px-4 py-2 border-b border-border/50">
               <div className="flex items-center gap-2">
                 <BookOpen className="h-3.5 w-3.5 text-foreground/40" />
                 <span className="text-[10px] font-mono uppercase tracking-[1.17px] text-foreground/40">Skills</span>
