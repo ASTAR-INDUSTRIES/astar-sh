@@ -248,6 +248,7 @@ export type Database = {
         Row: {
           added_at: string | null
           domain: string | null
+          entry_price: number | null
           fund_id: string
           id: string
           name: string
@@ -258,6 +259,7 @@ export type Database = {
         Insert: {
           added_at?: string | null
           domain?: string | null
+          entry_price?: number | null
           fund_id: string
           id?: string
           name: string
@@ -268,6 +270,7 @@ export type Database = {
         Update: {
           added_at?: string | null
           domain?: string | null
+          entry_price?: number | null
           fund_id?: string
           id?: string
           name?: string

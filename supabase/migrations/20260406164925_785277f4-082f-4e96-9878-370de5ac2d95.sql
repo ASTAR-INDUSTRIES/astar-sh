@@ -1,0 +1,1 @@
+ALTER TABLE public.etf_holdings ADD COLUMN entry_price numeric(12,4);
