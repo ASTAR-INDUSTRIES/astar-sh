@@ -1483,10 +1483,11 @@ app.get("/etf/:ticker", async (c) => {
   const { data: perf } = await sb.from("etf_performance").select("nav, daily_return, cumulative_return, date").eq("fund_id", fund.id).order("date", { ascending: false }).limit(1);
 
   const symbols = (holdings || []).map((h: any) => h.symbol);
-  const today = new Date().toISOString().split("T")[0];
-  const { data: prices } = await sb.from("etf_prices").select("symbol, close_price, change_pct").in("symbol", symbols).eq("date", today);
   const priceMap: Record<string, any> = {};
-  for (const p of (prices || [])) priceMap[p.symbol] = p;
+  for (const sym of symbols) {
+    const { data: latest } = await sb.from("etf_prices").select("close_price, change_pct, date").eq("symbol", sym).order("date", { ascending: false }).limit(1);
+    if (latest?.[0]) priceMap[sym] = latest[0];
+  }
 
   const enrichedHoldings = (holdings || []).map((h: any) => ({
     ...h,

@@ -230,11 +230,11 @@ export interface FeedbackItem {
 export class AstarAPI {
   constructor(private token?: string) {}
 
-  private async fetch<T>(path: string): Promise<T> {
+  private async fetch<T>(path: string, opts?: { method?: string; body?: string }): Promise<T> {
     const config = await getConfig();
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
-    const res = await fetch(`${config.apiUrl}${path}`, { headers });
+    const res = await fetch(`${config.apiUrl}${path}`, { method: opts?.method || "GET", headers, body: opts?.body });
     if (!res.ok) {
       if (res.status === 404) throw new Error("This feature isn't available yet. The API may need to be redeployed.");
       if (res.status === 401) throw new Error("Session expired. Run 'astar login' to sign in again.");
