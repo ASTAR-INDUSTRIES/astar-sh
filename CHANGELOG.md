@@ -5,17 +5,27 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.37] - 2026-04-06
+
 ## [0.0.36] - 2026-04-05
 ### Added
 - Daily beat circuit breaker — agents auto-stop after 100 beats/day (configurable via `--max-beats`)
 
 ## [0.0.35] - 2026-04-05
+### Changed
+- `astar ask` now returns instantly (fire-and-forget) instead of polling for response
 
 ## [0.0.34] - 2026-04-05
+### Fixed
+- Agent monitor rendering — single buffered write eliminates flicker
 
 ## [0.0.33] - 2026-04-05
+### Changed
+- Agent monitor rewritten to use inbox-based activity feed
 
 ## [0.0.32] - 2026-04-05
+### Fixed
+- Agent monitor flicker + `claude` not found in PATH
 
 ## [0.0.31] - 2026-04-05
 ### Added
@@ -23,8 +33,12 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 - `ctrl+o` toggle to expand/collapse activity feed
 
 ## [0.0.30] - 2026-04-05
+### Added
+- `--dangerously-skip-permissions` flag for agent heartbeat
 
 ## [0.0.29] - 2026-04-05
+### Added
+- `--skip-auth` flag for `astar agent hire`
 
 ## [0.0.28] - 2026-04-05
 ### Added
@@ -70,6 +84,8 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 - `ctrl+o` toggle to expand/collapse descriptions in monitor view
 
 ## [0.0.22] - 2026-04-04
+### Fixed
+- Todo monitor uses full terminal width for task titles
 
 ## [0.0.21] - 2026-04-04
 ### Added
@@ -112,6 +128,8 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 - CHANGELOG.md auto-versioned by pre-commit hook
 
 ## [0.0.15] - 2026-04-03
+### Fixed
+- Health always checks CLI version (not just in `--extended` mode)
 
 ## [0.0.14] - 2026-04-03
 ### Added
@@ -121,7 +139,6 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ### Fixed
 - Health `--fix` correctly detects hash mismatch in base skill
-- Health always checks CLI version (not just in `--extended` mode)
 
 ## [0.0.12] - 2026-04-03
 ### Added
