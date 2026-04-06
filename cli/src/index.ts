@@ -14,12 +14,13 @@ import { registerHealthCommand } from "./commands/health";
 import { registerStatusCommand } from "./commands/status";
 import { registerChangelogCommand } from "./commands/changelog";
 import { registerUpdateCommand, checkForUpdates } from "./commands/update";
+import { registerEtfCommands } from "./commands/etf";
 import { getAuthStatus } from "./lib/auth";
 import { AstarAPI } from "./lib/api";
 import { c } from "./lib/ui";
 import { resolve } from "path";
 
-export const VERSION = "0.0.43";
+export const VERSION = "0.0.44";
 
 async function showDashboard() {
   const status = await getAuthStatus();
@@ -73,7 +74,7 @@ async function showDashboard() {
   console.log(`  ${c.dim}Tasks:${c.reset}     ${taskCount}`);
   console.log(`  ${c.dim}Feedback:${c.reset}  ${feedbackCount}`);
   console.log("");
-  console.log(`  ${c.dim}skill · news · todo · feedback · shipped · hours · audit · update${c.reset}`);
+  console.log(`  ${c.dim}skill · news · todo · etf · feedback · shipped · hours · audit · update${c.reset}`);
   console.log("");
 }
 
@@ -100,6 +101,7 @@ registerAskCommands(program);
 registerHealthCommand(program);
 registerStatusCommand(program);
 registerChangelogCommand(program);
+registerEtfCommands(program);
 registerUpdateCommand(program);
 
 await checkForUpdates();

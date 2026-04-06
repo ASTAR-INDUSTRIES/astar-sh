@@ -5,6 +5,15 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.44] - 2026-04-06
+### Added
+- Simulated ETF portfolio system — create, track, and analyze paper ETF funds
+- `astar etf list/info/performance/news/refresh` CLI commands
+- ASTX (ASTAR Space ETF) seeded with 12 space economy holdings
+- Yahoo Finance price fetching with daily NAV calculation
+- Auto-linked news: articles matching ETF holding entities surface automatically
+- 8 REST API endpoints for ETF CRUD, rebalancing, and price refresh
+
 ## [0.0.43] - 2026-04-06
 
 ## [0.0.42] - 2026-04-06
