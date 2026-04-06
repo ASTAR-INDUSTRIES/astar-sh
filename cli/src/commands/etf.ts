@@ -114,7 +114,8 @@ async function renderMonitorSingle(api: AstarAPI, ticker: string) {
   console.log("");
 
   const symWidth = 6;
-  const nameWidth = Math.min(25, Math.max(12, cols - 55));
+  const nameWidth = Math.min(25, Math.max(12, cols - 75));
+  console.log(`  ${c.dim}  ${"".padEnd(symWidth)} ${"".padEnd(nameWidth)} ${"Weight".padStart(6)}  ${"Price".padStart(10)}  ${"Daily".padStart(8)}  ${"Entry".padStart(10)}  ${"Since".padStart(8)}${c.reset}`);
   for (const h of holdings) {
     const sym = h.symbol.padEnd(symWidth);
     const name = h.name.length > nameWidth ? h.name.slice(0, nameWidth - 1) + "…" : h.name.padEnd(nameWidth);
@@ -122,18 +123,23 @@ async function renderMonitorSingle(api: AstarAPI, ticker: string) {
     const price = h.latest_price != null ? `$${h.latest_price.toFixed(2)}`.padStart(10) : `${c.dim}${"—".padStart(10)}${c.reset}`;
     const change = h.daily_change_pct != null ? fmtPct(h.daily_change_pct / 100) : `${c.dim}—${c.reset}`;
     const changeColor = h.daily_change_pct != null && h.daily_change_pct > 0 ? c.green : h.daily_change_pct != null && h.daily_change_pct < 0 ? c.red : c.dim;
-    const entry = (h as any).since_entry_pct != null ? fmtPct((h as any).since_entry_pct / 100) : `${c.dim}—${c.reset}`;
+    const entryPx = (h as any).entry_price != null ? `$${(h as any).entry_price.toFixed(2)}`.padStart(10) : `${c.dim}${"—".padStart(10)}${c.reset}`;
+    const sinceEntry = (h as any).since_entry_pct != null ? fmtPct((h as any).since_entry_pct / 100) : `${c.dim}—${c.reset}`;
     const bar = h.daily_change_pct != null && h.daily_change_pct > 0 ? `${c.green}▲${c.reset}` : h.daily_change_pct != null && h.daily_change_pct < 0 ? `${c.red}▼${c.reset}` : `${c.dim}·${c.reset}`;
-    console.log(`  ${bar} ${c.cyan}${sym}${c.reset} ${c.dim}${name}${c.reset} ${weight}  ${price}  ${change}  ${entry}`);
+    console.log(`  ${bar} ${c.cyan}${sym}${c.reset} ${c.dim}${name}${c.reset} ${weight}  ${price}  ${change}  ${entryPx}  ${sinceEntry}`);
   }
 
-  if (monitorExpanded && news.length) {
+  if (news.length) {
+    const newsLimit = monitorExpanded ? 5 : 3;
     console.log("");
-    console.log(`  ${c.bold}NEWS${c.reset}`);
-    for (const n of news.slice(0, 5)) {
+    console.log(`  ${c.bold}NEWS${c.reset} ${c.dim}(${news.length} linked)${c.reset}`);
+    for (const n of news.slice(0, newsLimit)) {
       const date = n.publishedAt ? new Date(n.publishedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
+      const entities = (n.entities || []).map((e: any) => e.name).slice(0, 3).join(", ");
       console.log(`  ${c.dim}${date}${c.reset}  ${n.title}`);
+      if (monitorExpanded && entities) console.log(`  ${c.dim}       ${entities}${c.reset}`);
     }
+    if (news.length > newsLimit) console.log(`  ${c.dim}  +${news.length - newsLimit} more${c.reset}`);
   }
 
   console.log("");
