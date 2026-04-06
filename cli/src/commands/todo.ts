@@ -319,8 +319,11 @@ export function registerTodoCommands(program: Command) {
           console.log("");
           console.log(`  ${c.bold}${c.white}Activity${c.reset}`);
           for (const a of activity) {
-            const detail = a.action === "commented" ? `: ${a.details?.comment || ""}` : "";
-            console.log(`  ${c.dim}${fmtDate(a.created_at)}${c.reset} ${a.actor.split("@")[0]} ${c.dim}${a.action}${detail}${c.reset}`);
+            const actor = (a.actor_email || a.actor || "").split("@")[0] || "system";
+            const ts = a.timestamp || a.created_at;
+            const detail = a.action === "commented" ? `: ${a.state_after?.comment || a.details?.comment || ""}` : "";
+            const reason = a.context?.reason ? ` ${c.dim}— ${a.context.reason}${c.reset}` : "";
+            console.log(`  ${c.dim}${fmtDate(ts)}${c.reset} ${actor} ${c.dim}${a.action}${detail}${c.reset}${reason}`);
           }
         }
         console.log("");
