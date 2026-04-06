@@ -5,8 +5,9 @@ import { sanityClient } from "@/lib/sanity";
 import { format, subDays, startOfDay, startOfWeek, addDays } from "date-fns";
 import {
   FileText, MessageCircle,
-  BookOpen, Download, ExternalLink,
+  BookOpen, Download, ExternalLink, TrendingUp,
 } from "lucide-react";
+import { AreaChart, Area, ResponsiveContainer, Tooltip } from "recharts";
 
 const REACTION_EMOJIS = ["🔥", "👏", "🧠", "💡", "🎯"];
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -18,11 +19,11 @@ import remarkGfm from "remark-gfm";
 const ASTAR_VERSION = "0.0.7";
 
 const regionColors: Record<string, string> = {
-  US: "text-blue-400 bg-blue-400/10",
-  EU: "text-yellow-400 bg-yellow-400/10",
-  NO: "text-red-400 bg-red-400/10",
-  UK: "text-purple-400 bg-purple-400/10",
-  Intl: "text-emerald-400 bg-emerald-400/10",
+  US: "text-foreground/70 bg-foreground/5 border border-foreground/10",
+  EU: "text-foreground/70 bg-foreground/5 border border-foreground/10",
+  NO: "text-foreground/70 bg-foreground/5 border border-foreground/10",
+  UK: "text-foreground/70 bg-foreground/5 border border-foreground/10",
+  Intl: "text-foreground/70 bg-foreground/5 border border-foreground/10",
 };
 
 const HEATMAP_DAYS = 14;
@@ -66,8 +67,8 @@ const NewsAutoScroll = ({ posts, onSelect }: { posts: any[]; onSelect: (id: stri
   return (
     <div className="bg-background flex flex-col overflow-hidden">
       <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-border">
-        <FileText className="h-3.5 w-3.5 text-accent" />
-        <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">News</span>
+        <FileText className="h-3.5 w-3.5 text-foreground/40" />
+        <span className="text-[10px] font-mono uppercase tracking-[1.17px] text-foreground/40">News</span>
       </div>
       <div
         ref={scrollRef}
@@ -78,10 +79,10 @@ const NewsAutoScroll = ({ posts, onSelect }: { posts: any[]; onSelect: (id: stri
       >
         <div className="divide-y divide-border">
           {posts.length === 0 ? (
-            <p className="px-4 py-6 text-sm font-mono text-muted-foreground/30 text-center">—</p>
+            <p className="px-4 py-6 text-sm font-mono text-foreground/20 text-center">—</p>
           ) : (
             posts.map((post: any) => (
-              <div key={post._id} className="px-4 py-3 cursor-pointer hover:bg-accent/5 transition-colors" onClick={() => onSelect(post._id)}>
+              <div key={post._id} className="px-4 py-3 cursor-pointer hover:bg-foreground/5 transition-colors" onClick={() => onSelect(post._id)}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0 flex-1">
                     {post.entities?.[0]?.domain && (
@@ -95,13 +96,13 @@ const NewsAutoScroll = ({ posts, onSelect }: { posts: any[]; onSelect: (id: stri
                     <span className="font-mono text-sm font-medium text-foreground leading-snug">{post.title}</span>
                   </div>
                   {post.publishedAt && (
-                    <span className="text-[10px] font-mono text-muted-foreground/40 shrink-0 mt-0.5">
+                    <span className="text-[10px] font-mono text-foreground/25 shrink-0 mt-0.5">
                       {format(new Date(post.publishedAt), "MMM d HH:mm")}
                     </span>
                   )}
                 </div>
                 {post.excerpt && (
-                  <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2 leading-snug">{post.excerpt}</p>
+                  <p className="text-[11px] text-foreground/40 mt-1 line-clamp-2 leading-snug">{post.excerpt}</p>
                 )}
               </div>
             ))
@@ -171,6 +172,33 @@ const PublicDashboard = () => {
       if (error) throw error;
       return data;
     },
+    refetchInterval: 30000,
+  });
+
+  const { data: etfFunds = [] } = useQuery({
+    queryKey: ["etf-funds"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("etf_funds").select("*").eq("status", "active");
+      if (error) throw error;
+      return data;
+    },
+    refetchInterval: 30000,
+  });
+
+  const { data: etfPerformance = [] } = useQuery({
+    queryKey: ["etf-performance", etfFunds?.[0]?.id],
+    queryFn: async () => {
+      if (!etfFunds?.[0]?.id) return [];
+      const { data, error } = await supabase
+        .from("etf_performance")
+        .select("date, nav, daily_return, cumulative_return")
+        .eq("fund_id", etfFunds[0].id)
+        .order("date", { ascending: true })
+        .limit(90);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!etfFunds?.[0]?.id,
     refetchInterval: 30000,
   });
 
@@ -295,12 +323,12 @@ const PublicDashboard = () => {
   }, [heatmapEvents]);
 
   const getHeatColor = (count: number, max: number) => {
-    if (count === 0) return "bg-accent/5";
+    if (count === 0) return "bg-foreground/5";
     const r = count / max;
-    if (r < 0.25) return "bg-accent/20";
-    if (r < 0.5) return "bg-accent/40";
-    if (r < 0.75) return "bg-accent/60";
-    return "bg-accent/90";
+    if (r < 0.25) return "bg-foreground/15";
+    if (r < 0.5) return "bg-foreground/25";
+    if (r < 0.75) return "bg-foreground/40";
+    return "bg-foreground/60";
   };
 
   const stats = [
@@ -321,17 +349,17 @@ const PublicDashboard = () => {
             <span className="text-xl font-mono font-bold text-foreground tabular-nums leading-none">
               {format(now, "HH:mm")}
             </span>
-            <span className="text-sm font-mono text-muted-foreground/50 tabular-nums">
+            <span className="text-sm font-mono text-foreground/30 tabular-nums">
               {format(now, "ss")}
             </span>
-            <span className="text-[9px] font-mono text-muted-foreground/30 tabular-nums">
+            <span className="text-[9px] font-mono text-foreground/20 tabular-nums">
               {String(now.getMilliseconds()).padStart(3, "0").slice(0, 2)}
             </span>
           </div>
-          <span className="text-[10px] font-mono text-muted-foreground/40 mt-0.5">
+          <span className="text-[10px] font-mono text-foreground/25 mt-0.5">
             {format(now, "EEE dd")}
           </span>
-          <span className="w-full text-[7px] font-mono text-muted-foreground/30 tracking-[0.2em] uppercase animate-clock-shimmer bg-clip-text mt-0.5" style={{ backgroundSize: '200% 100%' }}>
+          <span className="w-full text-[7px] font-mono text-foreground/20 tracking-[0.2em] uppercase animate-clock-shimmer bg-clip-text mt-0.5" style={{ backgroundSize: '200% 100%' }}>
             every second counts
           </span>
         </div>
@@ -342,7 +370,7 @@ const PublicDashboard = () => {
             <div className="text-xl font-mono font-bold text-foreground leading-none tabular-nums">
               {stat.value}
             </div>
-            <div className="text-[8px] font-mono uppercase tracking-widest text-muted-foreground mt-0.5">
+            <div className="text-[8px] font-mono uppercase tracking-[1.17px] text-foreground/40 mt-0.5">
               {stat.label}
             </div>
           </div>
@@ -351,9 +379,9 @@ const PublicDashboard = () => {
         {/* Brand cell */}
         <div className="bg-background px-3 py-2 flex flex-col justify-center items-end">
           <span className="text-xs font-mono font-bold text-foreground tracking-wider flex items-center gap-1">
-            ASTAR <span className="text-accent">✦</span>
+            ASTAR <span className="text-foreground/40">✦</span>
           </span>
-          <span className="text-[9px] font-mono text-muted-foreground/30 mt-0.5">
+          <span className="text-[9px] font-mono text-foreground/20 mt-0.5">
             v{ASTAR_VERSION}
           </span>
         </div>
@@ -370,19 +398,19 @@ const PublicDashboard = () => {
               {/* Day labels */}
               <div className="flex flex-col gap-[3px] mr-1 pt-[18px]">
                 {DAY_LABELS.map(d => (
-                  <div key={d} className="h-[14px] text-[9px] font-mono text-muted-foreground/40 leading-[14px]">{d}</div>
+                  <div key={d} className="h-[14px] text-[9px] font-mono text-foreground/25 leading-[14px]">{d}</div>
                 ))}
               </div>
               {/* Grid: 2 weeks as columns, 7 days as rows */}
               <div className="flex-1">
                 <div className="flex gap-[4px] mb-1.5">
-                  <span className="text-[8px] font-mono text-muted-foreground/25 flex-1 text-center">forrige uke</span>
-                  <span className="text-[8px] font-mono text-muted-foreground/25 flex-1 text-center">denne uke</span>
+                  <span className="text-[8px] font-mono text-foreground/15 flex-1 text-center">forrige uke</span>
+                  <span className="text-[8px] font-mono text-foreground/15 flex-1 text-center">denne uke</span>
                 </div>
                 {heatmapGrid.users.length === 0 ? (
                   <div className="grid grid-cols-[repeat(14,1fr)] gap-[3px]">
                     {Array.from({ length: 14 }).map((_, i) => (
-                      <div key={i} className="aspect-square rounded-[2px] bg-accent/5" />
+                      <div key={i} className="aspect-square rounded-[2px] bg-foreground/5" />
                     ))}
                   </div>
                 ) : (
@@ -400,25 +428,76 @@ const PublicDashboard = () => {
                           );
                         })}
                       </div>
-                      <span className="text-[8px] font-mono text-muted-foreground/30 w-8 shrink-0 text-right">{user.slice(0, 5)}</span>
+                      <span className="text-[8px] font-mono text-foreground/20 w-8 shrink-0 text-right">{user.slice(0, 5)}</span>
                     </div>
                   ))
                 )}
               </div>
             </div>
-            <p className="text-[8px] font-mono text-muted-foreground/20 text-center mt-1.5 tracking-wider uppercase">
+            <p className="text-[8px] font-mono text-foreground/15 text-center mt-1.5 tracking-wider uppercase">
               Hours · siste 14d
             </p>
           </div>
 
+          {/* ETF Panel */}
+          {etfFunds.length > 0 && (() => {
+            const fund = etfFunds[0];
+            const latest = etfPerformance[etfPerformance.length - 1];
+            const nav = latest?.nav ?? fund.base_nav ?? 100;
+            const dailyReturn = latest?.daily_return ?? 0;
+            const cumulReturn = latest?.cumulative_return ?? 0;
+            const isUp = cumulReturn >= 0;
+            return (
+              <div className="flex-shrink-0 border-b border-border/50">
+                <div className="flex items-center gap-2 px-4 py-2 border-b border-border/50">
+                  <TrendingUp className="h-3.5 w-3.5 text-foreground/40" />
+                  <span className="text-[10px] font-mono uppercase tracking-[1.17px] text-foreground/40">{fund.ticker}</span>
+                  <span className="text-[10px] font-mono text-foreground/20 ml-auto">{fund.name}</span>
+                </div>
+                <div className="px-4 py-2">
+                  <div className="flex items-baseline gap-3">
+                    <span className="text-lg font-mono font-bold text-foreground tabular-nums">{nav.toFixed(2)}</span>
+                    <span className={`text-xs font-mono tabular-nums ${dailyReturn >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      {dailyReturn >= 0 ? "+" : ""}{(dailyReturn * 100).toFixed(2)}%
+                    </span>
+                    <span className={`text-[10px] font-mono tabular-nums ${isUp ? "text-green-400/60" : "text-red-400/60"}`}>
+                      {cumulReturn >= 0 ? "+" : ""}{(cumulReturn * 100).toFixed(2)}% cumul
+                    </span>
+                  </div>
+                  {etfPerformance.length >= 2 && (
+                    <div className="mt-2 h-[60px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={etfPerformance} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                          <defs>
+                            <linearGradient id="navGrad" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor={isUp ? "#4ade80" : "#f87171"} stopOpacity={0.3} />
+                              <stop offset="100%" stopColor={isUp ? "#4ade80" : "#f87171"} stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <Tooltip
+                            contentStyle={{ background: "#111", border: "1px solid rgba(240,240,250,0.1)", borderRadius: 6, fontSize: 11, fontFamily: "JetBrains Mono" }}
+                            labelStyle={{ color: "rgba(240,240,250,0.4)" }}
+                            formatter={(value: number) => [`${value.toFixed(2)}`, "NAV"]}
+                            labelFormatter={(label: string) => label}
+                          />
+                          <Area type="monotone" dataKey="nav" stroke={isUp ? "#4ade80" : "#f87171"} strokeWidth={1.5} fill="url(#navGrad)" dot={false} />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Skills */}
           <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-            <div className="flex-shrink-0 flex items-center justify-between px-4 py-2 border-b border-border">
+            <div className="flex-shrink-0 flex items-center justify-between px-4 py-2 border-b border-border/50">
               <div className="flex items-center gap-2">
-                <BookOpen className="h-3.5 w-3.5 text-accent" />
-                <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">Skills</span>
+                <BookOpen className="h-3.5 w-3.5 text-foreground/40" />
+                <span className="text-[10px] font-mono uppercase tracking-[1.17px] text-foreground/40">Skills</span>
               </div>
-              <span className="text-[10px] font-mono text-muted-foreground/30">{skills.length}</span>
+              <span className="text-[10px] font-mono text-foreground/20">{skills.length}</span>
             </div>
             <ScrollArea className="flex-1">
               <div className="divide-y divide-border">
@@ -427,10 +506,10 @@ const PublicDashboard = () => {
                   const count = downloadCounts[slug] || 0;
                   return (
                     <div key={skill._id} className="px-4 py-2 flex items-center gap-2">
-                      <span className="text-[10px] font-mono text-muted-foreground/20 w-5 shrink-0">{i + 1}</span>
+                      <span className="text-[10px] font-mono text-foreground/15 w-5 shrink-0">{i + 1}</span>
                       <span className="font-mono text-sm text-foreground truncate flex-1">{skill.title}</span>
                       {count > 0 && (
-                        <span className="text-[10px] font-mono text-muted-foreground/40 flex items-center gap-0.5">
+                        <span className="text-[10px] font-mono text-foreground/25 flex items-center gap-0.5">
                           <Download className="h-3 w-3" />{count}
                         </span>
                       )}
@@ -450,27 +529,27 @@ const PublicDashboard = () => {
         {/* Middle column: Thinking — full height */}
         <div className="bg-background flex flex-col overflow-hidden">
           <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-border">
-            <MessageCircle className="h-3.5 w-3.5 text-accent" />
-            <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">Thinking</span>
+            <MessageCircle className="h-3.5 w-3.5 text-foreground/40" />
+            <span className="text-[10px] font-mono uppercase tracking-[1.17px] text-foreground/40">Thinking</span>
           </div>
           <ScrollArea className="flex-1">
             <div className="divide-y divide-border">
               {tweets.length === 0 ? (
-                <p className="px-4 py-6 text-sm font-mono text-muted-foreground/30 text-center">—</p>
+                <p className="px-4 py-6 text-sm font-mono text-foreground/20 text-center">—</p>
               ) : (
                 tweets.slice(0, 20).map((tweet) => {
                   const counts = reactionCounts[tweet.id] || {};
                   return (
                     <div key={tweet.id} className="px-4 py-3">
                       <p className="text-sm text-foreground/90 leading-relaxed font-mono">{tweet.content}</p>
-                      <span className="text-[10px] font-mono text-muted-foreground/40 mt-1.5 block">
+                      <span className="text-[10px] font-mono text-foreground/25 mt-1.5 block">
                         {tweet.author_name && `${tweet.author_name} · `}
                         {format(new Date(tweet.created_at), "MMM d · HH:mm")}
                       </span>
                       {Object.keys(counts).length > 0 && (
                         <div className="flex gap-1 mt-1.5 flex-wrap">
                           {Object.entries(counts).map(([emoji, count]) => (
-                            <span key={emoji} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[11px] font-mono border border-accent/20 bg-accent/5 text-foreground/70">
+                            <span key={emoji} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[11px] font-mono border border-foreground/10 bg-foreground/5 text-foreground/70">
                               {emoji} {count}
                             </span>
                           ))}
@@ -503,7 +582,7 @@ const PublicDashboard = () => {
                         className="h-6 w-6 rounded-sm"
                         onError={(e: any) => { e.currentTarget.style.display = "none"; }}
                       />
-                      <span className="text-xs font-mono text-muted-foreground">{ent.name}</span>
+                      <span className="text-xs font-mono text-foreground/40">{ent.name}</span>
                     </div>
                   ))}
                 </div>
@@ -513,15 +592,15 @@ const PublicDashboard = () => {
               )}
               <DialogHeader>
                 <DialogTitle className="font-mono text-xl leading-snug">{newsDetail.title}</DialogTitle>
-                <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground mt-1">
+                <div className="flex items-center gap-2 text-xs font-mono text-foreground/40 mt-1">
                   <span>{newsDetail.authorName}</span>
                   <span>·</span>
                   <span>{newsDetail.publishedAt && format(new Date(newsDetail.publishedAt), "MMM d, yyyy")}</span>
                   <span>·</span>
-                  <span className="text-accent uppercase tracking-wider">{newsDetail.category}</span>
+                  <span className="text-foreground/40 uppercase tracking-wider">{newsDetail.category}</span>
                 </div>
                 {newsDetail.continues && newsDetail.continuesTitle && (
-                  <p className="text-xs font-mono text-muted-foreground/60 mt-1">
+                  <p className="text-xs font-mono text-foreground/40/60 mt-1">
                     Continues: {newsDetail.continuesTitle}
                   </p>
                 )}
@@ -529,14 +608,14 @@ const PublicDashboard = () => {
 
               {newsDetail.excerpt && (
                 <div className="bg-secondary/50 border border-border rounded-md p-4 mt-4">
-                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">Summary</p>
+                  <p className="text-[10px] font-mono uppercase tracking-wider text-foreground/40 mb-1">Summary</p>
                   <p className="text-sm text-foreground/80 leading-relaxed">{newsDetail.excerpt}</p>
                 </div>
               )}
 
               {newsDetail.sources?.length > 0 && (
                 <div className="mt-4">
-                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-3">Source Perspectives</p>
+                  <p className="text-[10px] font-mono uppercase tracking-wider text-foreground/40 mb-3">Source Perspectives</p>
                   <div className="space-y-3">
                     {newsDetail.sources.map((src: any, i: number) => (
                       <div key={i} className="flex gap-3 items-start">
@@ -546,12 +625,12 @@ const PublicDashboard = () => {
                           </span>
                         </div>
                         <div className="flex-1 min-w-0">
-                          <a href={src.url} target="_blank" rel="noopener noreferrer" className="text-sm font-mono font-medium text-foreground hover:text-accent transition-colors inline-flex items-center gap-1">
+                          <a href={src.url} target="_blank" rel="noopener noreferrer" className="text-sm font-mono font-medium text-foreground hover:text-foreground/40 transition-colors inline-flex items-center gap-1">
                             {src.name}
                             <ExternalLink className="h-3 w-3" />
                           </a>
                           {src.perspective && (
-                            <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{src.perspective}</p>
+                            <p className="text-xs text-foreground/40 mt-0.5 leading-snug">{src.perspective}</p>
                           )}
                         </div>
                       </div>
@@ -562,11 +641,11 @@ const PublicDashboard = () => {
 
               {newsDetail.consensus?.length > 0 && (
                 <div className="mt-4">
-                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-2">Where Sources Agree</p>
+                  <p className="text-[10px] font-mono uppercase tracking-wider text-foreground/40 mb-2">Where Sources Agree</p>
                   <ul className="space-y-1">
                     {newsDetail.consensus.map((point: string, i: number) => (
                       <li key={i} className="text-sm text-foreground/80 flex gap-2">
-                        <span className="text-emerald-400 shrink-0">•</span>{point}
+                        <span className="text-foreground/40 shrink-0">•</span>{point}
                       </li>
                     ))}
                   </ul>
@@ -575,11 +654,11 @@ const PublicDashboard = () => {
 
               {newsDetail.divergence?.length > 0 && (
                 <div className="mt-4">
-                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-2">Where Sources Diverge</p>
+                  <p className="text-[10px] font-mono uppercase tracking-wider text-foreground/40 mb-2">Where Sources Diverge</p>
                   <ul className="space-y-1">
                     {newsDetail.divergence.map((point: string, i: number) => (
                       <li key={i} className="text-sm text-foreground/80 flex gap-2">
-                        <span className="text-yellow-400 shrink-0">•</span>{point}
+                        <span className="text-foreground/30 shrink-0">•</span>{point}
                       </li>
                     ))}
                   </ul>
@@ -587,15 +666,15 @@ const PublicDashboard = () => {
               )}
 
               {newsDetail.takeaway && (
-                <div className="mt-4 bg-accent/5 border border-accent/20 rounded-md p-4">
-                  <p className="text-[10px] font-mono uppercase tracking-wider text-accent mb-1">Astar Takeaway</p>
+                <div className="mt-4 bg-foreground/5 border border-foreground/10 rounded-md p-4">
+                  <p className="text-[10px] font-mono uppercase tracking-wider text-foreground/40 mb-1">Astar Takeaway</p>
                   <p className="text-sm text-foreground leading-relaxed">{newsDetail.takeaway}</p>
                 </div>
               )}
 
               {newsDetail.content && (
                 <div className="mt-4">
-                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-2">Full Article</p>
+                  <p className="text-[10px] font-mono uppercase tracking-wider text-foreground/40 mb-2">Full Article</p>
                   <div className="prose prose-sm prose-invert max-w-none text-foreground/80">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{newsDetail.content}</ReactMarkdown>
                   </div>

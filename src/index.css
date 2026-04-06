@@ -4,6 +4,7 @@
 @import '@fontsource/space-grotesk/400.css';
 @import '@fontsource/space-grotesk/500.css';
 @import '@fontsource/space-grotesk/700.css';
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -11,47 +12,47 @@
 
 @layer base {
   :root {
-    --background: 0 0% 5%;
-    --foreground: 0 0% 92%;
+    --background: 0 0% 0%;
+    --foreground: 240 33% 95%;
 
-    --card: 0 0% 8%;
-    --card-foreground: 0 0% 92%;
+    --card: 0 0% 4%;
+    --card-foreground: 240 33% 95%;
 
-    --popover: 0 0% 8%;
-    --popover-foreground: 0 0% 92%;
+    --popover: 0 0% 4%;
+    --popover-foreground: 240 33% 95%;
 
-    --primary: 0 0% 100%;
-    --primary-foreground: 0 0% 5%;
+    --primary: 240 33% 95%;
+    --primary-foreground: 0 0% 0%;
 
-    --secondary: 0 0% 12%;
-    --secondary-foreground: 0 0% 70%;
+    --secondary: 0 0% 8%;
+    --secondary-foreground: 240 33% 70%;
 
-    --muted: 0 0% 12%;
-    --muted-foreground: 0 0% 45%;
+    --muted: 0 0% 8%;
+    --muted-foreground: 0 0% 40%;
 
-    --accent: 160 70% 45%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 240 33% 95%;
+    --accent-foreground: 0 0% 0%;
 
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 0 0% 16%;
-    --input: 0 0% 16%;
-    --ring: 0 0% 30%;
+    --border: 240 10% 12%;
+    --input: 240 10% 12%;
+    --ring: 240 10% 25%;
 
     --radius: 0.375rem;
 
     --font-mono: 'JetBrains Mono', monospace;
-    --font-sans: 'Space Grotesk', system-ui, sans-serif;
+    --font-sans: 'DM Sans', 'Space Grotesk', system-ui, sans-serif;
 
-    --sidebar-background: 0 0% 8%;
-    --sidebar-foreground: 0 0% 92%;
-    --sidebar-primary: 0 0% 100%;
-    --sidebar-primary-foreground: 0 0% 5%;
-    --sidebar-accent: 0 0% 14%;
-    --sidebar-accent-foreground: 0 0% 92%;
-    --sidebar-border: 0 0% 16%;
-    --sidebar-ring: 0 0% 30%;
+    --sidebar-background: 0 0% 4%;
+    --sidebar-foreground: 240 33% 95%;
+    --sidebar-primary: 240 33% 95%;
+    --sidebar-primary-foreground: 0 0% 0%;
+    --sidebar-accent: 0 0% 8%;
+    --sidebar-accent-foreground: 240 33% 95%;
+    --sidebar-border: 240 10% 12%;
+    --sidebar-ring: 240 10% 25%;
   }
 }
 
@@ -63,7 +64,7 @@
     background-image: linear-gradient(
       90deg,
       hsl(var(--muted-foreground) / 0.4) 0%,
-      hsl(var(--accent)) 50%,
+      hsl(var(--foreground)) 50%,
       hsl(var(--muted-foreground) / 0.4) 100%
     );
     -webkit-background-clip: text;
@@ -129,15 +130,15 @@
   }
 
   .skill-prose li::marker {
-    @apply text-accent;
+    @apply text-foreground/30;
   }
 
   .skill-prose blockquote {
-    @apply border-l-2 border-accent/50 pl-4 py-1 my-3 italic text-foreground/70 bg-secondary/30 rounded-r-md;
+    @apply border-l-2 border-foreground/20 pl-4 py-1 my-3 italic text-foreground/70 bg-foreground/[0.03] rounded-r-md;
   }
 
   .skill-prose code {
-    @apply font-mono text-xs bg-secondary text-accent px-1.5 py-0.5 rounded;
+    @apply font-mono text-xs bg-secondary text-foreground/80 px-1.5 py-0.5 rounded;
   }
 
   .skill-prose pre {
@@ -163,7 +164,7 @@
   }
 
   .skill-prose a {
-    @apply text-accent underline underline-offset-2 hover:text-accent/80 transition-colors;
+    @apply text-foreground underline underline-offset-2 hover:text-foreground/60 transition-colors;
   }
 
   .skill-prose table {
