@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.40] - 2026-04-06
+
 ## [0.0.39] - 2026-04-06
 
 ## [0.0.38] - 2026-04-06

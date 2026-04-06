@@ -11,21 +11,21 @@ const Layout = ({ children, fullScreen }: LayoutProps) => {
 
   return (
     <div className={`bg-background ${fullScreen ? "h-screen flex flex-col overflow-hidden" : "min-h-screen"}`}>
-      <nav className="flex-shrink-0 flex items-center justify-between px-5 py-2.5 border-b border-border">
+      <nav className="flex-shrink-0 flex items-center justify-between px-5 py-2.5 border-b border-border/50">
         <Link to="/" className="flex items-center gap-2 text-sm font-mono">
-          <span className="text-accent text-base">◆</span>
-          <span className="text-muted-foreground/40">/</span>
-          <span className="text-foreground font-medium text-xs">astar.sh</span>
+          <span className="text-foreground text-base">◆</span>
+          <span className="text-foreground/20">/</span>
+          <span className="text-foreground font-bold text-[13px] uppercase tracking-[1.17px]">astar.sh</span>
         </Link>
         <div className="flex items-center gap-4 text-xs font-mono">
           {user && (
             <>
-              <span className="text-muted-foreground/30 text-[10px] hidden sm:inline">
+              <span className="text-foreground/20 text-[10px] uppercase tracking-wider hidden sm:inline">
                 {user.email}
               </span>
               <button
                 onClick={signOut}
-                className="text-muted-foreground/50 hover:text-foreground transition-colors text-[10px]"
+                className="text-foreground/30 hover:text-foreground transition-colors text-[10px] uppercase tracking-[1.17px]"
               >
                 sign out
               </button>

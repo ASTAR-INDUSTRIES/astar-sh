@@ -18,11 +18,11 @@ import remarkGfm from "remark-gfm";
 const ASTAR_VERSION = "0.0.7";
 
 const regionColors: Record<string, string> = {
-  US: "text-blue-400 bg-blue-400/10",
-  EU: "text-yellow-400 bg-yellow-400/10",
-  NO: "text-red-400 bg-red-400/10",
-  UK: "text-purple-400 bg-purple-400/10",
-  Intl: "text-emerald-400 bg-emerald-400/10",
+  US: "text-foreground/70 bg-foreground/5 border border-foreground/10",
+  EU: "text-foreground/70 bg-foreground/5 border border-foreground/10",
+  NO: "text-foreground/70 bg-foreground/5 border border-foreground/10",
+  UK: "text-foreground/70 bg-foreground/5 border border-foreground/10",
+  Intl: "text-foreground/70 bg-foreground/5 border border-foreground/10",
 };
 
 const HEATMAP_DAYS = 14;
@@ -65,9 +65,9 @@ const NewsAutoScroll = ({ posts, onSelect }: { posts: any[]; onSelect: (id: stri
 
   return (
     <div className="bg-background flex flex-col overflow-hidden">
-      <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-border">
-        <FileText className="h-3.5 w-3.5 text-accent" />
-        <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">News</span>
+      <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-border/50">
+        <FileText className="h-3.5 w-3.5 text-foreground/40" />
+        <span className="text-[10px] font-mono uppercase tracking-[1.17px] text-foreground/40">News</span>
       </div>
       <div
         ref={scrollRef}
@@ -76,12 +76,12 @@ const NewsAutoScroll = ({ posts, onSelect }: { posts: any[]; onSelect: (id: stri
         onMouseEnter={() => { hovered.current = true; }}
         onMouseLeave={() => { hovered.current = false; }}
       >
-        <div className="divide-y divide-border">
+        <div className="divide-y divide-border/50">
           {posts.length === 0 ? (
-            <p className="px-4 py-6 text-sm font-mono text-muted-foreground/30 text-center">—</p>
+            <p className="px-4 py-6 text-sm font-mono text-foreground/20 text-center">—</p>
           ) : (
             posts.map((post: any) => (
-              <div key={post._id} className="px-4 py-3 cursor-pointer hover:bg-accent/5 transition-colors" onClick={() => onSelect(post._id)}>
+              <div key={post._id} className="px-4 py-3 cursor-pointer hover:bg-foreground/[0.03] transition-colors" onClick={() => onSelect(post._id)}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0 flex-1">
                     {post.entities?.[0]?.domain && (
@@ -92,16 +92,16 @@ const NewsAutoScroll = ({ posts, onSelect }: { posts: any[]; onSelect: (id: stri
                         onError={(e: any) => { e.currentTarget.style.display = "none"; }}
                       />
                     )}
-                    <span className="font-mono text-sm font-medium text-foreground leading-snug">{post.title}</span>
+                    <span className="font-sans text-sm font-medium text-foreground leading-snug">{post.title}</span>
                   </div>
                   {post.publishedAt && (
-                    <span className="text-[10px] font-mono text-muted-foreground/40 shrink-0 mt-0.5">
+                    <span className="text-[10px] font-mono text-foreground/25 shrink-0 mt-0.5 uppercase tracking-wider">
                       {format(new Date(post.publishedAt), "MMM d HH:mm")}
                     </span>
                   )}
                 </div>
                 {post.excerpt && (
-                  <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2 leading-snug">{post.excerpt}</p>
+                  <p className="text-[11px] text-foreground/40 mt-1 line-clamp-2 leading-snug">{post.excerpt}</p>
                 )}
               </div>
             ))
@@ -295,12 +295,12 @@ const PublicDashboard = () => {
   }, [heatmapEvents]);
 
   const getHeatColor = (count: number, max: number) => {
-    if (count === 0) return "bg-accent/5";
+    if (count === 0) return "bg-foreground/5";
     const r = count / max;
-    if (r < 0.25) return "bg-accent/20";
-    if (r < 0.5) return "bg-accent/40";
-    if (r < 0.75) return "bg-accent/60";
-    return "bg-accent/90";
+    if (r < 0.25) return "bg-foreground/15";
+    if (r < 0.5) return "bg-foreground/25";
+    if (r < 0.75) return "bg-foreground/40";
+    return "bg-foreground/60";
   };
 
   const stats = [
@@ -314,24 +314,24 @@ const PublicDashboard = () => {
     <div className="flex flex-col h-full overflow-hidden bg-background">
 
       {/* Top bar: Clock | Stats x4 | Brand */}
-      <div className="flex-shrink-0 grid grid-cols-[minmax(140px,1fr)_repeat(4,minmax(70px,1fr))_minmax(110px,1fr)] gap-px border-b border-border bg-border">
+      <div className="flex-shrink-0 grid grid-cols-[minmax(140px,1fr)_repeat(4,minmax(70px,1fr))_minmax(110px,1fr)] gap-px border-b border-border/50 bg-border/50">
         {/* Clock cell */}
         <div className="bg-background px-3 py-2 flex flex-col justify-center">
           <div className="flex items-baseline gap-1">
-            <span className="text-xl font-mono font-bold text-foreground tabular-nums leading-none">
+            <span className="text-xl font-sans font-bold text-foreground tabular-nums leading-none uppercase tracking-[0.96px]">
               {format(now, "HH:mm")}
             </span>
-            <span className="text-sm font-mono text-muted-foreground/50 tabular-nums">
+            <span className="text-sm font-mono text-foreground/30 tabular-nums">
               {format(now, "ss")}
             </span>
-            <span className="text-[9px] font-mono text-muted-foreground/30 tabular-nums">
+            <span className="text-[9px] font-mono text-foreground/15 tabular-nums">
               {String(now.getMilliseconds()).padStart(3, "0").slice(0, 2)}
             </span>
           </div>
-          <span className="text-[10px] font-mono text-muted-foreground/40 mt-0.5">
+          <span className="text-[10px] font-mono text-foreground/25 mt-0.5 uppercase tracking-[1.17px]">
             {format(now, "EEE dd")}
           </span>
-          <span className="w-full text-[7px] font-mono text-muted-foreground/30 tracking-[0.2em] uppercase animate-clock-shimmer bg-clip-text mt-0.5" style={{ backgroundSize: '200% 100%' }}>
+          <span className="w-full text-[7px] font-mono text-foreground/15 tracking-[0.2em] uppercase animate-clock-shimmer bg-clip-text mt-0.5" style={{ backgroundSize: '200% 100%' }}>
             every second counts
           </span>
         </div>
@@ -339,10 +339,10 @@ const PublicDashboard = () => {
         {/* Stats cells */}
         {stats.map((stat) => (
           <div key={stat.label} className="bg-background px-3 py-2 flex flex-col justify-center items-center">
-            <div className="text-xl font-mono font-bold text-foreground leading-none tabular-nums">
+            <div className="text-xl font-sans font-bold text-foreground leading-none tabular-nums">
               {stat.value}
             </div>
-            <div className="text-[8px] font-mono uppercase tracking-widest text-muted-foreground mt-0.5">
+            <div className="text-[8px] font-mono uppercase tracking-[1.17px] text-foreground/25 mt-0.5">
               {stat.label}
             </div>
           </div>
@@ -350,39 +350,39 @@ const PublicDashboard = () => {
 
         {/* Brand cell */}
         <div className="bg-background px-3 py-2 flex flex-col justify-center items-end">
-          <span className="text-xs font-mono font-bold text-foreground tracking-wider flex items-center gap-1">
-            ASTAR <span className="text-accent">✦</span>
+          <span className="text-xs font-sans font-bold text-foreground tracking-[1.17px] uppercase flex items-center gap-1">
+            ASTAR <span className="text-foreground/40">✦</span>
           </span>
-          <span className="text-[9px] font-mono text-muted-foreground/30 mt-0.5">
+          <span className="text-[9px] font-mono text-foreground/15 mt-0.5 uppercase tracking-wider">
             v{ASTAR_VERSION}
           </span>
         </div>
       </div>
 
       {/* Main grid: left (heatmap+skills+shipped) | middle (thinking) | right (news) */}
-      <div className="flex-1 grid grid-cols-[1fr_1fr_1fr] gap-px bg-border overflow-hidden min-h-0">
+      <div className="flex-1 grid grid-cols-[1fr_1fr_1fr] gap-px bg-border/50 overflow-hidden min-h-0">
 
         {/* Left column */}
         <div className="bg-background flex flex-col overflow-hidden">
           {/* 14-day heatmap */}
-          <div className="flex-shrink-0 border-b border-border px-4 py-3">
+          <div className="flex-shrink-0 border-b border-border/50 px-4 py-3">
             <div className="flex items-start gap-2">
               {/* Day labels */}
               <div className="flex flex-col gap-[3px] mr-1 pt-[18px]">
                 {DAY_LABELS.map(d => (
-                  <div key={d} className="h-[14px] text-[9px] font-mono text-muted-foreground/40 leading-[14px]">{d}</div>
+                  <div key={d} className="h-[14px] text-[9px] font-mono text-foreground/20 leading-[14px] uppercase">{d}</div>
                 ))}
               </div>
               {/* Grid: 2 weeks as columns, 7 days as rows */}
               <div className="flex-1">
                 <div className="flex gap-[4px] mb-1.5">
-                  <span className="text-[8px] font-mono text-muted-foreground/25 flex-1 text-center">forrige uke</span>
-                  <span className="text-[8px] font-mono text-muted-foreground/25 flex-1 text-center">denne uke</span>
+                  <span className="text-[8px] font-mono text-foreground/15 flex-1 text-center uppercase tracking-wider">forrige uke</span>
+                  <span className="text-[8px] font-mono text-foreground/15 flex-1 text-center uppercase tracking-wider">denne uke</span>
                 </div>
                 {heatmapGrid.users.length === 0 ? (
                   <div className="grid grid-cols-[repeat(14,1fr)] gap-[3px]">
                     {Array.from({ length: 14 }).map((_, i) => (
-                      <div key={i} className="aspect-square rounded-[2px] bg-accent/5" />
+                      <div key={i} className="aspect-square rounded-[2px] bg-foreground/5" />
                     ))}
                   </div>
                 ) : (
@@ -400,37 +400,37 @@ const PublicDashboard = () => {
                           );
                         })}
                       </div>
-                      <span className="text-[8px] font-mono text-muted-foreground/30 w-8 shrink-0 text-right">{user.slice(0, 5)}</span>
+                      <span className="text-[8px] font-mono text-foreground/20 w-8 shrink-0 text-right uppercase">{user.slice(0, 5)}</span>
                     </div>
                   ))
                 )}
               </div>
             </div>
-            <p className="text-[8px] font-mono text-muted-foreground/20 text-center mt-1.5 tracking-wider uppercase">
-              Hours · siste 14d
+            <p className="text-[8px] font-mono text-foreground/15 text-center mt-1.5 tracking-[1.17px] uppercase">
+              Activity · 14d
             </p>
           </div>
 
           {/* Skills */}
           <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-            <div className="flex-shrink-0 flex items-center justify-between px-4 py-2 border-b border-border">
+            <div className="flex-shrink-0 flex items-center justify-between px-4 py-2 border-b border-border/50">
               <div className="flex items-center gap-2">
-                <BookOpen className="h-3.5 w-3.5 text-accent" />
-                <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">Skills</span>
+                <BookOpen className="h-3.5 w-3.5 text-foreground/40" />
+                <span className="text-[10px] font-mono uppercase tracking-[1.17px] text-foreground/40">Skills</span>
               </div>
-              <span className="text-[10px] font-mono text-muted-foreground/30">{skills.length}</span>
+              <span className="text-[10px] font-mono text-foreground/20">{skills.length}</span>
             </div>
             <ScrollArea className="flex-1">
-              <div className="divide-y divide-border">
+              <div className="divide-y divide-border/50">
                 {skills.map((skill: any, i: number) => {
                   const slug = skill.slug || skill.title?.toLowerCase().replace(/\s+/g, "-");
                   const count = downloadCounts[slug] || 0;
                   return (
                     <div key={skill._id} className="px-4 py-2 flex items-center gap-2">
-                      <span className="text-[10px] font-mono text-muted-foreground/20 w-5 shrink-0">{i + 1}</span>
-                      <span className="font-mono text-sm text-foreground truncate flex-1">{skill.title}</span>
+                      <span className="text-[10px] font-mono text-foreground/15 w-5 shrink-0">{i + 1}</span>
+                      <span className="font-sans text-sm text-foreground truncate flex-1">{skill.title}</span>
                       {count > 0 && (
-                        <span className="text-[10px] font-mono text-muted-foreground/40 flex items-center gap-0.5">
+                        <span className="text-[10px] font-mono text-foreground/25 flex items-center gap-0.5">
                           <Download className="h-3 w-3" />{count}
                         </span>
                       )}
@@ -442,35 +442,35 @@ const PublicDashboard = () => {
           </div>
 
           {/* Shipped Calendar — compact */}
-          <div className="flex-shrink-0 border-t border-border">
+          <div className="flex-shrink-0 border-t border-border/50">
             <ShippedCalendar />
           </div>
         </div>
 
         {/* Middle column: Thinking — full height */}
         <div className="bg-background flex flex-col overflow-hidden">
-          <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-border">
-            <MessageCircle className="h-3.5 w-3.5 text-accent" />
-            <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">Thinking</span>
+          <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-border/50">
+            <MessageCircle className="h-3.5 w-3.5 text-foreground/40" />
+            <span className="text-[10px] font-mono uppercase tracking-[1.17px] text-foreground/40">Thinking</span>
           </div>
           <ScrollArea className="flex-1">
-            <div className="divide-y divide-border">
+            <div className="divide-y divide-border/50">
               {tweets.length === 0 ? (
-                <p className="px-4 py-6 text-sm font-mono text-muted-foreground/30 text-center">—</p>
+                <p className="px-4 py-6 text-sm font-mono text-foreground/20 text-center">—</p>
               ) : (
                 tweets.slice(0, 20).map((tweet) => {
                   const counts = reactionCounts[tweet.id] || {};
                   return (
                     <div key={tweet.id} className="px-4 py-3">
-                      <p className="text-sm text-foreground/90 leading-relaxed font-mono">{tweet.content}</p>
-                      <span className="text-[10px] font-mono text-muted-foreground/40 mt-1.5 block">
+                      <p className="text-sm text-foreground/80 leading-relaxed font-sans">{tweet.content}</p>
+                      <span className="text-[10px] font-mono text-foreground/20 mt-1.5 block uppercase tracking-wider">
                         {tweet.author_name && `${tweet.author_name} · `}
                         {format(new Date(tweet.created_at), "MMM d · HH:mm")}
                       </span>
                       {Object.keys(counts).length > 0 && (
                         <div className="flex gap-1 mt-1.5 flex-wrap">
                           {Object.entries(counts).map(([emoji, count]) => (
-                            <span key={emoji} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[11px] font-mono border border-accent/20 bg-accent/5 text-foreground/70">
+                            <span key={emoji} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[11px] font-mono border border-foreground/10 bg-foreground/[0.03] text-foreground/60">
                               {emoji} {count}
                             </span>
                           ))}
@@ -512,13 +512,13 @@ const PublicDashboard = () => {
                 <img src={newsDetail.coverImage} alt="" className="w-full h-48 object-cover rounded-md -mt-2 mb-4" />
               )}
               <DialogHeader>
-                <DialogTitle className="font-mono text-xl leading-snug">{newsDetail.title}</DialogTitle>
-                <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground mt-1">
+                <DialogTitle className="font-sans text-xl leading-snug font-bold">{newsDetail.title}</DialogTitle>
+                <div className="flex items-center gap-2 text-xs font-mono text-foreground/30 mt-1 uppercase tracking-wider">
                   <span>{newsDetail.authorName}</span>
                   <span>·</span>
                   <span>{newsDetail.publishedAt && format(new Date(newsDetail.publishedAt), "MMM d, yyyy")}</span>
                   <span>·</span>
-                  <span className="text-accent uppercase tracking-wider">{newsDetail.category}</span>
+                  <span className="text-foreground/50">{newsDetail.category}</span>
                 </div>
                 {newsDetail.continues && newsDetail.continuesTitle && (
                   <p className="text-xs font-mono text-muted-foreground/60 mt-1">
@@ -528,30 +528,30 @@ const PublicDashboard = () => {
               </DialogHeader>
 
               {newsDetail.excerpt && (
-                <div className="bg-secondary/50 border border-border rounded-md p-4 mt-4">
-                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1">Summary</p>
-                  <p className="text-sm text-foreground/80 leading-relaxed">{newsDetail.excerpt}</p>
+                <div className="bg-foreground/[0.03] border border-foreground/10 rounded-md p-4 mt-4">
+                  <p className="text-[10px] font-mono uppercase tracking-[1.17px] text-foreground/30 mb-1">Summary</p>
+                  <p className="text-sm text-foreground/80 leading-relaxed font-sans">{newsDetail.excerpt}</p>
                 </div>
               )}
 
               {newsDetail.sources?.length > 0 && (
                 <div className="mt-4">
-                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-3">Source Perspectives</p>
+                  <p className="text-[10px] font-mono uppercase tracking-[1.17px] text-foreground/30 mb-3">Source Perspectives</p>
                   <div className="space-y-3">
                     {newsDetail.sources.map((src: any, i: number) => (
                       <div key={i} className="flex gap-3 items-start">
                         <div className="shrink-0 mt-0.5">
-                          <span className={`text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded ${regionColors[src.region] || regionColors.Intl}`}>
+                          <span className={`text-[10px] font-mono uppercase tracking-[1.17px] px-1.5 py-0.5 rounded ${regionColors[src.region] || regionColors.Intl}`}>
                             {src.region || "Intl"}
                           </span>
                         </div>
                         <div className="flex-1 min-w-0">
-                          <a href={src.url} target="_blank" rel="noopener noreferrer" className="text-sm font-mono font-medium text-foreground hover:text-accent transition-colors inline-flex items-center gap-1">
+                          <a href={src.url} target="_blank" rel="noopener noreferrer" className="text-sm font-sans font-medium text-foreground hover:text-foreground/60 transition-colors inline-flex items-center gap-1">
                             {src.name}
                             <ExternalLink className="h-3 w-3" />
                           </a>
                           {src.perspective && (
-                            <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{src.perspective}</p>
+                            <p className="text-xs text-foreground/40 mt-0.5 leading-snug">{src.perspective}</p>
                           )}
                         </div>
                       </div>
@@ -562,11 +562,11 @@ const PublicDashboard = () => {
 
               {newsDetail.consensus?.length > 0 && (
                 <div className="mt-4">
-                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-2">Where Sources Agree</p>
+                  <p className="text-[10px] font-mono uppercase tracking-[1.17px] text-foreground/30 mb-2">Where Sources Agree</p>
                   <ul className="space-y-1">
                     {newsDetail.consensus.map((point: string, i: number) => (
-                      <li key={i} className="text-sm text-foreground/80 flex gap-2">
-                        <span className="text-emerald-400 shrink-0">•</span>{point}
+                      <li key={i} className="text-sm text-foreground/80 font-sans flex gap-2">
+                        <span className="text-foreground/40 shrink-0">•</span>{point}
                       </li>
                     ))}
                   </ul>
@@ -575,11 +575,11 @@ const PublicDashboard = () => {
 
               {newsDetail.divergence?.length > 0 && (
                 <div className="mt-4">
-                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-2">Where Sources Diverge</p>
+                  <p className="text-[10px] font-mono uppercase tracking-[1.17px] text-foreground/30 mb-2">Where Sources Diverge</p>
                   <ul className="space-y-1">
                     {newsDetail.divergence.map((point: string, i: number) => (
-                      <li key={i} className="text-sm text-foreground/80 flex gap-2">
-                        <span className="text-yellow-400 shrink-0">•</span>{point}
+                      <li key={i} className="text-sm text-foreground/80 font-sans flex gap-2">
+                        <span className="text-foreground/30 shrink-0">•</span>{point}
                       </li>
                     ))}
                   </ul>
@@ -587,15 +587,15 @@ const PublicDashboard = () => {
               )}
 
               {newsDetail.takeaway && (
-                <div className="mt-4 bg-accent/5 border border-accent/20 rounded-md p-4">
-                  <p className="text-[10px] font-mono uppercase tracking-wider text-accent mb-1">Astar Takeaway</p>
-                  <p className="text-sm text-foreground leading-relaxed">{newsDetail.takeaway}</p>
+                <div className="mt-4 bg-foreground/[0.03] border border-foreground/10 rounded-md p-4">
+                  <p className="text-[10px] font-mono uppercase tracking-[1.17px] text-foreground/50 mb-1">Astar Takeaway</p>
+                  <p className="text-sm text-foreground leading-relaxed font-sans">{newsDetail.takeaway}</p>
                 </div>
               )}
 
               {newsDetail.content && (
                 <div className="mt-4">
-                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-2">Full Article</p>
+                  <p className="text-[10px] font-mono uppercase tracking-[1.17px] text-foreground/30 mb-2">Full Article</p>
                   <div className="prose prose-sm prose-invert max-w-none text-foreground/80">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{newsDetail.content}</ReactMarkdown>
                   </div>
