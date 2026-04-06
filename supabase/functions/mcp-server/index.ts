@@ -1451,6 +1451,19 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       for (const f of ["status", "priority", "assigned_to", "due_date", "description", "visibility"]) {
         if ((args as any)[f] !== undefined) { patch[f] = (args as any)[f]; changes[f] = (args as any)[f]; stateBefore[f] = (task as any)[f]; }
       }
+      if (args.parent_task_number !== undefined) {
+        if (args.parent_task_number === 0) {
+          patch.parent_task_id = null;
+          changes.parent_task_id = null;
+          stateBefore.parent_task_id = (task as any).parent_task_id;
+        } else {
+          const { data: parent } = await sb.from("tasks").select("id").eq("task_number", args.parent_task_number).single();
+          if (!parent) return [{ type: "text", text: `Error: Parent task #${args.parent_task_number} not found.` }];
+          patch.parent_task_id = parent.id;
+          changes.parent_task_id = parent.id;
+          stateBefore.parent_task_id = (task as any).parent_task_id;
+        }
+      }
       if (args.status === "completed") { patch.completed_by = user.email; patch.completed_at = new Date().toISOString(); }
       const { error } = await sb.from("tasks").update(patch).eq("id", task.id);
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];

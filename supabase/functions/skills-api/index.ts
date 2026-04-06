@@ -1091,6 +1091,18 @@ app.patch("/tasks/:number", async (c) => {
     }
   }
 
+  if (body.parent_task_number !== undefined) {
+    if (body.parent_task_number === 0) {
+      patch.parent_task_id = null;
+      changes.parent_task_id = { from: task.parent_task_id, to: null };
+    } else {
+      const { data: parentTask } = await sb.from("tasks").select("id").eq("task_number", body.parent_task_number).single();
+      if (!parentTask) return c.json({ error: `Parent task #${body.parent_task_number} not found` }, 404, corsHeaders);
+      patch.parent_task_id = parentTask.id;
+      changes.parent_task_id = { from: task.parent_task_id, to: parentTask.id };
+    }
+  }
+
   if (body.status === "completed") {
     if (!body.force) {
       const { data: openSubs } = await sb.from("tasks").select("id").eq("parent_task_id", task.id).neq("status", "completed").neq("status", "cancelled");
