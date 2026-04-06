@@ -1768,9 +1768,9 @@ app.post("/etf/refresh-prices", async (c) => {
     }
     nav = Math.round(f.base_nav * (1 + weightedReturn) * 10000) / 10000;
 
-    const { data: prevPerf } = await sb.from("etf_performance").select("nav").eq("fund_id", f.id).eq("date", todayStr).single();
-    const prevNav = prevPerf?.nav ?? f.base_nav;
-    const dailyReturn = prevNav > 0 ? (nav - prevNav) / prevNav : 0;
+    const { data: yesterdayPerf } = await sb.from("etf_performance").select("nav").eq("fund_id", f.id).lt("date", todayStr).order("date", { ascending: false }).limit(1);
+    const startOfDayNav = yesterdayPerf?.[0]?.nav ?? f.base_nav;
+    const dailyReturn = startOfDayNav > 0 ? (nav - startOfDayNav) / startOfDayNav : 0;
     const cumulativeReturn = (nav / f.base_nav) - 1;
 
     const snapshot = holdings.map((h: any) => {
