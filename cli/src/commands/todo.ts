@@ -48,18 +48,35 @@ function renderTaskTable(tasks: Task[]) {
     console.log(`${c.dim}No tasks found.${c.reset}`);
     return;
   }
-  console.log("");
-  table(
-    ["#", "Title", "Status", "Priority", "Assigned", "Due"],
-    tasks.map((t) => [
+  const rows: string[][] = [];
+  for (const t of tasks) {
+    const subCount = t.subtasks?.length || 0;
+    const subDone = t.subtasks?.filter((s) => s.status === "completed").length || 0;
+    const titleSuffix = subCount > 0 ? ` ${c.dim}[${subDone}/${subCount}]${c.reset}` : "";
+    rows.push([
       `${c.cyan}${t.task_number}${c.reset}`,
-      truncate(t.title, 35),
+      truncate(t.title, 35) + titleSuffix,
       `${statusColors[t.status] || c.dim}${t.status}${c.reset}`,
       `${priorityColors[t.priority] || c.dim}${t.priority}${c.reset}`,
       `${c.dim}${t.assigned_to?.split("@")[0] || "—"}${c.reset}`,
       t.due_date ? `${c.dim}${fmtDate(t.due_date)}${c.reset}` : `${c.dim}—${c.reset}`,
-    ])
-  );
+    ]);
+    if (t.subtasks?.length) {
+      for (const s of t.subtasks) {
+        const icon = s.status === "completed" ? `${c.green}✓${c.reset}` : s.status === "in_progress" ? `${c.yellow}›${c.reset}` : `${c.dim}○${c.reset}`;
+        rows.push([
+          `${c.dim} └${c.reset}${c.cyan}${s.task_number}${c.reset}`,
+          `${icon} ${c.dim}${truncate(s.title, 32)}${c.reset}`,
+          `${statusColors[s.status] || c.dim}${s.status}${c.reset}`,
+          `${c.dim}${s.priority}${c.reset}`,
+          `${c.dim}${s.assigned_to?.split("@")[0] || "—"}${c.reset}`,
+          s.due_date ? `${c.dim}${fmtDate(s.due_date)}${c.reset}` : `${c.dim}—${c.reset}`,
+        ]);
+      }
+    }
+  }
+  console.log("");
+  table(["#", "Title", "Status", "Priority", "Assigned", "Due"], rows);
   console.log("");
   console.log(`  ${c.dim}${tasks.length} task(s)${c.reset}`);
   console.log("");
@@ -80,7 +97,7 @@ let monitorError = "";
 async function renderMonitor(api: AstarAPI) {
   try {
     const [open, done] = await Promise.all([
-      api.listTasks({ assigned_to: "all" }),
+      api.listTasks({ assigned_to: "all", include_subtasks: true }),
       api.listTasks({ assigned_to: "all", status: "completed" }),
     ]);
     lastOpenTasks = open;
@@ -127,11 +144,23 @@ async function renderMonitor(api: AstarAPI) {
     const title = t.title.length > titleWidth ? t.title.slice(0, titleWidth - 1) + "…" : t.title;
     const titlePad = " ".repeat(Math.max(1, titleWidth - title.length));
 
-    console.log(`  ${pColor}${bar}${c.reset} ${c.cyan}${num}${c.reset}${numPad}  ${title}${titlePad}${pColor}${t.priority.padEnd(9)}${c.reset}${overdue ? c.red : c.dim}${due.padEnd(8)}${c.reset}${c.dim}${assignee}${c.reset}`);
+    const subCount = t.subtasks?.length || 0;
+    const subDone = t.subtasks?.filter((s) => s.status === "completed").length || 0;
+    const subLabel = subCount > 0 ? ` ${c.dim}[${subDone}/${subCount}]${c.reset}` : "";
+
+    console.log(`  ${pColor}${bar}${c.reset} ${c.cyan}${num}${c.reset}${numPad}  ${title}${subLabel}${titlePad}${pColor}${t.priority.padEnd(9)}${c.reset}${overdue ? c.red : c.dim}${due.padEnd(8)}${c.reset}${c.dim}${assignee}${c.reset}`);
 
     if (monitorExpanded && t.description) {
       const desc = t.description.length > descWidth ? t.description.slice(0, descWidth - 1) + "…" : t.description;
       console.log(`  ${c.dim}  ${" ".repeat(num.length + numPad.length)} ${desc}${c.reset}`);
+    }
+
+    if (monitorExpanded && t.subtasks?.length) {
+      for (const s of t.subtasks) {
+        const sIcon = s.status === "completed" ? `${c.green}✓${c.reset}` : s.status === "in_progress" ? `${c.yellow}›${c.reset}` : `${c.dim}○${c.reset}`;
+        const sTitle = s.title.length > titleWidth - 4 ? s.title.slice(0, titleWidth - 5) + "…" : s.title;
+        console.log(`  ${c.dim}  ${" ".repeat(num.length + numPad.length)} ${sIcon} ${c.cyan}#${s.task_number}${c.reset} ${c.dim}${sTitle}${c.reset}`);
+      }
     }
   }
 
@@ -316,7 +345,7 @@ export function registerTodoCommands(program: Command) {
       const token = await requireAuth();
       const api = new AstarAPI(token);
       try {
-        const tasks = await api.listTasks({ status: "open" });
+        const tasks = await api.listTasks({ status: "open", include_subtasks: true });
         renderTaskTable(tasks);
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} ${e.message}`);
@@ -331,7 +360,7 @@ export function registerTodoCommands(program: Command) {
       const token = await requireAuth();
       const api = new AstarAPI(token);
       try {
-        const tasks = await api.listTasks({ assigned_to: "all" });
+        const tasks = await api.listTasks({ assigned_to: "all", include_subtasks: true });
         if (!tasks.length) {
           console.log(`${c.dim}No tasks found.${c.reset}`);
           return;
@@ -362,7 +391,7 @@ export function registerTodoCommands(program: Command) {
       const token = await requireAuth();
       const api = new AstarAPI(token);
       try {
-        const tasks = await api.listTasks({ status: opts.status, priority: opts.prio, due: opts.due, search: opts.search, assigned_to: "all" });
+        const tasks = await api.listTasks({ status: opts.status, priority: opts.prio, due: opts.due, search: opts.search, assigned_to: "all", include_subtasks: true });
         renderTaskTable(tasks);
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} ${e.message}`);

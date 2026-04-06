@@ -929,6 +929,18 @@ app.get("/tasks", async (c) => {
 
   const { data, error } = await query;
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+  const includeSubtasks = c.req.query("include_subtasks") === "true";
+  if (includeSubtasks && data?.length && !parent) {
+    const parentIds = data.map((t: any) => t.id);
+    const { data: subs } = await sb.from("tasks").select("*").in("parent_task_id", parentIds).is("archived_at", null).order("task_number", { ascending: true });
+    if (subs?.length) {
+      const subsByParent: Record<string, any[]> = {};
+      for (const s of subs) { (subsByParent[s.parent_task_id] ||= []).push(s); }
+      for (const t of data as any[]) { t.subtasks = subsByParent[t.id] || []; }
+    }
+  }
+
   return c.json({ tasks: data || [] }, 200, corsHeaders);
 });
 

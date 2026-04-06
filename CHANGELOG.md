@@ -5,6 +5,12 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.37] - 2026-04-06
+### Added
+- Subtask hierarchy in monitor view — subtasks shown indented under parent tasks with progress indicators `[done/total]`
+- Subtask display in task table (`mine`, `list`, `team`) with tree-style `└` indentation
+- `include_subtasks` API parameter for fetching task hierarchy in a single request
+
 ## [0.0.36] - 2026-04-05
 ### Added
 - Daily beat circuit breaker — agents auto-stop after 100 beats/day (configurable via `--max-beats`)
