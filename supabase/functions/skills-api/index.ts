@@ -1484,23 +1484,17 @@ app.get("/etf/:ticker", async (c) => {
 
   const symbols = (holdings || []).map((h: any) => h.symbol);
   const priceMap: Record<string, any> = {};
-  const entryPriceMap: Record<string, number> = {};
+  const sparkMap: Record<string, number[]> = {};
   for (const sym of symbols) {
     const { data: latest } = await sb.from("etf_prices").select("close_price, change_pct, date").eq("symbol", sym).order("date", { ascending: false }).limit(1);
     if (latest?.[0]) priceMap[sym] = latest[0];
-    const { data: entry } = await sb.from("etf_prices").select("close_price").eq("symbol", sym).lte("date", fund.inception_date).order("date", { ascending: false }).limit(1);
-    if (entry?.[0]) entryPriceMap[sym] = entry[0].close_price;
-  }
-
-  const sparkMap: Record<string, number[]> = {};
-  for (const sym of symbols) {
     const { data: hist } = await sb.from("etf_prices").select("close_price").eq("symbol", sym).order("date", { ascending: true }).limit(20);
     if (hist?.length) sparkMap[sym] = hist.map((p: any) => p.close_price);
   }
 
   const enrichedHoldings = (holdings || []).map((h: any) => {
     const latest = priceMap[h.symbol];
-    const entryPrice = entryPriceMap[h.symbol];
+    const entryPrice = h.entry_price;
     const sinceEntry = latest && entryPrice ? ((latest.close_price - entryPrice) / entryPrice) * 100 : null;
     return {
       ...h,
@@ -1702,7 +1696,7 @@ app.post("/etf/refresh-prices", async (c) => {
   const allSymbols = new Set<string>();
   const fundHoldings: Record<string, any[]> = {};
   for (const f of funds) {
-    const { data: h } = await sb.from("etf_holdings").select("symbol, weight").eq("fund_id", f.id);
+    const { data: h } = await sb.from("etf_holdings").select("id, symbol, weight, entry_price").eq("fund_id", f.id);
     fundHoldings[f.id] = h || [];
     for (const hh of (h || [])) allSymbols.add(hh.symbol);
   }
@@ -1747,66 +1741,50 @@ app.post("/etf/refresh-prices", async (c) => {
 
     const symbols = holdings.map((h: any) => h.symbol);
 
-    const { data: entryPrices } = await sb.from("etf_prices").select("symbol, close_price").in("symbol", symbols).lte("date", f.inception_date).order("date", { ascending: false });
-    const entryPriceMap: Record<string, number> = {};
-    for (const p of (entryPrices || [])) {
-      if (!entryPriceMap[p.symbol]) entryPriceMap[p.symbol] = p.close_price;
-    }
-
-    const { data: allPrices } = await sb.from("etf_prices").select("symbol, date, close_price, change_pct").in("symbol", symbols).gte("date", f.inception_date).order("date", { ascending: true });
-    if (!allPrices?.length) continue;
-
-    const tradingDates = [...new Set(allPrices.map((p: any) => p.date))].sort();
-
-    const { data: existingPerf } = await sb.from("etf_performance").select("date").eq("fund_id", f.id);
-    const existingDates = new Set((existingPerf || []).map((p: any) => p.date));
-
-    const pricesByDate: Record<string, Record<string, { close: number; change: number }>> = {};
-    for (const p of allPrices) {
-      if (!pricesByDate[p.date]) pricesByDate[p.date] = {};
-      pricesByDate[p.date][p.symbol] = { close: p.close_price, change: p.change_pct / 100 };
-    }
-
-    const datesToCalc = tradingDates.filter(d => !existingDates.has(d) || d === todayStr);
-
-    let prevNav = f.base_nav;
-    const prevDates = tradingDates.filter(d => !datesToCalc.includes(d));
-    if (prevDates.length) {
-      const lastPrevDate = prevDates[prevDates.length - 1];
-      const { data: lp } = await sb.from("etf_performance").select("nav").eq("fund_id", f.id).eq("date", lastPrevDate).single();
-      if (lp) prevNav = lp.nav;
-    }
-
-    for (const date of datesToCalc) {
-      const dayPrices = pricesByDate[date];
-      if (!dayPrices) continue;
-
-      let dailyReturn = 0;
-      if (date === f.inception_date) {
-        for (const h of holdings) {
-          const entry = entryPriceMap[h.symbol];
-          const current = dayPrices[h.symbol]?.close;
-          if (entry && current) {
-            dailyReturn += h.weight * ((current - entry) / entry);
-          }
-        }
-      } else {
-        for (const h of holdings) {
-          dailyReturn += h.weight * (dayPrices[h.symbol]?.change ?? 0);
+    const needsEntryPrice = holdings.some((h: any) => !h.entry_price);
+    if (needsEntryPrice) {
+      for (const h of holdings) {
+        if (h.entry_price) continue;
+        const { data: price } = await sb.from("etf_prices").select("close_price").eq("symbol", h.symbol).order("date", { ascending: false }).limit(1);
+        if (price?.[0]) {
+          h.entry_price = price[0].close_price;
+          await sb.from("etf_holdings").update({ entry_price: h.entry_price }).eq("id", h.id);
         }
       }
+    }
 
-      const nav = Math.round(prevNav * (1 + dailyReturn) * 10000) / 10000;
-      const cumulativeReturn = Math.round(((nav / f.base_nav) - 1) * 1000000) / 1000000;
-      const snapshot = holdings.map((h: any) => ({ symbol: h.symbol, weight: h.weight, return: dayPrices[h.symbol]?.change ?? 0 }));
+    const latestPrices: Record<string, number> = {};
+    for (const sym of symbols) {
+      const { data: p } = await sb.from("etf_prices").select("close_price").eq("symbol", sym).order("date", { ascending: false }).limit(1);
+      if (p?.[0]) latestPrices[sym] = p[0].close_price;
+    }
 
-      await sb.from("etf_performance").upsert({
-        fund_id: f.id, date, nav,
-        daily_return: Math.round(dailyReturn * 1000000) / 1000000,
-        cumulative_return: cumulativeReturn,
-        holdings_snapshot: snapshot,
-      }, { onConflict: "fund_id,date" });
-      prevNav = nav;
+    let nav = f.base_nav;
+    let weightedReturn = 0;
+    for (const h of holdings) {
+      if (!h.entry_price || !latestPrices[h.symbol]) continue;
+      const stockReturn = (latestPrices[h.symbol] - h.entry_price) / h.entry_price;
+      weightedReturn += h.weight * stockReturn;
+    }
+    nav = Math.round(f.base_nav * (1 + weightedReturn) * 10000) / 10000;
+
+    const { data: prevPerf } = await sb.from("etf_performance").select("nav").eq("fund_id", f.id).eq("date", todayStr).single();
+    const prevNav = prevPerf?.nav ?? f.base_nav;
+    const dailyReturn = prevNav > 0 ? (nav - prevNav) / prevNav : 0;
+    const cumulativeReturn = (nav / f.base_nav) - 1;
+
+    const snapshot = holdings.map((h: any) => {
+      const ret = h.entry_price && latestPrices[h.symbol] ? (latestPrices[h.symbol] - h.entry_price) / h.entry_price : 0;
+      return { symbol: h.symbol, weight: h.weight, return: Math.round(ret * 10000) / 10000 };
+    });
+
+    await sb.from("etf_performance").upsert({
+      fund_id: f.id, date: todayStr, nav,
+      daily_return: Math.round(dailyReturn * 1000000) / 1000000,
+      cumulative_return: Math.round(cumulativeReturn * 1000000) / 1000000,
+      holdings_snapshot: snapshot,
+    }, { onConflict: "fund_id,date" });
+    prevNav;
     }
     navsCalculated++;
   }
