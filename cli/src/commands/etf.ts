@@ -106,6 +106,7 @@ let lastDetail: { fund: EtfFund; holdings: EtfHolding[]; performance: any; bench
 
 async function renderMonitorAll(api: AstarAPI) {
   try {
+    await api.refreshEtfPrices().catch(() => {});
     lastFunds = await api.listEtf();
     monitorError = "";
   } catch (e: any) {
@@ -147,6 +148,7 @@ async function renderMonitorAll(api: AstarAPI) {
 
 async function renderMonitorSingle(api: AstarAPI, ticker: string) {
   try {
+    await api.refreshEtfPrices(ticker).catch(() => {});
     const [detail, news, perfFull] = await Promise.all([
       api.getEtf(ticker),
       api.getEtfNews(ticker).catch(() => []),
