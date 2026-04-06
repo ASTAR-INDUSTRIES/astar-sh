@@ -5,11 +5,54 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.47] - 2026-04-06
+
+## [0.0.46] - 2026-04-06
+### Added
+- `astar etf ASTX --monitor` — live-updating single-fund dashboard with NAV, holdings with ▲/▼ arrows, prices, changes, SPY alpha, and linked news headlines (30s refresh)
+- `astar etf --monitor` — live overview dashboard of all active ETF funds with NAV, daily and cumulative returns
+- `astar etf ASTX` — ticker shorthand now routes directly to fund detail (same as `astar etf info ASTX`)
+- `ctrl+o` toggle between compact (NAV + holdings) and expanded (+ news + strategy) in ETF monitor
+- `ctrl+c` clean exit from ETF monitor
+
+## [0.0.45] - 2026-04-06
+### Added
+- SPY (S&P 500) benchmark tracking — automatically fetched alongside ETF holdings for alpha comparison
+- Alpha calculation displayed in `astar etf info` and monitor views (fund cumulative return vs SPY)
+- SPY cumulative return timeline in `astar etf performance` for side-by-side comparison
+- 6 MCP tools: `list_etf`, `get_etf`, `create_etf`, `update_etf`, `rebalance_etf`, `refresh_etf_prices`
+- ETF wiki page documenting data model, NAV calculation, and price fetching strategy
+
+### Changed
+- Price engine now fetches 1 month of daily data (was 5 days) — recovers from multi-day gaps automatically
+- NAV calculated for all missing trading days since inception (was today-only) — handles weekends and downtime
+- Price fetch errors reported per-symbol in API response instead of failing silently
+
+## [0.0.44] - 2026-04-06
+### Added
+- Simulated ETF portfolio system — create, track, and analyze paper ETF funds
+- `astar etf list/info/performance/news/refresh` CLI commands
+- ASTX (ASTAR Space ETF) seeded with 12 space economy holdings (RKLB, ASTS, PL, LUNR, KTOS, IRDM, RDW, SATS, GSAT, VSAT, MNTS, BKSY)
+- Yahoo Finance price fetching with weighted daily NAV calculation (base NAV 100, compounding)
+- Auto-linked news: articles with entities matching ETF holding names/domains surface automatically via GROQ query
+- 8 REST API endpoints: list funds, fund detail, performance history, linked news, create fund, update fund, rebalance holdings, refresh prices
+- 4 new Supabase tables: `etf_funds`, `etf_holdings`, `etf_prices`, `etf_performance`
+
 ## [0.0.43] - 2026-04-06
+### Fixed
+- `astar todo info` crash — was referencing `actor` and `created_at` fields but audit_events uses `actor_email` and `timestamp`
+- Activity log now shows audit `reason` from context when present
 
 ## [0.0.42] - 2026-04-06
+### Added
+- `astar todo --monitor` highlights your own tasks in bold white (others stay dim)
+- `astar todo mine --monitor` — live-updating view filtered to your tasks only, with header "MY TASKS"
 
 ## [0.0.41] - 2026-04-06
+### Added
+- Wiki structure with subsystem documentation: auth, agents, tasks, audit, news, skills, mcp, cli
+- `wiki/index.md` master index linking all subsystem pages
+- Post-commit Claude Code hook reminding to check wiki updates when committing
 
 ## [0.0.40] - 2026-04-06
 

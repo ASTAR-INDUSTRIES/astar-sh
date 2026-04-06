@@ -1,6 +1,6 @@
 {
   "name": "@astar/cli",
-  "version": "0.0.43",
+  "version": "0.0.47",
   "type": "module",
   "bin": {
     "astar": "./src/index.ts"

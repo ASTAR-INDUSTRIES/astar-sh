@@ -1448,6 +1448,343 @@ app.post("/agents/:slug/heartbeat", async (c) => {
   return c.json({ status: agent.status, scopes: agent.scopes }, 200, corsHeaders);
 });
 
+// ── ETF: list funds ─────────────────────────────────────────────────
+app.get("/etf", async (c) => {
+  const sb = getSupabase();
+  const { data: funds, error } = await sb.from("etf_funds").select("*").eq("status", "active").order("ticker");
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+  const enriched = [];
+  for (const f of (funds || [])) {
+    const { data: perf } = await sb.from("etf_performance").select("nav, daily_return, cumulative_return, date").eq("fund_id", f.id).order("date", { ascending: false }).limit(1);
+    const { count } = await sb.from("etf_holdings").select("*", { count: "exact", head: true }).eq("fund_id", f.id);
+    const latest = perf?.[0];
+    enriched.push({
+      ...f,
+      latest_nav: latest?.nav ?? f.base_nav,
+      daily_return: latest?.daily_return ?? 0,
+      cumulative_return: latest?.cumulative_return ?? 0,
+      holdings_count: count || 0,
+      last_updated: latest?.date ?? f.inception_date,
+    });
+  }
+  return c.json({ funds: enriched }, 200, corsHeaders);
+});
+
+// ── ETF: get fund detail ────────────────────────────────────────────
+app.get("/etf/:ticker", async (c) => {
+  const ticker = c.req.param("ticker").toUpperCase();
+  const sb = getSupabase();
+
+  const { data: fund, error } = await sb.from("etf_funds").select("*").eq("ticker", ticker).single();
+  if (error || !fund) return c.json({ error: "Fund not found" }, 404, corsHeaders);
+
+  const { data: holdings } = await sb.from("etf_holdings").select("*").eq("fund_id", fund.id).order("weight", { ascending: false });
+  const { data: perf } = await sb.from("etf_performance").select("nav, daily_return, cumulative_return, date").eq("fund_id", fund.id).order("date", { ascending: false }).limit(1);
+
+  const symbols = (holdings || []).map((h: any) => h.symbol);
+  const today = new Date().toISOString().split("T")[0];
+  const { data: prices } = await sb.from("etf_prices").select("symbol, close_price, change_pct").in("symbol", symbols).eq("date", today);
+  const priceMap: Record<string, any> = {};
+  for (const p of (prices || [])) priceMap[p.symbol] = p;
+
+  const enrichedHoldings = (holdings || []).map((h: any) => ({
+    ...h,
+    latest_price: priceMap[h.symbol]?.close_price ?? null,
+    daily_change_pct: priceMap[h.symbol]?.change_pct ?? null,
+  }));
+
+  const latest = perf?.[0];
+
+  let benchmark = null;
+  if (latest?.date) {
+    const { data: spyToday } = await sb.from("etf_prices").select("close_price, change_pct").eq("symbol", "SPY").eq("date", latest.date).single();
+    const { data: spyInception } = await sb.from("etf_prices").select("close_price").eq("symbol", "SPY").eq("date", fund.inception_date).single();
+    if (spyToday && spyInception) {
+      benchmark = {
+        symbol: "SPY",
+        daily_return: spyToday.change_pct / 100,
+        cumulative_return: (spyToday.close_price - spyInception.close_price) / spyInception.close_price,
+      };
+    }
+  }
+
+  return c.json({
+    fund,
+    holdings: enrichedHoldings,
+    performance: {
+      nav: latest?.nav ?? fund.base_nav,
+      daily_return: latest?.daily_return ?? 0,
+      cumulative_return: latest?.cumulative_return ?? 0,
+      date: latest?.date ?? fund.inception_date,
+    },
+    benchmark,
+  }, 200, corsHeaders);
+});
+
+// ── ETF: performance history ────────────────────────────────────────
+app.get("/etf/:ticker/performance", async (c) => {
+  const ticker = c.req.param("ticker").toUpperCase();
+  const range = c.req.query("range") || "1m";
+  const sb = getSupabase();
+
+  const { data: fund } = await sb.from("etf_funds").select("id").eq("ticker", ticker).single();
+  if (!fund) return c.json({ error: "Fund not found" }, 404, corsHeaders);
+
+  const days: Record<string, number> = { "1w": 7, "1m": 30, "3m": 90, "6m": 180, "1y": 365, all: 9999 };
+  const since = new Date(Date.now() - (days[range] || 30) * 86400000).toISOString().split("T")[0];
+
+  const { data } = await sb.from("etf_performance").select("date, nav, daily_return, cumulative_return").eq("fund_id", fund.id).gte("date", since).order("date", { ascending: true });
+
+  const { data: fundFull } = await sb.from("etf_funds").select("inception_date").eq("id", fund.id).single();
+  let spyBenchmark: any[] = [];
+  if (fundFull) {
+    const { data: spyInception } = await sb.from("etf_prices").select("close_price").eq("symbol", "SPY").eq("date", fundFull.inception_date).single();
+    if (spyInception) {
+      const { data: spyPrices } = await sb.from("etf_prices").select("date, close_price").eq("symbol", "SPY").gte("date", since).order("date", { ascending: true });
+      spyBenchmark = (spyPrices || []).map((p: any) => ({
+        date: p.date,
+        cumulative_return: (p.close_price - spyInception.close_price) / spyInception.close_price,
+      }));
+    }
+  }
+
+  return c.json({ ticker, range, data: data || [], benchmark: spyBenchmark }, 200, corsHeaders);
+});
+
+// ── ETF: linked news ────────────────────────────────────────────────
+app.get("/etf/:ticker/news", async (c) => {
+  const ticker = c.req.param("ticker").toUpperCase();
+  const sb = getSupabase();
+
+  const { data: fund } = await sb.from("etf_funds").select("id").eq("ticker", ticker).single();
+  if (!fund) return c.json({ error: "Fund not found" }, 404, corsHeaders);
+
+  const { data: holdings } = await sb.from("etf_holdings").select("name, domain").eq("fund_id", fund.id);
+  const names = (holdings || []).map((h: any) => h.name);
+  const domains = (holdings || []).filter((h: any) => h.domain).map((h: any) => h.domain);
+
+  const query = `*[_type == "newsPost" && published == true && count(entities[name in $names || domain in $domains]) > 0] | order(publishedAt desc)[0...20] { _id, title, "slug": slug.current, excerpt, category, publishedAt, entities[] { name, domain } }`;
+  const res = await fetch(`${SANITY_API}/data/query/${SANITY_DATASET}?query=${encodeURIComponent(query)}&$names=${encodeURIComponent(JSON.stringify(names))}&$domains=${encodeURIComponent(JSON.stringify(domains))}`);
+  const json = await res.json();
+
+  return c.json({ ticker, news: json.result || [] }, 200, corsHeaders);
+});
+
+// ── ETF: create fund ────────────────────────────────────────────────
+app.post("/etf", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const body = await c.req.json();
+  if (!body.ticker || !body.name) return c.json({ error: "ticker and name required" }, 400, corsHeaders);
+  if (!body.holdings?.length) return c.json({ error: "holdings required" }, 400, corsHeaders);
+
+  const weightSum = body.holdings.reduce((s: number, h: any) => s + (h.weight || 0), 0);
+  if (Math.abs(weightSum - 1.0) > 0.001) return c.json({ error: `Holdings weights must sum to 1.0 (got ${weightSum.toFixed(4)})` }, 400, corsHeaders);
+
+  const sb = getSupabase();
+  const { data: fund, error } = await sb.from("etf_funds").insert({
+    ticker: body.ticker.toUpperCase(),
+    name: body.name,
+    description: body.description || null,
+    strategy: body.strategy || null,
+    inception_date: body.inception_date || new Date().toISOString().split("T")[0],
+    created_by: user.email,
+  }).select("id, ticker").single();
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+  const holdingsRows = body.holdings.map((h: any) => ({
+    fund_id: fund.id,
+    symbol: h.symbol.toUpperCase(),
+    name: h.name,
+    domain: h.domain || null,
+    sector: h.sector || null,
+    weight: h.weight,
+  }));
+  await sb.from("etf_holdings").insert(holdingsRows);
+
+  await logAudit({ actor_email: user.email, actor_type: "human", entity_type: "etf", entity_id: fund.ticker, action: "created", channel: "api", state_after: { ticker: fund.ticker, holdings: body.holdings.length } });
+
+  return c.json({ ok: true, ticker: fund.ticker }, 200, corsHeaders);
+});
+
+// ── ETF: update fund metadata ───────────────────────────────────────
+app.patch("/etf/:ticker", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const ticker = c.req.param("ticker").toUpperCase();
+  const sb = getSupabase();
+  const body = await c.req.json();
+
+  const patch: any = { updated_at: new Date().toISOString() };
+  for (const f of ["name", "description", "strategy", "status"]) {
+    if (body[f] !== undefined) patch[f] = body[f];
+  }
+
+  const { error } = await sb.from("etf_funds").update(patch).eq("ticker", ticker);
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+  await logAudit({ actor_email: user.email, actor_type: "human", entity_type: "etf", entity_id: ticker, action: "updated", channel: "api", state_after: patch });
+
+  return c.json({ ok: true }, 200, corsHeaders);
+});
+
+// ── ETF: rebalance holdings ─────────────────────────────────────────
+app.post("/etf/:ticker/rebalance", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const ticker = c.req.param("ticker").toUpperCase();
+  const sb = getSupabase();
+  const body = await c.req.json();
+
+  if (!body.holdings?.length) return c.json({ error: "holdings required" }, 400, corsHeaders);
+  const weightSum = body.holdings.reduce((s: number, h: any) => s + (h.weight || 0), 0);
+  if (Math.abs(weightSum - 1.0) > 0.001) return c.json({ error: `Weights must sum to 1.0 (got ${weightSum.toFixed(4)})` }, 400, corsHeaders);
+
+  const { data: fund } = await sb.from("etf_funds").select("id").eq("ticker", ticker).single();
+  if (!fund) return c.json({ error: "Fund not found" }, 404, corsHeaders);
+
+  await sb.from("etf_holdings").delete().eq("fund_id", fund.id);
+  const rows = body.holdings.map((h: any) => ({
+    fund_id: fund.id,
+    symbol: h.symbol.toUpperCase(),
+    name: h.name || h.symbol,
+    domain: h.domain || null,
+    sector: h.sector || null,
+    weight: h.weight,
+  }));
+  await sb.from("etf_holdings").insert(rows);
+
+  await logAudit({ actor_email: user.email, actor_type: "human", entity_type: "etf", entity_id: ticker, action: "rebalanced", channel: "api", state_after: { holdings: body.holdings.length, weights: body.holdings.map((h: any) => `${h.symbol}:${h.weight}`) } });
+
+  return c.json({ ok: true }, 200, corsHeaders);
+});
+
+// ── ETF: fetch Yahoo Finance prices for a symbol ────────────────────
+async function fetchYahooPrices(symbol: string, range = "1mo"): Promise<{ date: string; close: number; changePct: number }[]> {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=${range}&interval=1d`;
+  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; AstarETF/1.0)" } });
+  if (!res.ok) throw new Error(`Yahoo ${res.status}`);
+  const json = await res.json();
+  const result = json.chart?.result?.[0];
+  if (!result) throw new Error("No chart data");
+
+  const timestamps = result.timestamp || [];
+  const closes = result.indicators?.quote?.[0]?.close || [];
+  const points: { date: string; close: number; changePct: number }[] = [];
+
+  for (let i = 0; i < timestamps.length; i++) {
+    if (closes[i] == null) continue;
+    const date = new Date(timestamps[i] * 1000).toISOString().split("T")[0];
+    const prevClose = i > 0 && closes[i - 1] != null ? closes[i - 1] : closes[i];
+    const changePct = prevClose ? ((closes[i] - prevClose) / prevClose) * 100 : 0;
+    points.push({ date, close: Math.round(closes[i] * 10000) / 10000, changePct: Math.round(changePct * 10000) / 10000 });
+  }
+  return points;
+}
+
+// ── ETF: refresh prices + recalculate NAV ───────────────────────────
+app.post("/etf/refresh-prices", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const sb = getSupabase();
+  const targetTicker = c.req.query("ticker");
+
+  let fundsQuery = sb.from("etf_funds").select("id, ticker, base_nav, inception_date").eq("status", "active");
+  if (targetTicker) fundsQuery = fundsQuery.eq("ticker", targetTicker.toUpperCase());
+  const { data: funds } = await fundsQuery;
+  if (!funds?.length) return c.json({ error: "No active funds" }, 404, corsHeaders);
+
+  const allSymbols = new Set<string>();
+  const fundHoldings: Record<string, any[]> = {};
+  for (const f of funds) {
+    const { data: h } = await sb.from("etf_holdings").select("symbol, weight").eq("fund_id", f.id);
+    fundHoldings[f.id] = h || [];
+    for (const hh of (h || [])) allSymbols.add(hh.symbol);
+  }
+  allSymbols.add("SPY");
+
+  let pricesFetched = 0;
+  const errors: string[] = [];
+
+  for (const symbol of allSymbols) {
+    try {
+      const points = await fetchYahooPrices(symbol, "1mo");
+      for (const p of points) {
+        await sb.from("etf_prices").upsert({
+          symbol, date: p.date, close_price: p.close, change_pct: p.changePct,
+        }, { onConflict: "symbol,date" });
+      }
+      pricesFetched++;
+    } catch (e: any) {
+      errors.push(`${symbol}: ${e.message}`);
+    }
+  }
+
+  let navsCalculated = 0;
+  for (const f of funds) {
+    const holdings = fundHoldings[f.id];
+    if (!holdings?.length) continue;
+
+    const symbols = holdings.map((h: any) => h.symbol);
+    const { data: allPrices } = await sb.from("etf_prices").select("symbol, date, change_pct").in("symbol", symbols).gte("date", f.inception_date).order("date", { ascending: true });
+    if (!allPrices?.length) continue;
+
+    const tradingDates = [...new Set(allPrices.map((p: any) => p.date))].sort();
+
+    const { data: existingPerf } = await sb.from("etf_performance").select("date").eq("fund_id", f.id);
+    const existingDates = new Set((existingPerf || []).map((p: any) => p.date));
+
+    let prevNav = f.base_nav;
+    const { data: lastPerf } = await sb.from("etf_performance").select("nav, date").eq("fund_id", f.id).order("date", { ascending: false }).limit(1);
+    if (lastPerf?.[0]) prevNav = lastPerf[0].nav;
+
+    const pricesByDate: Record<string, Record<string, number>> = {};
+    for (const p of allPrices) {
+      if (!pricesByDate[p.date]) pricesByDate[p.date] = {};
+      pricesByDate[p.date][p.symbol] = p.change_pct / 100;
+    }
+
+    const datesToCalc = tradingDates.filter(d => !existingDates.has(d));
+    if (!datesToCalc.length && lastPerf?.[0]) {
+      const latestDate = tradingDates[tradingDates.length - 1];
+      if (latestDate && existingDates.has(latestDate)) continue;
+      if (latestDate) datesToCalc.push(latestDate);
+    }
+
+    for (const date of datesToCalc) {
+      const dayPrices = pricesByDate[date];
+      if (!dayPrices) continue;
+
+      let dailyReturn = 0;
+      for (const h of holdings) {
+        dailyReturn += h.weight * (dayPrices[h.symbol] ?? 0);
+      }
+
+      const nav = Math.round(prevNav * (1 + dailyReturn) * 10000) / 10000;
+      const cumulativeReturn = Math.round(((nav / f.base_nav) - 1) * 1000000) / 1000000;
+      const snapshot = holdings.map((h: any) => ({ symbol: h.symbol, weight: h.weight, return: dayPrices[h.symbol] ?? 0 }));
+
+      await sb.from("etf_performance").upsert({
+        fund_id: f.id, date, nav,
+        daily_return: Math.round(dailyReturn * 1000000) / 1000000,
+        cumulative_return: cumulativeReturn,
+        holdings_snapshot: snapshot,
+      }, { onConflict: "fund_id,date" });
+      prevNav = nav;
+    }
+    navsCalculated++;
+  }
+
+  await logAudit({ actor_email: user.email, actor_type: "human", entity_type: "etf", action: "prices_refreshed", channel: "api", state_after: { prices_fetched: pricesFetched, navs_calculated: navsCalculated, errors: errors.length } });
+
+  return c.json({ ok: true, prices_fetched: pricesFetched, navs_calculated: navsCalculated, errors: errors.length ? errors : undefined }, 200, corsHeaders);
+});
+
 // ── Health ─────────────────────────────────────────────────────────────
 app.get("/", (c) => c.json({ status: "ok", service: "skills-api" }, 200, corsHeaders));
 

@@ -103,6 +103,40 @@ export interface TaskSuggestion {
   reasons: string[];
 }
 
+export interface EtfFund {
+  id: string;
+  ticker: string;
+  name: string;
+  description?: string;
+  strategy?: string;
+  inception_date: string;
+  base_nav: number;
+  status: string;
+  created_by: string;
+  latest_nav?: number;
+  daily_return?: number;
+  cumulative_return?: number;
+  holdings_count?: number;
+  last_updated?: string;
+}
+
+export interface EtfHolding {
+  symbol: string;
+  name: string;
+  domain?: string;
+  sector?: string;
+  weight: number;
+  latest_price?: number;
+  daily_change_pct?: number;
+}
+
+export interface EtfPerformancePoint {
+  date: string;
+  nav: number;
+  daily_return: number;
+  cumulative_return: number;
+}
+
 export interface Agent {
   id: string;
   slug: string;
@@ -516,5 +550,38 @@ export class AstarAPI {
     });
     if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
     return res.json();
+  }
+
+  async listEtf(): Promise<EtfFund[]> {
+    const data = await this.fetch<{ funds: EtfFund[] }>("/etf");
+    return data.funds;
+  }
+
+  async getEtf(ticker: string): Promise<{ fund: EtfFund; holdings: EtfHolding[]; performance: any }> {
+    return this.fetch(`/etf/${ticker.toUpperCase()}`);
+  }
+
+  async getEtfPerformance(ticker: string, range?: string): Promise<EtfPerformancePoint[]> {
+    const qs = range ? `?range=${range}` : "";
+    const data = await this.fetch<{ data: EtfPerformancePoint[] }>(`/etf/${ticker.toUpperCase()}/performance${qs}`);
+    return data.data;
+  }
+
+  async getEtfNews(ticker: string): Promise<any[]> {
+    const data = await this.fetch<{ news: any[] }>(`/etf/${ticker.toUpperCase()}/news`);
+    return data.news;
+  }
+
+  async createEtf(fund: { ticker: string; name: string; description?: string; strategy?: string; holdings: { symbol: string; name: string; domain?: string; sector?: string; weight: number }[] }): Promise<{ ok: boolean; ticker: string }> {
+    return this.fetch("/etf", { method: "POST", body: JSON.stringify(fund) });
+  }
+
+  async rebalanceEtf(ticker: string, holdings: { symbol: string; name?: string; domain?: string; sector?: string; weight: number }[]): Promise<{ ok: boolean }> {
+    return this.fetch(`/etf/${ticker.toUpperCase()}/rebalance`, { method: "POST", body: JSON.stringify({ holdings }) });
+  }
+
+  async refreshEtfPrices(ticker?: string): Promise<{ ok: boolean; prices_fetched: number; navs_calculated: number }> {
+    const qs = ticker ? `?ticker=${ticker.toUpperCase()}` : "";
+    return this.fetch(`/etf/refresh-prices${qs}`, { method: "POST" });
   }
 }
