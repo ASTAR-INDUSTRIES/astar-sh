@@ -693,6 +693,7 @@ export type Database = {
           task_number: number
           title: string
           updated_at: string
+          visibility: string | null
         }
         Insert: {
           archived_at?: string | null
@@ -717,6 +718,7 @@ export type Database = {
           task_number?: number
           title: string
           updated_at?: string
+          visibility?: string | null
         }
         Update: {
           archived_at?: string | null
@@ -741,6 +743,7 @@ export type Database = {
           task_number?: number
           title?: string
           updated_at?: string
+          visibility?: string | null
         }
         Relationships: [
           {
