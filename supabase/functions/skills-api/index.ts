@@ -1631,38 +1631,6 @@ app.patch("/etf/:ticker", async (c) => {
   return c.json({ ok: true }, 200, corsHeaders);
 });
 
-// ── ETF: rebalance holdings ─────────────────────────────────────────
-app.post("/etf/:ticker/rebalance", async (c) => {
-  const user = await validateMsToken(c.req.raw);
-  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
-
-  const ticker = c.req.param("ticker").toUpperCase();
-  const sb = getSupabase();
-  const body = await c.req.json();
-
-  if (!body.holdings?.length) return c.json({ error: "holdings required" }, 400, corsHeaders);
-  const weightSum = body.holdings.reduce((s: number, h: any) => s + (h.weight || 0), 0);
-  if (Math.abs(weightSum - 1.0) > 0.001) return c.json({ error: `Weights must sum to 1.0 (got ${weightSum.toFixed(4)})` }, 400, corsHeaders);
-
-  const { data: fund } = await sb.from("etf_funds").select("id").eq("ticker", ticker).single();
-  if (!fund) return c.json({ error: "Fund not found" }, 404, corsHeaders);
-
-  await sb.from("etf_holdings").delete().eq("fund_id", fund.id);
-  const rows = body.holdings.map((h: any) => ({
-    fund_id: fund.id,
-    symbol: h.symbol.toUpperCase(),
-    name: h.name || h.symbol,
-    domain: h.domain || null,
-    sector: h.sector || null,
-    weight: h.weight,
-  }));
-  await sb.from("etf_holdings").insert(rows);
-
-  await logAudit({ actor_email: user.email, actor_type: "human", entity_type: "etf", entity_id: ticker, action: "rebalanced", channel: "api", state_after: { holdings: body.holdings.length, weights: body.holdings.map((h: any) => `${h.symbol}:${h.weight}`) } });
-
-  return c.json({ ok: true }, 200, corsHeaders);
-});
-
 // ── ETF: fetch Yahoo Finance prices for a symbol ────────────────────
 async function fetchYahooPrices(symbol: string, range = "1mo"): Promise<{ date: string; close: number; changePct: number }[]> {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=${range}&interval=1d`;
@@ -1686,7 +1654,7 @@ async function fetchYahooPrices(symbol: string, range = "1mo"): Promise<{ date: 
   return points;
 }
 
-// ── ETF: refresh prices + recalculate NAV ───────────────────────────
+// ── ETF: refresh prices + recalculate NAV (MUST be before /:ticker routes) ──
 app.post("/etf/refresh-prices", async (c) => {
   const user = await validateMsToken(c.req.raw);
   if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
@@ -1783,6 +1751,38 @@ app.post("/etf/refresh-prices", async (c) => {
   await logAudit({ actor_email: user.email, actor_type: "human", entity_type: "etf", action: "prices_refreshed", channel: "api", state_after: { prices_fetched: pricesFetched, navs_calculated: navsCalculated, errors: errors.length } });
 
   return c.json({ ok: true, prices_fetched: pricesFetched, navs_calculated: navsCalculated, errors: errors.length ? errors : undefined }, 200, corsHeaders);
+});
+
+// ── ETF: rebalance holdings ─────────────────────────────────────────
+app.post("/etf/:ticker/rebalance", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const ticker = c.req.param("ticker").toUpperCase();
+  const sb = getSupabase();
+  const body = await c.req.json();
+
+  if (!body.holdings?.length) return c.json({ error: "holdings required" }, 400, corsHeaders);
+  const weightSum = body.holdings.reduce((s: number, h: any) => s + (h.weight || 0), 0);
+  if (Math.abs(weightSum - 1.0) > 0.001) return c.json({ error: `Weights must sum to 1.0 (got ${weightSum.toFixed(4)})` }, 400, corsHeaders);
+
+  const { data: fund } = await sb.from("etf_funds").select("id").eq("ticker", ticker).single();
+  if (!fund) return c.json({ error: "Fund not found" }, 404, corsHeaders);
+
+  await sb.from("etf_holdings").delete().eq("fund_id", fund.id);
+  const rows = body.holdings.map((h: any) => ({
+    fund_id: fund.id,
+    symbol: h.symbol.toUpperCase(),
+    name: h.name || h.symbol,
+    domain: h.domain || null,
+    sector: h.sector || null,
+    weight: h.weight,
+  }));
+  await sb.from("etf_holdings").insert(rows);
+
+  await logAudit({ actor_email: user.email, actor_type: "human", entity_type: "etf", entity_id: ticker, action: "rebalanced", channel: "api", state_after: { holdings: body.holdings.length, weights: body.holdings.map((h: any) => `${h.symbol}:${h.weight}`) } });
+
+  return c.json({ ok: true }, 200, corsHeaders);
 });
 
 // ── Health ─────────────────────────────────────────────────────────────
