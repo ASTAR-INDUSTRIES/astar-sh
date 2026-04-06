@@ -1492,6 +1492,12 @@ app.get("/etf/:ticker", async (c) => {
     if (entry?.[0]) entryPriceMap[sym] = entry[0].close_price;
   }
 
+  const sparkMap: Record<string, number[]> = {};
+  for (const sym of symbols) {
+    const { data: hist } = await sb.from("etf_prices").select("close_price").eq("symbol", sym).order("date", { ascending: true }).limit(20);
+    if (hist?.length) sparkMap[sym] = hist.map((p: any) => p.close_price);
+  }
+
   const enrichedHoldings = (holdings || []).map((h: any) => {
     const latest = priceMap[h.symbol];
     const entryPrice = entryPriceMap[h.symbol];
@@ -1502,6 +1508,7 @@ app.get("/etf/:ticker", async (c) => {
       daily_change_pct: latest?.change_pct ?? null,
       entry_price: entryPrice ?? null,
       since_entry_pct: sinceEntry != null ? Math.round(sinceEntry * 100) / 100 : null,
+      price_history: sparkMap[h.symbol] || [],
     };
   });
 

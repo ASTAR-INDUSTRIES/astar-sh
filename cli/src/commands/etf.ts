@@ -22,10 +22,87 @@ function fmtNav(val: number | null | undefined): string {
   return val.toFixed(2);
 }
 
+const SPARK_CHARS = "▁▂▃▄▅▆▇█";
+function sparkline(values: number[]): string {
+  if (values.length < 2) return "";
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  return values.map(v => {
+    const idx = Math.round(((v - min) / range) * (SPARK_CHARS.length - 1));
+    return SPARK_CHARS[idx];
+  }).join("");
+}
+
+function asciiChart(data: { date: string; value: number }[], opts: { width?: number; height?: number; label?: string; benchmarkData?: { date: string; value: number }[] } = {}): string {
+  if (data.length < 2) return "";
+  const width = opts.width || 60;
+  const height = opts.height || 12;
+
+  const allValues = [...data.map(d => d.value)];
+  if (opts.benchmarkData?.length) allValues.push(...opts.benchmarkData.map(d => d.value));
+  const min = Math.min(...allValues);
+  const max = Math.max(...allValues);
+  const range = max - min || 1;
+
+  const sampled = data.length <= width ? data : data.filter((_, i) => i === 0 || i === data.length - 1 || Math.floor(i * width / data.length) !== Math.floor((i - 1) * width / data.length));
+  const values = sampled.map(d => d.value);
+
+  let benchValues: number[] = [];
+  if (opts.benchmarkData?.length) {
+    const bs = opts.benchmarkData.length <= width ? opts.benchmarkData : opts.benchmarkData.filter((_, i) => i === 0 || i === opts.benchmarkData!.length - 1 || Math.floor(i * width / opts.benchmarkData!.length) !== Math.floor((i - 1) * width / opts.benchmarkData!.length));
+    benchValues = bs.map(d => d.value);
+  }
+
+  const lines: string[] = [];
+  const labelWidth = 8;
+
+  for (let row = height - 1; row >= 0; row--) {
+    const threshold = min + (range * row / (height - 1));
+    const yLabel = row === height - 1 ? max.toFixed(1) : row === 0 ? min.toFixed(1) : "";
+    let line = `  ${c.dim}${yLabel.padStart(labelWidth)}${c.reset} `;
+
+    for (let col = 0; col < values.length; col++) {
+      const val = values[col];
+      const benchVal = benchValues[col];
+      const nextThreshold = min + (range * (row + 1) / (height - 1));
+
+      if (val >= threshold && (row === height - 1 || val < nextThreshold)) {
+        const lastVal = values[values.length - 1];
+        const firstVal = values[0];
+        line += lastVal >= firstVal ? `${c.green}█${c.reset}` : `${c.red}█${c.reset}`;
+      } else if (val > threshold) {
+        const lastVal = values[values.length - 1];
+        const firstVal = values[0];
+        line += lastVal >= firstVal ? `${c.green}│${c.reset}` : `${c.red}│${c.reset}`;
+      } else if (benchVal != null && benchVal >= threshold && (row === height - 1 || benchVal < nextThreshold)) {
+        line += `${c.dim}·${c.reset}`;
+      } else {
+        line += " ";
+      }
+    }
+    lines.push(line);
+  }
+
+  const dateFirst = sampled[0]?.date?.slice(5) || "";
+  const dateLast = sampled[sampled.length - 1]?.date?.slice(5) || "";
+  const axisLine = `  ${"".padStart(labelWidth)} ${c.dim}${dateFirst}${"─".repeat(Math.max(1, values.length - dateFirst.length - dateLast.length))}${dateLast}${c.reset}`;
+  lines.push(axisLine);
+
+  if (opts.label) {
+    const legend = opts.benchmarkData?.length
+      ? `  ${"".padStart(labelWidth)} ${opts.label}  ${c.dim}· SPY${c.reset}`
+      : `  ${"".padStart(labelWidth)} ${opts.label}`;
+    lines.push(legend);
+  }
+
+  return lines.join("\n");
+}
+
 let monitorExpanded = true;
 let monitorError = "";
 let lastFunds: EtfFund[] = [];
-let lastDetail: { fund: EtfFund; holdings: EtfHolding[]; performance: any; benchmark: any; news: any[] } | null = null;
+let lastDetail: { fund: EtfFund; holdings: EtfHolding[]; performance: any; benchmark: any; news: any[]; perfHistory: any[]; benchHistory: any[] } | null = null;
 
 async function renderMonitorAll(api: AstarAPI) {
   try {
@@ -70,18 +147,19 @@ async function renderMonitorAll(api: AstarAPI) {
 
 async function renderMonitorSingle(api: AstarAPI, ticker: string) {
   try {
-    const [detail, news] = await Promise.all([
+    const [detail, news, perfFull] = await Promise.all([
       api.getEtf(ticker),
       api.getEtfNews(ticker).catch(() => []),
+      api.getEtfPerformanceFull(ticker, "all").catch(() => ({ data: [], benchmark: [] })),
     ]);
-    lastDetail = { ...detail, news };
+    lastDetail = { ...detail, news, perfHistory: perfFull.data || [], benchHistory: perfFull.benchmark || [] };
     monitorError = "";
   } catch (e: any) {
     monitorError = e.message?.includes("401") ? "session expired — re-run astar login" : "API unreachable";
   }
   if (!lastDetail) return;
 
-  const { fund, holdings, performance, benchmark, news } = lastDetail;
+  const { fund, holdings, performance, benchmark, news, perfHistory, benchHistory } = lastDetail;
   const now = new Date();
   const time = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const cols = process.stdout.columns || 100;
@@ -109,13 +187,23 @@ async function renderMonitorSingle(api: AstarAPI, ticker: string) {
     console.log(`  ${c.dim}SPY${c.reset} ${fmtPct(benchmark.daily_return)} daily  ${fmtPct(benchmark.cumulative_return)} cumul  ${c.dim}α${c.reset} ${alphaColor}${alphaSign}${(alpha * 100).toFixed(2)}%${c.reset}`);
   }
 
+  if (perfHistory.length >= 2) {
+    const chartWidth = Math.min(60, cols - 15);
+    const chartData = perfHistory.map((p: any) => ({ date: p.date, value: p.nav }));
+    const benchData = benchHistory.length >= 2
+      ? benchHistory.map((b: any) => ({ date: b.date, value: 100 * (1 + b.cumulative_return) }))
+      : undefined;
+    console.log("");
+    console.log(asciiChart(chartData, { width: chartWidth, height: 8, label: `${c.bold}NAV${c.reset}`, benchmarkData: benchData }));
+  }
+
   console.log("");
   console.log(`  ${c.bold}HOLDINGS${c.reset} ${c.dim}(${holdings.length})${c.reset}`);
   console.log("");
 
   const symWidth = 6;
   const nameWidth = Math.min(25, Math.max(12, cols - 75));
-  console.log(`  ${c.dim}  ${"".padEnd(symWidth)} ${"".padEnd(nameWidth)} ${"Weight".padStart(6)}  ${"Price".padStart(10)}  ${"Daily".padStart(8)}  ${"Entry".padStart(10)}  ${"Since".padStart(8)}${c.reset}`);
+  console.log(`  ${c.dim}  ${"".padEnd(symWidth)} ${"".padEnd(nameWidth)} ${"Weight".padStart(6)}  ${"Price".padStart(10)}  ${"Daily".padStart(8)}  ${"Entry".padStart(10)}  ${"Since".padStart(8)}  ${"20d".padStart(10)}${c.reset}`);
   for (const h of holdings) {
     const sym = h.symbol.padEnd(symWidth);
     const name = h.name.length > nameWidth ? h.name.slice(0, nameWidth - 1) + "…" : h.name.padEnd(nameWidth);
@@ -125,8 +213,11 @@ async function renderMonitorSingle(api: AstarAPI, ticker: string) {
     const changeColor = h.daily_change_pct != null && h.daily_change_pct > 0 ? c.green : h.daily_change_pct != null && h.daily_change_pct < 0 ? c.red : c.dim;
     const entryPx = (h as any).entry_price != null ? `$${(h as any).entry_price.toFixed(2)}`.padStart(10) : `${c.dim}${"—".padStart(10)}${c.reset}`;
     const sinceEntry = (h as any).since_entry_pct != null ? fmtPct((h as any).since_entry_pct / 100) : `${c.dim}—${c.reset}`;
+    const hist = (h as any).price_history || [];
+    const spark = hist.length >= 2 ? sparkline(hist) : "";
+    const sparkColor = hist.length >= 2 && hist[hist.length - 1] >= hist[0] ? c.green : c.red;
     const bar = h.daily_change_pct != null && h.daily_change_pct > 0 ? `${c.green}▲${c.reset}` : h.daily_change_pct != null && h.daily_change_pct < 0 ? `${c.red}▼${c.reset}` : `${c.dim}·${c.reset}`;
-    console.log(`  ${bar} ${c.cyan}${sym}${c.reset} ${c.dim}${name}${c.reset} ${weight}  ${price}  ${change}  ${entryPx}  ${sinceEntry}`);
+    console.log(`  ${bar} ${c.cyan}${sym}${c.reset} ${c.dim}${name}${c.reset} ${weight}  ${price}  ${change}  ${entryPx}  ${sinceEntry}  ${sparkColor}${spark}${c.reset}`);
   }
 
   if (news.length) {
@@ -292,13 +383,23 @@ export function registerEtfCommands(program: Command) {
       const token = await requireAuth();
       const api = new AstarAPI(token);
       try {
-        const data = await api.getEtfPerformance(ticker, opts.range);
+        const full = await api.getEtfPerformanceFull(ticker, opts.range);
+        const data = full.data;
         if (!data.length) {
           console.log(`${c.dim}No performance data yet.${c.reset}`);
           return;
         }
         console.log("");
         console.log(`  ${c.bold}${ticker.toUpperCase()}${c.reset} — ${opts.range} performance`);
+
+        const chartData = data.map(p => ({ date: p.date, value: p.nav }));
+        const benchData = full.benchmark?.length >= 2
+          ? full.benchmark.map((b: any) => ({ date: b.date, value: 100 * (1 + b.cumulative_return) }))
+          : undefined;
+        const chartWidth = Math.min(60, (process.stdout.columns || 100) - 15);
+        console.log("");
+        console.log(asciiChart(chartData, { width: chartWidth, height: 10, label: `${c.bold}NAV${c.reset}`, benchmarkData: benchData }));
+
         console.log("");
         table(
           ["Date", "NAV", "Daily", "Cumulative"],

@@ -567,6 +567,11 @@ export class AstarAPI {
     return data.data;
   }
 
+  async getEtfPerformanceFull(ticker: string, range?: string): Promise<{ data: EtfPerformancePoint[]; benchmark: { date: string; cumulative_return: number }[] }> {
+    const qs = range ? `?range=${range}` : "";
+    return this.fetch(`/etf/${ticker.toUpperCase()}/performance${qs}`);
+  }
+
   async getEtfNews(ticker: string): Promise<any[]> {
     const data = await this.fetch<{ news: any[] }>(`/etf/${ticker.toUpperCase()}/news`);
     return data.news;
