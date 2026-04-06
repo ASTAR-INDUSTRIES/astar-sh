@@ -763,6 +763,7 @@ const TOOLS = [
         due_date: { type: "string", description: "New due date (YYYY-MM-DD)" },
         description: { type: "string" },
         visibility: { type: "string", enum: ["private", "team", "public"], description: "Task visibility" },
+        parent_task_number: { type: "number", description: "Set parent task (makes this a subtask). Use 0 to remove parent." },
         reason: { type: "string", description: "Why this change is being made (for audit trail)" },
       },
       required: ["task_number"],
