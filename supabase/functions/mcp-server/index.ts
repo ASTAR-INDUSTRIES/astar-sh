@@ -1634,7 +1634,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
 
     case "triage_tasks": {
       const sb = adminClient();
-      const { data, error } = await sb.from("tasks").select("task_number, title, source, source_agent, confidence, created_at").eq("requires_triage", true).is("archived_at", null).order("created_at", { ascending: false }).limit(args.limit || 20);
+      const { data, error } = await sb.from("tasks").select("task_number, title, source, confidence, created_at").eq("requires_triage", true).is("archived_at", null).order("created_at", { ascending: false }).limit(args.limit || 20);
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
       if (!data?.length) return [{ type: "text", text: "No tasks need triage." }];
       const out = data.map((t: any) => `#${t.task_number} [${t.source}${t.confidence ? ` ${(t.confidence * 100).toFixed(0)}%` : ""}] ${t.title}`).join("\n");
