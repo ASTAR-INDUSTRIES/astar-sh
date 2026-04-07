@@ -13,14 +13,6 @@ async function requireAuth(): Promise<string> {
   }
 }
 
-async function optionalAuth(): Promise<string | undefined> {
-  try {
-    return await getToken();
-  } catch {
-    return undefined;
-  }
-}
-
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
@@ -92,7 +84,7 @@ export function registerFeedbackCommands(program: Command) {
     .description("List recent feedback")
     .option("-s, --status <status>", "Filter: new, accepted, rejected, done")
     .action(async (opts: { status?: string }) => {
-      const token = await optionalAuth();
+      const token = await requireAuth();
       const api = new AstarAPI(token);
 
       try {

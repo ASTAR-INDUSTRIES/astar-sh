@@ -5,6 +5,21 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.62] - 2026-04-07
+### Added
+- `astar events` command group for creating, listing, inspecting, and updating first-class events with goals, dates, locations, attendees, and visibility
+- Event-aware task workflows: `astar todo --event <slug>` filters work by event and `astar todo "..." --event <slug>` links new tasks directly to that event
+- 4 MCP event tools: `create_event`, `list_events`, `get_event`, and `update_event`
+
+### Changed
+- `astar changelog` now shows the latest non-empty sections, including bullet entries and changelog categories instead of mostly empty recent version headers
+- `astar feedback`, `astar audit`, and agent activity views now require login instead of exposing staff backlog and audit data anonymously
+
+### Fixed
+- Task listing and task detail access now enforce task visibility even when callers request `assigned_to=all` or know a task number
+- MCP task tools now reject `include_all` until server-enforced admin claims exist and no longer bypass task visibility for reads, triage, or task mutations
+- Audit and feedback reads now stop using public-read access by default; users only see their own audit trail and agents they own
+
 ## [0.0.60] - 2026-04-06
 
 ## [0.0.59] - 2026-04-06

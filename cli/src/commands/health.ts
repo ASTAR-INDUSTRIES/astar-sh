@@ -60,7 +60,7 @@ async function checkApi(): Promise<{ reachable: boolean; latency_ms: number | nu
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5000);
   try {
-    const res = await fetch(`${config.apiUrl}/audit?limit=1`, { signal: controller.signal });
+    const res = await fetch(`${config.apiUrl}/skills?query=astar`, { signal: controller.signal });
     clearTimeout(timeout);
     return { reachable: res.ok, latency_ms: Date.now() - start };
   } catch {

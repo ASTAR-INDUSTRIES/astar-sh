@@ -1,6 +1,6 @@
 # CLI
 
-Bun + Commander CLI with 14 command groups.
+Bun + Commander CLI with 15 command groups.
 
 ## Structure
 
@@ -12,9 +12,10 @@ Root program in `cli/src/index.ts`. Each command module exports a `registerXxxCo
 | skill | list, search, info, install, remove, installed, diff, update, init, push |
 | news | list, info |
 | feedback | submit, list, close, reject |
+| events | create/list, info, update |
 | shipped | log milestone, browse calendar |
 | hours | log, ask, check, month (CFA agent queue) |
-| todo | create, done, info, assign, mine, team, list, triage, accept, dismiss, link, velocity, next, --monitor |
+| todo | create, done, info, assign, mine, team, list, triage, accept, dismiss, link, velocity, next, `--event`, --monitor |
 | audit | query with filters |
 | agent | list, info, register, pause, resume, retire, logs, login, hire, start, stop, --monitor |
 | ask | send message to any agent |
@@ -58,4 +59,4 @@ Both support `ctrl+o` to expand/collapse details and `ctrl+c` to exit.
 - `cli/src/lib/api.ts` — API client class
 - `cli/src/lib/auth.ts` — auth helpers
 - `cli/src/lib/ui.ts` — terminal colors, table renderer
-- `cli/src/commands/*.ts` — 14 command modules
+- `cli/src/commands/*.ts` — 15 command modules

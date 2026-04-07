@@ -53,9 +53,10 @@ function renderTaskTable(tasks: Task[]) {
     const subCount = t.subtasks?.length || 0;
     const subDone = t.subtasks?.filter((s) => s.status === "completed").length || 0;
     const titleSuffix = subCount > 0 ? ` ${c.dim}[${subDone}/${subCount}]${c.reset}` : "";
+    const eventSuffix = t.event?.slug ? ` ${c.dim}@${t.event.slug}${c.reset}` : "";
     rows.push([
       `${c.cyan}${t.task_number}${c.reset}`,
-      truncate(t.title, 35) + titleSuffix,
+      truncate(t.title, 35) + titleSuffix + eventSuffix,
       `${statusColors[t.status] || c.dim}${t.status}${c.reset}`,
       `${priorityColors[t.priority] || c.dim}${t.priority}${c.reset}`,
       `${c.dim}${t.assigned_to?.split("@")[0] || "—"}${c.reset}`,
@@ -94,11 +95,11 @@ let lastOpenTasks: Task[] = [];
 let lastCompletedTasks: Task[] = [];
 let monitorError = "";
 
-async function renderMonitor(api: AstarAPI, opts: { mineOnly?: boolean; myEmail?: string } = {}) {
+async function renderMonitor(api: AstarAPI, opts: { mineOnly?: boolean; myEmail?: string; event?: string } = {}) {
   try {
     const [open, done] = await Promise.all([
-      api.listTasks({ assigned_to: opts.mineOnly ? undefined : "all", include_subtasks: true }),
-      api.listTasks({ assigned_to: opts.mineOnly ? undefined : "all", status: "completed" }),
+      api.listTasks({ assigned_to: opts.mineOnly ? undefined : "all", event: opts.event, include_subtasks: true }),
+      api.listTasks({ assigned_to: opts.mineOnly ? undefined : "all", event: opts.event, status: "completed" }),
     ]);
     lastOpenTasks = open;
     lastCompletedTasks = done;
@@ -129,7 +130,8 @@ async function renderMonitor(api: AstarAPI, opts: { mineOnly?: boolean; myEmail?
   const descWidth = Math.max(20, cols - 12);
 
   console.log("");
-  const headerLabel = opts.mineOnly ? "MY TASKS" : "TASKS";
+  const baseLabel = opts.mineOnly ? "MY TASKS" : "TASKS";
+  const headerLabel = opts.event ? `${baseLabel} @${opts.event}` : baseLabel;
   const headerPad = Math.max(1, cols - 13 - headerLabel.length);
   console.log(`  ${c.bold}${headerLabel}${c.reset}${" ".repeat(headerPad)}${c.dim}${time}${c.reset}`);
   console.log("");
@@ -200,6 +202,7 @@ export function registerTodoCommands(program: Command) {
     .option("--description <text>", "Task description")
     .option("--parent <number>", "Parent task number (creates subtask)")
     .option("--skill <slug>", "Link to a skill")
+    .option("--event <slug>", "Assign or filter tasks by event")
     .option("--estimate <hours>", "Estimated hours")
     .option("--recurring <interval>", "Recurring: weekly, monthly, quarterly")
     .option("--monitor", "Live-updating task view (refreshes every 10s)")
@@ -212,7 +215,7 @@ export function registerTodoCommands(program: Command) {
           return new AstarAPI(token);
         }
         async function tick() {
-          try { const api = await freshApi(); await renderMonitor(api, { myEmail }); } catch { /* token dead, renderMonitor handles display */ }
+          try { const api = await freshApi(); await renderMonitor(api, { myEmail, event: opts.event }); } catch { /* token dead, renderMonitor handles display */ }
         }
         await tick();
         const interval = setInterval(tick, 10000);
@@ -233,7 +236,15 @@ export function registerTodoCommands(program: Command) {
       }
 
       if (!title) {
-        await todo.commands.find((cmd) => cmd.name() === "mine")!.parseAsync([], { from: "user" });
+        const token = await requireAuth();
+        const api = new AstarAPI(token);
+        try {
+          const tasks = await api.listTasks({ status: "open", event: opts.event, include_subtasks: true });
+          renderTaskTable(tasks);
+        } catch (e: any) {
+          console.error(`${c.red}✗${c.reset} ${e.message}`);
+          process.exit(1);
+        }
         return;
       }
 
@@ -251,12 +262,14 @@ export function registerTodoCommands(program: Command) {
           parent_task_number: opts.parent ? parseNum(opts.parent) : undefined,
           estimated_hours: opts.estimate ? parseFloat(opts.estimate) : undefined,
           recurring: opts.recurring ? { interval: opts.recurring } : undefined,
+          event: opts.event || undefined,
           links: opts.skill ? [{ type: "skill", ref: opts.skill }] : undefined,
         };
         const result = await api.createTask(createPayload);
         const dueStr = opts.due ? ` ${c.dim}(due ${fmtDate(opts.due)})${c.reset}` : "";
         const assignStr = opts.assign ? ` → ${c.dim}${opts.assign}${c.reset}` : "";
-        console.log(`${c.green}✓${c.reset} Task ${c.cyan}#${result.task_number}${c.reset} created${assignStr}${dueStr}`);
+        const eventStr = opts.event ? ` ${c.dim}@${opts.event}${c.reset}` : "";
+        console.log(`${c.green}✓${c.reset} Task ${c.cyan}#${result.task_number}${c.reset} created${assignStr}${dueStr}${eventStr}`);
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} ${e.message}`);
         process.exit(1);
@@ -293,6 +306,7 @@ export function registerTodoCommands(program: Command) {
         if (t.description) console.log(`  ${c.dim}${t.description}${c.reset}`);
         console.log(`  ${c.dim}Created by${c.reset} ${t.created_by.split("@")[0]} · ${c.dim}Assigned to${c.reset} ${t.assigned_to?.split("@")[0] || "unassigned"}`);
         if (t.due_date) console.log(`  ${c.dim}Due${c.reset} ${fmtDate(t.due_date)}`);
+        if (t.event?.slug) console.log(`  ${c.dim}Event${c.reset} ${t.event.slug} · ${t.event.title}`);
         if (t.estimated_hours) console.log(`  ${c.dim}Estimate${c.reset} ${t.estimated_hours}h`);
         if (t.recurring) console.log(`  ${c.dim}Recurring${c.reset} ${t.recurring.interval}`);
         if (t.tags?.length) console.log(`  ${c.dim}Tags${c.reset} ${t.tags.join(", ")}`);
@@ -351,6 +365,7 @@ export function registerTodoCommands(program: Command) {
   todo
     .command("mine")
     .description("List your open tasks")
+    .option("--event <slug>", "Filter to a single event")
     .option("--monitor", "Live-updating view of your tasks")
     .action(async (opts) => {
       if (opts.monitor) {
@@ -361,7 +376,7 @@ export function registerTodoCommands(program: Command) {
           return new AstarAPI(token);
         }
         async function tick() {
-          try { const api = await freshApi(); await renderMonitor(api, { mineOnly: true, myEmail }); } catch { /* token dead, renderMonitor handles display */ }
+          try { const api = await freshApi(); await renderMonitor(api, { mineOnly: true, myEmail, event: opts.event }); } catch { /* token dead, renderMonitor handles display */ }
         }
         await tick();
         const interval = setInterval(tick, 10000);
@@ -381,7 +396,7 @@ export function registerTodoCommands(program: Command) {
       const token = await requireAuth();
       const api = new AstarAPI(token);
       try {
-        const tasks = await api.listTasks({ status: "open", include_subtasks: true });
+        const tasks = await api.listTasks({ status: "open", event: opts.event, include_subtasks: true });
         renderTaskTable(tasks);
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} ${e.message}`);
@@ -392,11 +407,12 @@ export function registerTodoCommands(program: Command) {
   todo
     .command("team")
     .description("All tasks grouped by assignee")
-    .action(async () => {
+    .option("--event <slug>", "Filter to a single event")
+    .action(async (opts: { event?: string }) => {
       const token = await requireAuth();
       const api = new AstarAPI(token);
       try {
-        const tasks = await api.listTasks({ assigned_to: "all", include_subtasks: true });
+        const tasks = await api.listTasks({ assigned_to: "all", event: opts.event, include_subtasks: true });
         if (!tasks.length) {
           console.log(`${c.dim}No tasks found.${c.reset}`);
           return;
@@ -423,11 +439,12 @@ export function registerTodoCommands(program: Command) {
     .option("--prio <priority>", "Filter: low, medium, high, critical")
     .option("--due <due>", "Filter: today, overdue, week")
     .option("--search <text>", "Search title/description")
+    .option("--event <slug>", "Filter to a single event")
     .action(async (opts) => {
       const token = await requireAuth();
       const api = new AstarAPI(token);
       try {
-        const tasks = await api.listTasks({ status: opts.status, priority: opts.prio, due: opts.due, search: opts.search, assigned_to: "all", include_subtasks: true });
+        const tasks = await api.listTasks({ status: opts.status, priority: opts.prio, due: opts.due, search: opts.search, event: opts.event, assigned_to: "all", include_subtasks: true });
         renderTaskTable(tasks);
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} ${e.message}`);

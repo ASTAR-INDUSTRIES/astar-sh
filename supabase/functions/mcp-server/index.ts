@@ -33,6 +33,7 @@ const TOOL_SCOPES: Record<string, string> = {
   create_skill: "skill.create", update_skill: "skill.write", delete_skill: "skill.delete", list_skills: "skill.read", get_skill: "skill.read", upload_skill_file: "skill.write", delete_skill_file: "skill.delete", get_skill_history: "skill.read",
   create_news: "news.create", update_news: "news.write", delete_news: "news.delete", list_news: "news.read",
   submit_feedback: "feedback.write", list_feedback: "feedback.read", update_feedback: "feedback.write",
+  create_event: "event.create", list_events: "event.read", get_event: "event.read", update_event: "event.write",
   create_milestone: "milestone.create", list_milestones: "milestone.read",
   ask_agent: "inbox.write", list_inbox: "inbox.read", read_inbox: "inbox.read", respond_inbox: "inbox.respond",
   submit_inquiry: "inbox.write", list_own_inquiries: "inbox.read", list_pending_inquiries: "inbox.read", respond_inquiry: "inbox.respond",
@@ -94,6 +95,42 @@ async function sanityQuery(query: string, params?: Record<string, any>) {
   const res = await fetch(url.toString());
   const json = await res.json();
   return json.result;
+}
+
+function slugify(value: string): string {
+  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+async function resolveEventRef(sb: ReturnType<typeof adminClient>, ref: string) {
+  if (!ref) return null;
+  const query = sb.from("events").select("*");
+  const { data } = isUuid(ref)
+    ? await query.eq("id", ref).maybeSingle()
+    : await query.eq("slug", ref).maybeSingle();
+  return data || null;
+}
+
+function canAccessTask(task: any, user: { email: string }): boolean {
+  if (!task) return false;
+  if (task.visibility === "public" || task.visibility === "team") return true;
+  return task.created_by === user.email || task.assigned_to === user.email;
+}
+
+function canModifyTask(task: any, user: { email: string }): boolean {
+  return !!task && (task.created_by === user.email || task.assigned_to === user.email);
+}
+
+async function listOwnedAgentSlugs(sb: ReturnType<typeof adminClient>, ownerEmail: string): Promise<Set<string>> {
+  const { data } = await sb.from("agents").select("slug").eq("owner", ownerEmail);
+  return new Set((data || []).map((agent: any) => agent.slug).filter(Boolean));
+}
+
+function canReadAuditEvent(event: any, user: { email: string }, ownedAgentSlugs: Set<string>): boolean {
+  return event.actor_email === user.email || (!!event.actor_agent_id && ownedAgentSlugs.has(event.actor_agent_id));
 }
 
 // ── CORS ───────────────────────────────────────────────────────────────
@@ -607,6 +644,99 @@ const TOOLS = [
       required: ["id", "status"],
     },
   },
+  // ── Event Tools ────────────────────────────────────────────────────
+  {
+    name: "create_event",
+    description: "Create an event with a goal, date, attendees, and linked work context",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Event title" },
+        goal: { type: "string", description: "Why this event exists / success criteria" },
+        slug: { type: "string", description: "Custom slug (optional)" },
+        type: { type: "string", enum: ["arranged", "speaking", "attending", "podcast"], description: "Event type (default: attending)" },
+        status: { type: "string", enum: ["tentative", "confirmed", "completed", "cancelled"], description: "Event status (default: tentative)" },
+        date: { type: "string", description: "Event date (YYYY-MM-DD)" },
+        date_tentative: { type: "boolean", description: "Mark the date as tentative" },
+        location: { type: "string", description: "Location" },
+        attendees: {
+          type: "array",
+          description: "Attendees with kind internal|external plus optional org/role/email",
+          items: {
+            type: "object",
+            properties: {
+              kind: { type: "string", enum: ["internal", "external"] },
+              name: { type: "string" },
+              org: { type: "string" },
+              role: { type: "string" },
+              email: { type: "string" },
+            },
+            required: ["kind", "name"],
+          },
+        },
+        visibility: { type: "string", enum: ["private", "team", "public"], description: "Event visibility (default: team)" },
+      },
+      required: ["title", "goal"],
+    },
+  },
+  {
+    name: "list_events",
+    description: "List events with optional status, type, month, or search filters",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: { type: "string", enum: ["tentative", "confirmed", "completed", "cancelled"] },
+        type: { type: "string", enum: ["arranged", "speaking", "attending", "podcast"] },
+        month: { type: "string", description: "Filter by month (YYYY-MM)" },
+        search: { type: "string", description: "Search title, goal, location, or slug" },
+        limit: { type: "number", description: "Max results (default 20)" },
+      },
+    },
+  },
+  {
+    name: "get_event",
+    description: "Get one event with its linked tasks",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: { type: "string", description: "Event slug or UUID" },
+      },
+      required: ["slug"],
+    },
+  },
+  {
+    name: "update_event",
+    description: "Update event fields such as status, date, goal, or attendees",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: { type: "string", description: "Event slug or UUID" },
+        title: { type: "string" },
+        goal: { type: "string" },
+        type: { type: "string", enum: ["arranged", "speaking", "attending", "podcast"] },
+        status: { type: "string", enum: ["tentative", "confirmed", "completed", "cancelled"] },
+        date: { type: "string", description: "Event date (YYYY-MM-DD)" },
+        date_tentative: { type: "boolean" },
+        location: { type: "string" },
+        attendees: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              kind: { type: "string", enum: ["internal", "external"] },
+              name: { type: "string" },
+              org: { type: "string" },
+              role: { type: "string" },
+              email: { type: "string" },
+            },
+            required: ["kind", "name"],
+          },
+        },
+        visibility: { type: "string", enum: ["private", "team", "public"] },
+      },
+      required: ["slug"],
+    },
+  },
   // ── Milestone Tools ─────────────────────────────────────────────────
   {
     name: "create_milestone",
@@ -746,6 +876,7 @@ const TOOLS = [
         estimated_hours: { type: "number", description: "Estimated hours" },
         recurring: { type: "string", enum: ["weekly", "monthly", "quarterly"], description: "Recurring interval" },
         links: { type: "array", items: { type: "object", properties: { type: { type: "string" }, ref: { type: "string" } }, required: ["type", "ref"] }, description: "Links to skills, news, URLs" },
+        event: { type: "string", description: "Event slug or UUID" },
         visibility: { type: "string", enum: ["private", "team", "public"], description: "Task visibility (default: private)" },
       },
       required: ["title"],
@@ -763,6 +894,7 @@ const TOOLS = [
         assigned_to: { type: "string", description: "Email of new assignee" },
         due_date: { type: "string", description: "New due date (YYYY-MM-DD)" },
         description: { type: "string" },
+        event: { type: "string", description: "Event slug or UUID" },
         visibility: { type: "string", enum: ["private", "team", "public"], description: "Task visibility" },
         parent_task_number: { type: "number", description: "Set parent task (makes this a subtask). Use 0 to remove parent." },
         reason: { type: "string", description: "Why this change is being made (for audit trail)" },
@@ -792,8 +924,9 @@ const TOOLS = [
         status: { type: "string", enum: ["open", "in_progress", "completed", "blocked", "cancelled"] },
         priority: { type: "string", enum: ["low", "medium", "high", "critical"] },
         search: { type: "string", description: "Search title/description" },
+        event: { type: "string", description: "Filter to an event slug or UUID" },
         limit: { type: "number", description: "Max results (default 20)" },
-        include_all: { type: "boolean", description: "Include all tasks regardless of visibility (admin only)" },
+        include_all: { type: "boolean", description: "Disabled until server-enforced admin claims exist" },
       },
     },
   },
@@ -1384,6 +1517,139 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       return [{ type: "text", text: `✓ Feedback updated to "${args.status}".` }];
     }
 
+    // ── Events ────────────────────────────────────────────────────
+    case "create_event": {
+      const sb = adminClient();
+      const slug = args.slug ? slugify(args.slug) : slugify(args.title);
+      if (!slug) return [{ type: "text", text: "Error: Could not derive a slug from the title." }];
+      const { data, error } = await sb.from("events").insert({
+        slug,
+        title: args.title,
+        goal: args.goal,
+        type: args.type || "attending",
+        status: args.status || "tentative",
+        date: args.date || null,
+        date_tentative: args.date_tentative ?? false,
+        location: args.location || null,
+        attendees: Array.isArray(args.attendees) ? args.attendees : [],
+        visibility: args.visibility || "team",
+        created_by: user.email,
+      }).select("id, slug, title, date, date_tentative").single();
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      await sb.from("audit_events").insert({
+        actor_email: user.email,
+        actor_type: actorType,
+        actor_agent_id: actorAgentId,
+        entity_type: "event",
+        entity_id: data.slug,
+        action: "created",
+        channel: "mcp",
+        state_after: { title: args.title, goal: args.goal, type: args.type || "attending", status: args.status || "tentative" },
+        context: { event_uuid: data.id },
+      });
+      const when = data.date ? ` (${data.date}${data.date_tentative ? ", tentative" : ""})` : "";
+      return [{ type: "text", text: `✓ Event ${data.slug} created${when}.` }];
+    }
+
+    case "list_events": {
+      const sb = adminClient();
+      const limit = Math.min(args.limit || 20, 50);
+      const fetchLimit = args.search ? 100 : limit;
+      let query = sb.from("events")
+        .select("*")
+        .or(`visibility.eq.public,visibility.eq.team,created_by.eq.${user.email}`)
+        .order("date", { ascending: true, nullsFirst: false })
+        .order("created_at", { ascending: false })
+        .limit(fetchLimit);
+      if (args.status) query = query.eq("status", args.status);
+      if (args.type) query = query.eq("type", args.type);
+      if (args.month) query = query.gte("date", `${args.month}-01`).lte("date", `${args.month}-31`);
+      const { data, error } = await query;
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      let events = data || [];
+      if (args.search) {
+        const search = String(args.search).toLowerCase();
+        events = events.filter((event: any) =>
+          [event.slug, event.title, event.goal, event.location].some((field) => String(field || "").toLowerCase().includes(search))
+        );
+      }
+      if (!events.length) return [{ type: "text", text: "No events found." }];
+      const out = events.slice(0, limit).map((event: any) => {
+        const when = event.date ? `${event.date}${event.date_tentative ? " (tentative)" : ""}` : "TBD";
+        const where = event.location ? ` · ${event.location}` : "";
+        return `${event.slug} [${event.status}] ${event.type} — ${event.title} (${when})${where}`;
+      }).join("\n");
+      return [{ type: "text", text: out }];
+    }
+
+    case "get_event": {
+      const sb = adminClient();
+      const event = await resolveEventRef(sb, args.slug);
+      if (!event) return [{ type: "text", text: "Error: Event not found." }];
+      if (event.visibility === "private" && event.created_by !== user.email) return [{ type: "text", text: "Error: Forbidden." }];
+
+      const { data: tasks } = await sb.from("tasks")
+        .select("id, task_number, title, status, priority, assigned_to, due_date, parent_task_id")
+        .eq("event_id", event.id)
+        .is("archived_at", null)
+        .order("task_number", { ascending: true });
+
+      const topLevel = (tasks || []).filter((task: any) => !task.parent_task_id);
+      const subtasks = (tasks || []).filter((task: any) => task.parent_task_id);
+      const subtasksByParent: Record<string, any[]> = {};
+      for (const task of subtasks) (subtasksByParent[task.parent_task_id] ||= []).push(task);
+
+      let out = `${event.title}\nSlug: ${event.slug}\nType: ${event.type} | Status: ${event.status}\nGoal: ${event.goal}\nDate: ${event.date || "TBD"}${event.date_tentative ? " (tentative)" : ""}\nLocation: ${event.location || "none"}\nVisibility: ${event.visibility}`;
+      if (event.attendees?.length) {
+        out += `\n\nAttendees:\n${event.attendees.map((attendee: any) => `  - ${attendee.kind}: ${attendee.name}${attendee.org ? ` (${attendee.org}${attendee.role ? ` · ${attendee.role}` : ""})` : attendee.role ? ` (${attendee.role})` : ""}`).join("\n")}`;
+      }
+      if (topLevel.length) {
+        const lines: string[] = [];
+        for (const task of topLevel) {
+          lines.push(`  #${task.task_number} [${task.status}] ${task.priority} — ${task.title}`);
+          for (const subtask of subtasksByParent[task.id] || []) {
+            lines.push(`    - #${subtask.task_number} [${subtask.status}] ${subtask.title}`);
+          }
+        }
+        out += `\n\nTasks:\n${lines.join("\n")}`;
+      }
+      return [{ type: "text", text: out }];
+    }
+
+    case "update_event": {
+      const sb = adminClient();
+      const event = await resolveEventRef(sb, args.slug);
+      if (!event) return [{ type: "text", text: "Error: Event not found." }];
+      if (event.created_by !== user.email) return [{ type: "text", text: "Error: Only the creator can update this event." }];
+
+      const patch: any = { updated_at: new Date().toISOString() };
+      const stateBefore: Record<string, any> = {};
+      const stateAfter: Record<string, any> = {};
+      for (const field of ["title", "goal", "type", "status", "date", "date_tentative", "location", "attendees", "visibility"]) {
+        if ((args as any)[field] !== undefined) {
+          patch[field] = (args as any)[field];
+          stateBefore[field] = event[field];
+          stateAfter[field] = (args as any)[field];
+        }
+      }
+      if (!Object.keys(stateAfter).length) return [{ type: "text", text: "Error: No fields to update." }];
+      const { error } = await sb.from("events").update(patch).eq("id", event.id);
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      await sb.from("audit_events").insert({
+        actor_email: user.email,
+        actor_type: actorType,
+        actor_agent_id: actorAgentId,
+        entity_type: "event",
+        entity_id: event.slug,
+        action: "updated",
+        channel: "mcp",
+        state_before: stateBefore,
+        state_after: stateAfter,
+        context: { event_uuid: event.id },
+      });
+      return [{ type: "text", text: `✓ Event ${event.slug} updated.` }];
+    }
+
     // ── Milestones ──────────────────────────────────────────────────
     case "create_milestone": {
       const sb = adminClient();
@@ -1509,8 +1775,18 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const sb = adminClient();
       let parentId = null;
       if (args.parent_task_number) {
-        const { data: p } = await sb.from("tasks").select("id").eq("task_number", args.parent_task_number).single();
+        const { data: p } = await sb.from("tasks").select("*").eq("task_number", args.parent_task_number).single();
+        if (p && !canAccessTask(p, user)) return [{ type: "text", text: `Error: Parent task #${args.parent_task_number} not found.` }];
         if (p) parentId = p.id;
+      }
+      let eventId = null;
+      let eventSlug = "";
+      if (args.event) {
+        const event = await resolveEventRef(sb, args.event);
+        if (!event) return [{ type: "text", text: `Error: Event '${args.event}' not found.` }];
+        if (event.visibility === "private" && event.created_by !== user.email) return [{ type: "text", text: "Denied: you cannot link a private event you do not own." }];
+        eventId = event.id;
+        eventSlug = event.slug;
       }
       const { data, error } = await sb.from("tasks").insert({
         title: args.title,
@@ -1523,6 +1799,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
         parent_task_id: parentId,
         estimated_hours: args.estimated_hours ?? null,
         recurring: args.recurring ? { interval: args.recurring } : null,
+        event_id: eventId,
         visibility: args.visibility || "private",
       }).select("task_number, id").single();
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
@@ -1531,20 +1808,30 @@ async function handleTool(name: string, args: any, user: { email: string; userId
           await sb.from("task_links").insert({ task_id: data.id, link_type: link.type, link_ref: link.ref });
         }
       }
-      await sb.from("audit_events").insert({ actor_email: user.email, actor_type: actorType, actor_agent_id: actorAgentId, entity_type: "task", entity_id: String(data.task_number), action: "created", channel: "mcp", state_after: { title: args.title }, context: { task_uuid: data.id } });
-      const parts = [args.assigned_to ? ` → ${args.assigned_to}` : "", parentId ? ` (subtask of #${args.parent_task_number})` : ""];
+      await sb.from("audit_events").insert({ actor_email: user.email, actor_type: actorType, actor_agent_id: actorAgentId, entity_type: "task", entity_id: String(data.task_number), action: "created", channel: "mcp", state_after: { title: args.title, event: eventSlug || null }, context: { task_uuid: data.id } });
+      const parts = [args.assigned_to ? ` → ${args.assigned_to}` : "", parentId ? ` (subtask of #${args.parent_task_number})` : "", eventSlug ? ` @${eventSlug}` : ""];
       return [{ type: "text", text: `✓ Task #${data.task_number} created: "${args.title}"${parts.join("")}` }];
     }
 
     case "update_task": {
       const sb = adminClient();
-      const { data: task, error: fetchErr } = await sb.from("tasks").select("id, task_number, status, title, description, priority, assigned_to, due_date, tags, estimated_hours").eq("task_number", args.task_number).single();
+      const { data: task, error: fetchErr } = await sb.from("tasks").select("id, task_number, status, title, description, priority, created_by, assigned_to, due_date, tags, estimated_hours, visibility, parent_task_id, event_id").eq("task_number", args.task_number).single();
       if (fetchErr || !task) return [{ type: "text", text: "Error: Task not found." }];
+      if (!canAccessTask(task, user)) return [{ type: "text", text: "Error: Task not found." }];
+      if (!canModifyTask(task, user)) return [{ type: "text", text: "Denied: only the creator or assignee can modify this task." }];
       const patch: any = { updated_at: new Date().toISOString() };
       const changes: any = {};
       const stateBefore: Record<string, any> = {};
       for (const f of ["status", "priority", "assigned_to", "due_date", "description", "visibility"]) {
         if ((args as any)[f] !== undefined) { patch[f] = (args as any)[f]; changes[f] = (args as any)[f]; stateBefore[f] = (task as any)[f]; }
+      }
+      if (args.event !== undefined) {
+        const event = await resolveEventRef(sb, args.event);
+        if (!event) return [{ type: "text", text: `Error: Event '${args.event}' not found.` }];
+        if (event.visibility === "private" && event.created_by !== user.email) return [{ type: "text", text: "Denied: you cannot link a private event you do not own." }];
+        patch.event_id = event.id;
+        changes.event_id = event.id;
+        stateBefore.event_id = task.event_id;
       }
       if (args.parent_task_number !== undefined) {
         if (args.parent_task_number === 0) {
@@ -1552,8 +1839,9 @@ async function handleTool(name: string, args: any, user: { email: string; userId
           changes.parent_task_id = null;
           stateBefore.parent_task_id = (task as any).parent_task_id;
         } else {
-          const { data: parent } = await sb.from("tasks").select("id").eq("task_number", args.parent_task_number).single();
+          const { data: parent } = await sb.from("tasks").select("*").eq("task_number", args.parent_task_number).single();
           if (!parent) return [{ type: "text", text: `Error: Parent task #${args.parent_task_number} not found.` }];
+          if (!canAccessTask(parent, user)) return [{ type: "text", text: `Error: Parent task #${args.parent_task_number} not found.` }];
           patch.parent_task_id = parent.id;
           changes.parent_task_id = parent.id;
           stateBefore.parent_task_id = (task as any).parent_task_id;
@@ -1568,8 +1856,10 @@ async function handleTool(name: string, args: any, user: { email: string; userId
 
     case "complete_task": {
       const sb = adminClient();
-      const { data: task, error: fetchErr } = await sb.from("tasks").select("id, title, status").eq("task_number", args.task_number).single();
+      const { data: task, error: fetchErr } = await sb.from("tasks").select("id, title, status, visibility, created_by, assigned_to").eq("task_number", args.task_number).single();
       if (fetchErr || !task) return [{ type: "text", text: "Error: Task not found." }];
+      if (!canAccessTask(task, user)) return [{ type: "text", text: "Error: Task not found." }];
+      if (!canModifyTask(task, user)) return [{ type: "text", text: "Denied: only the creator or assignee can complete this task." }];
       if (task.status === "completed") return [{ type: "text", text: `Task #${args.task_number} is already completed.` }];
       const { error } = await sb.from("tasks").update({ status: "completed", completed_by: user.email, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", task.id);
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
@@ -1579,19 +1869,36 @@ async function handleTool(name: string, args: any, user: { email: string; userId
 
     case "list_tasks": {
       const sb = adminClient();
-      let query = sb.from("tasks").select("task_number, title, status, priority, assigned_to, due_date, created_at").is("archived_at", null).not("status", "eq", "cancelled").order("created_at", { ascending: false }).limit(args.limit || 20);
+      if (args.include_all) {
+        return [{ type: "text", text: "Denied: include_all is disabled until JWT-backed admin claims are enforced server-side." }];
+      }
+      const resultLimit = Math.min(args.limit || 20, 100);
+      const fetchLimit = Math.min(Math.max(resultLimit * 10, 100), 500);
+      let query = sb.from("tasks").select("task_number, title, status, priority, assigned_to, due_date, created_at, created_by, visibility, description, event_id").is("archived_at", null).not("status", "eq", "cancelled").order("created_at", { ascending: false }).limit(fetchLimit);
       if (args.assigned_to && args.assigned_to !== "all") query = query.eq("assigned_to", args.assigned_to);
       else if (!args.assigned_to) query = query.eq("assigned_to", user.email);
       if (args.status) query = query.eq("status", args.status);
       if (args.priority) query = query.eq("priority", args.priority);
       if (args.search) query = query.or(`title.ilike.%${args.search}%,description.ilike.%${args.search}%`);
-      if (!args.include_all) {
-        query = query.or(`visibility.eq.public,visibility.eq.team,created_by.eq.${user.email},assigned_to.eq.${user.email}`);
+      if (args.event) {
+        const event = await resolveEventRef(sb, args.event);
+        if (!event) return [{ type: "text", text: `Error: Event '${args.event}' not found.` }];
+        query = query.eq("event_id", event.id);
       }
       const { data, error } = await query;
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
-      if (!data?.length) return [{ type: "text", text: "No tasks found." }];
-      const out = data.map((t: any) => `#${t.task_number} [${t.status}] ${t.priority} — ${t.title} (${t.assigned_to?.split("@")[0] || "unassigned"}${t.due_date ? `, due ${t.due_date}` : ""})`).join("\n");
+      const visibleTasks = (data || []).filter((task: any) => canAccessTask(task, user)).slice(0, resultLimit);
+      if (!visibleTasks.length) return [{ type: "text", text: "No tasks found." }];
+      const eventIds = [...new Set(visibleTasks.map((task: any) => task.event_id).filter(Boolean))];
+      const eventMap = new Map<string, string>();
+      if (eventIds.length) {
+        const { data: events } = await sb.from("events").select("id, slug").in("id", eventIds);
+        for (const event of events || []) eventMap.set(event.id, event.slug);
+      }
+      const out = visibleTasks.map((t: any) => {
+        const eventLabel = t.event_id ? ` @${eventMap.get(t.event_id) || "event"}` : "";
+        return `#${t.task_number} [${t.status}] ${t.priority} — ${t.title}${eventLabel} (${t.assigned_to?.split("@")[0] || "unassigned"}${t.due_date ? `, due ${t.due_date}` : ""})`;
+      }).join("\n");
       return [{ type: "text", text: out }];
     }
 
@@ -1599,15 +1906,19 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const sb = adminClient();
       const { data: task, error: fetchErr } = await sb.from("tasks").select("*").eq("task_number", args.task_number).single();
       if (fetchErr || !task) return [{ type: "text", text: "Error: Task not found." }];
+      if (!canAccessTask(task, user)) return [{ type: "text", text: "Error: Task not found." }];
       const { data: activity } = await sb.from("audit_events").select("*").eq("entity_type", "task").eq("entity_id", String(task.task_number)).order("timestamp", { ascending: false }).limit(10);
-      const { data: subtasks } = await sb.from("tasks").select("task_number, title, status").eq("parent_task_id", task.id).order("task_number");
+      const { data: subtasks } = await sb.from("tasks").select("task_number, title, status, visibility, created_by, assigned_to").eq("parent_task_id", task.id).order("task_number");
       const { data: links } = await sb.from("task_links").select("*").eq("task_id", task.id);
-      const actLog = (activity || []).map((a: any) => `  ${a.created_at.slice(0, 16)} ${a.actor.split("@")[0]} ${a.action}`).join("\n");
-      const subLog = (subtasks || []).map((s: any) => `  ${s.status === "completed" ? "✓" : " "} #${s.task_number} ${s.title}`).join("\n");
+      const event = task.event_id ? await resolveEventRef(sb, task.event_id) : null;
+      const visibleSubtasks = (subtasks || []).filter((subtask: any) => canAccessTask(subtask, user));
+      const actLog = (activity || []).map((a: any) => `  ${a.timestamp.slice(0, 16)} ${(a.actor_email || a.actor_type || "system").split("@")[0]} ${a.action}`).join("\n");
+      const subLog = visibleSubtasks.map((s: any) => `  ${s.status === "completed" ? "✓" : " "} #${s.task_number} ${s.title}`).join("\n");
       const linkLog = (links || []).map((l: any) => `  ${l.link_type}: ${l.link_ref}`).join("\n");
       let out = `#${task.task_number} — ${task.title}\nStatus: ${task.status} | Priority: ${task.priority}\nAssigned: ${task.assigned_to || "unassigned"} | Created by: ${task.created_by}\nDue: ${task.due_date || "none"} | Tags: ${task.tags?.join(", ") || "none"}`;
       if (task.estimated_hours) out += ` | Est: ${task.estimated_hours}h`;
       if (task.recurring) out += ` | Recurring: ${task.recurring.interval}`;
+      if (event) out += `\nEvent: ${event.slug} — ${event.title}`;
       if (task.description) out += `\n\n${task.description}`;
       if (subLog) out += `\n\nSubtasks:\n${subLog}`;
       if (linkLog) out += `\n\nLinks:\n${linkLog}`;
@@ -1617,16 +1928,20 @@ async function handleTool(name: string, args: any, user: { email: string; userId
 
     case "comment_task": {
       const sb = adminClient();
-      const { data: task, error: fetchErr } = await sb.from("tasks").select("id").eq("task_number", args.task_number).single();
+      const { data: task, error: fetchErr } = await sb.from("tasks").select("*").eq("task_number", args.task_number).single();
       if (fetchErr || !task) return [{ type: "text", text: "Error: Task not found." }];
+      if (!canAccessTask(task, user)) return [{ type: "text", text: "Error: Task not found." }];
+      if (!canModifyTask(task, user)) return [{ type: "text", text: "Denied: only the creator or assignee can comment on this task." }];
       await sb.from("audit_events").insert({ actor_email: user.email, actor_type: actorType, actor_agent_id: actorAgentId, entity_type: "task", entity_id: String(args.task_number), action: "commented", channel: "mcp", state_after: { comment: args.comment }, context: { task_uuid: task.id, reason: args.reason || null } });
       return [{ type: "text", text: `✓ Comment added to task #${args.task_number}.` }];
     }
 
     case "link_task": {
       const sb = adminClient();
-      const { data: task } = await sb.from("tasks").select("id").eq("task_number", args.task_number).single();
+      const { data: task } = await sb.from("tasks").select("*").eq("task_number", args.task_number).single();
       if (!task) return [{ type: "text", text: "Error: Task not found." }];
+      if (!canAccessTask(task, user)) return [{ type: "text", text: "Error: Task not found." }];
+      if (!canModifyTask(task, user)) return [{ type: "text", text: "Denied: only the creator or assignee can link this task." }];
       await sb.from("task_links").insert({ task_id: task.id, link_type: args.link_type, link_ref: args.link_ref });
       await sb.from("audit_events").insert({ actor_email: user.email, actor_type: actorType, actor_agent_id: actorAgentId, entity_type: "task", entity_id: String(args.task_number), action: "linked", channel: "mcp", state_after: { link_type: args.link_type, link_ref: args.link_ref }, context: { task_uuid: task.id } });
       return [{ type: "text", text: `✓ Linked ${args.link_type} "${args.link_ref}" to task #${args.task_number}.` }];
@@ -1634,17 +1949,22 @@ async function handleTool(name: string, args: any, user: { email: string; userId
 
     case "triage_tasks": {
       const sb = adminClient();
-      const { data, error } = await sb.from("tasks").select("task_number, title, source, confidence, created_at").eq("requires_triage", true).is("archived_at", null).order("created_at", { ascending: false }).limit(args.limit || 20);
+      const resultLimit = Math.min(args.limit || 20, 100);
+      const fetchLimit = Math.min(Math.max(resultLimit * 10, 100), 500);
+      const { data, error } = await sb.from("tasks").select("task_number, title, source, confidence, created_at, visibility, created_by, assigned_to").eq("requires_triage", true).is("archived_at", null).order("created_at", { ascending: false }).limit(fetchLimit);
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
-      if (!data?.length) return [{ type: "text", text: "No tasks need triage." }];
-      const out = data.map((t: any) => `#${t.task_number} [${t.source}${t.confidence ? ` ${(t.confidence * 100).toFixed(0)}%` : ""}] ${t.title}`).join("\n");
-      return [{ type: "text", text: `${data.length} task(s) need triage:\n${out}` }];
+      const visibleTasks = (data || []).filter((task: any) => canAccessTask(task, user)).slice(0, resultLimit);
+      if (!visibleTasks.length) return [{ type: "text", text: "No tasks need triage." }];
+      const out = visibleTasks.map((t: any) => `#${t.task_number} [${t.source}${t.confidence ? ` ${(t.confidence * 100).toFixed(0)}%` : ""}] ${t.title}`).join("\n");
+      return [{ type: "text", text: `${visibleTasks.length} task(s) need triage:\n${out}` }];
     }
 
     case "accept_task": {
       const sb = adminClient();
-      const { data: task } = await sb.from("tasks").select("id").eq("task_number", args.task_number).single();
+      const { data: task } = await sb.from("tasks").select("*").eq("task_number", args.task_number).single();
       if (!task) return [{ type: "text", text: "Error: Task not found." }];
+      if (!canAccessTask(task, user)) return [{ type: "text", text: "Error: Task not found." }];
+      if (!canModifyTask(task, user)) return [{ type: "text", text: "Denied: only the creator or assignee can accept this task." }];
       await sb.from("tasks").update({ requires_triage: false, updated_at: new Date().toISOString() }).eq("id", task.id);
       await sb.from("audit_events").insert({ actor_email: user.email, actor_type: actorType, actor_agent_id: actorAgentId, entity_type: "task", entity_id: String(args.task_number), action: "triage_accepted", channel: "mcp", context: { task_uuid: task.id, reason: args.reason || null } });
       return [{ type: "text", text: `✓ Task #${args.task_number} accepted into main list.` }];
@@ -1652,8 +1972,10 @@ async function handleTool(name: string, args: any, user: { email: string; userId
 
     case "dismiss_task": {
       const sb = adminClient();
-      const { data: task } = await sb.from("tasks").select("id").eq("task_number", args.task_number).single();
+      const { data: task } = await sb.from("tasks").select("*").eq("task_number", args.task_number).single();
       if (!task) return [{ type: "text", text: "Error: Task not found." }];
+      if (!canAccessTask(task, user)) return [{ type: "text", text: "Error: Task not found." }];
+      if (!canModifyTask(task, user)) return [{ type: "text", text: "Denied: only the creator or assignee can dismiss this task." }];
       await sb.from("tasks").update({ status: "cancelled", archived_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", task.id);
       await sb.from("audit_events").insert({ actor_email: user.email, actor_type: actorType, actor_agent_id: actorAgentId, entity_type: "task", entity_id: String(args.task_number), action: "triage_dismissed", channel: "mcp", context: { task_uuid: task.id, reason: args.reason || null } });
       return [{ type: "text", text: `✓ Task #${args.task_number} dismissed.` }];
@@ -1699,7 +2021,16 @@ async function handleTool(name: string, args: any, user: { email: string; userId
 
     case "query_audit": {
       const sb = adminClient();
-      let query = sb.from("audit_events").select("*").order("timestamp", { ascending: false }).limit(args.limit || 20);
+      const resultLimit = Math.min(args.limit || 20, 100);
+      const fetchLimit = Math.min(Math.max(resultLimit * 10, 100), 500);
+      const ownedAgentSlugs = await listOwnedAgentSlugs(sb, user.email);
+      if (args.actor_email && args.actor_email !== user.email) {
+        return [{ type: "text", text: "Denied: you can only query your own audit trail." }];
+      }
+      if (args.actor_agent_id && !ownedAgentSlugs.has(args.actor_agent_id)) {
+        return [{ type: "text", text: `Denied: agent '${args.actor_agent_id}' is not owned by you.` }];
+      }
+      let query = sb.from("audit_events").select("*").order("timestamp", { ascending: false }).limit(fetchLimit);
       if (args.entity_type) query = query.eq("entity_type", args.entity_type);
       if (args.entity_id) query = query.eq("entity_id", args.entity_id);
       if (args.actor_email) query = query.eq("actor_email", args.actor_email);
@@ -1708,8 +2039,9 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       if (args.action) query = query.eq("action", args.action);
       const { data, error } = await query;
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
-      if (!data?.length) return [{ type: "text", text: "No audit events found." }];
-      const out = data.map((e: any) => `${e.timestamp.slice(0, 16)} [${e.channel || "?"}] ${e.actor_email?.split("@")[0] || e.actor_type} → ${e.entity_type}${e.entity_id ? " #" + e.entity_id : ""} ${e.action}`).join("\n");
+      const visibleEvents = (data || []).filter((event: any) => canReadAuditEvent(event, user, ownedAgentSlugs)).slice(0, resultLimit);
+      if (!visibleEvents.length) return [{ type: "text", text: "No audit events found." }];
+      const out = visibleEvents.map((e: any) => `${e.timestamp.slice(0, 16)} [${e.channel || "?"}] ${e.actor_email?.split("@")[0] || e.actor_type} → ${e.entity_type}${e.entity_id ? " #" + e.entity_id : ""} ${e.action}`).join("\n");
       return [{ type: "text", text: out }];
     }
 
@@ -1731,7 +2063,11 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const sb = adminClient();
       const { data: agent } = await sb.from("agents").select("*").eq("slug", args.slug).single();
       if (!agent) return [{ type: "text", text: "Agent not found." }];
-      const { data: activity } = await sb.from("audit_events").select("*").eq("actor_agent_id", args.slug).order("timestamp", { ascending: false }).limit(10);
+      let activity: any[] = [];
+      if (agent.owner === user.email || agent.email === user.email) {
+        const { data } = await sb.from("audit_events").select("*").eq("actor_agent_id", args.slug).order("timestamp", { ascending: false }).limit(10);
+        activity = data || [];
+      }
       const actLog = (activity || []).map((e: any) => `  ${e.timestamp.slice(0, 16)} ${e.action} ${e.entity_type}${e.entity_id ? " #" + e.entity_id : ""}`).join("\n");
       return [{ type: "text", text: `${agent.name} (${agent.slug})\nStatus: ${agent.status} | Owner: ${agent.owner}\nEmail: ${agent.email || "none"} | Skill: ${agent.skill_slug || "none"}\nScopes: ${agent.scopes?.join(", ") || "none"}\nMachine: ${agent.machine || "unknown"}\nLast seen: ${agent.last_seen || "never"}\n\nRecent activity:\n${actLog || "  (none)"}` }];
     }

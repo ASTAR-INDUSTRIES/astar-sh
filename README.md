@@ -14,18 +14,28 @@ astar login   # requires @astarconsulting.no Microsoft account
 ### Tasks
 
 ```
-astar todo "title" [-p high] [-d 2026-04-06] [-a email] [--parent 21]
+astar todo "title" [-p high] [-d 2026-04-06] [-a email] [--parent 21] [--event nmai-2026]
 astar todo done <number>
 astar todo info <number>
 astar todo mine                   Your open tasks
 astar todo team                   All tasks grouped by assignee
 astar todo list [--status open]   Filter tasks
+astar todo --event nmai-2026      Show your tasks for one event
 astar todo --monitor              Live task dashboard (10s refresh)
 astar todo velocity               Completion stats
 astar todo next                   AI-suggested next task
 astar todo triage                 Review agent-created tasks
 astar todo accept/dismiss <n>     Accept or dismiss agent tasks
 astar todo link <n> --url <url>   Link tasks to skills, URLs, feedback
+```
+
+### Events
+
+```
+astar events                      List events
+astar events "NM i AI 2026" --goal "..." --type arranged
+astar events info nmai-2026       Show event details + linked tasks
+astar events update nmai-2026 --status confirmed --date 2026-06-12
 ```
 
 ### Agents
@@ -81,7 +91,7 @@ astar update                      Self-update
 
 ## MCP Integration
 
-38 MCP tools are available through the `astar-platform` skill, giving Claude Code direct access to tasks, agents, news, feedback, skills, audit, and more.
+57 MCP tools are available through the `astar-platform` skill, giving Claude Code direct access to tasks, events, agents, news, feedback, skills, audit, and more.
 
 ```bash
 astar skill install astar-platform   # auto-installed on first login

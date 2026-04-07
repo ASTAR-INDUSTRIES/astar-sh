@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import { AstarAPI } from "../lib/api";
+import { getToken } from "../lib/auth";
 import { c, table } from "../lib/ui";
 
 function fmtTime(iso: string): string {
@@ -29,6 +30,15 @@ const actorTypeIcons: Record<string, string> = {
   system: " [sys]",
 };
 
+async function requireAuth(): Promise<string> {
+  try {
+    return await getToken();
+  } catch {
+    console.error(`${c.red}✗${c.reset} Not authenticated. Run ${c.cyan}astar login${c.reset} first.`);
+    process.exit(1);
+  }
+}
+
 export function registerAuditCommands(program: Command) {
   program
     .command("audit")
@@ -42,7 +52,8 @@ export function registerAuditCommands(program: Command) {
     .option("--today", "Only today's events")
     .option("-n, --limit <n>", "Max results", "30")
     .action(async (opts) => {
-      const api = new AstarAPI();
+      const token = await requireAuth();
+      const api = new AstarAPI(token);
       try {
         const since = opts.today ? new Date(new Date().setHours(0, 0, 0, 0)).toISOString() : undefined;
         const events = await api.queryAudit({

@@ -57,6 +57,34 @@ export interface NewsFull extends NewsSummary {
   continuesTitle?: string;
 }
 
+export interface EventAttendee {
+  kind: "internal" | "external";
+  name: string;
+  org?: string;
+  role?: string;
+  email?: string;
+}
+
+export interface EventSummary {
+  id: string;
+  slug: string;
+  title: string;
+  type: string;
+  status: string;
+  date?: string | null;
+  date_tentative?: boolean;
+  location?: string | null;
+}
+
+export interface Event extends EventSummary {
+  goal: string;
+  attendees: EventAttendee[];
+  visibility: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface TaskLink {
   id: string;
   link_type: string;
@@ -78,6 +106,8 @@ export interface Task {
   completed_at?: string;
   source: string;
   tags: string[];
+  event_id?: string;
+  event?: EventSummary | null;
   parent_task_id?: string;
   confidence?: number;
   requires_triage?: boolean;
@@ -342,6 +372,58 @@ export class AstarAPI {
     return data.milestones;
   }
 
+  async listEvents(filters?: { status?: string; type?: string; month?: string; search?: string; limit?: number }): Promise<Event[]> {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.type) params.set("type", filters.type);
+    if (filters?.month) params.set("month", filters.month);
+    if (filters?.search) params.set("search", filters.search);
+    if (filters?.limit) params.set("limit", String(filters.limit));
+    const qs = params.toString();
+    const data = await this.fetch<{ events: Event[] }>(`/events${qs ? `?${qs}` : ""}`);
+    return data.events;
+  }
+
+  async getEvent(slug: string): Promise<{ event: Event; tasks: Task[] }> {
+    return this.fetch(`/events/${slug}`);
+  }
+
+  async createEvent(event: {
+    title: string;
+    goal: string;
+    slug?: string;
+    type?: string;
+    status?: string;
+    date?: string;
+    date_tentative?: boolean;
+    location?: string;
+    attendees?: EventAttendee[];
+    visibility?: string;
+  }): Promise<{ ok: boolean; slug: string }> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/events`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(event),
+    });
+    if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+    return res.json();
+  }
+
+  async updateEvent(slug: string, updates: Record<string, any>): Promise<{ ok: boolean; slug: string }> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/events/${slug}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+    return res.json();
+  }
+
   async createMilestone(m: { title: string; category?: string; date?: string }): Promise<void> {
     const config = await getConfig();
     const res = await fetch(`${config.apiUrl}/milestones`, {
@@ -413,20 +495,33 @@ export class AstarAPI {
     return res.json();
   }
 
-  async listTasks(filters?: { status?: string; priority?: string; assigned_to?: string; due?: string; search?: string; include_subtasks?: boolean }): Promise<Task[]> {
+  async listTasks(filters?: { status?: string; priority?: string; assigned_to?: string; due?: string; search?: string; event?: string; include_subtasks?: boolean }): Promise<Task[]> {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
     if (filters?.priority) params.set("priority", filters.priority);
     if (filters?.assigned_to) params.set("assigned_to", filters.assigned_to);
     if (filters?.due) params.set("due", filters.due);
     if (filters?.search) params.set("search", filters.search);
+    if (filters?.event) params.set("event", filters.event);
     if (filters?.include_subtasks) params.set("include_subtasks", "true");
     const qs = params.toString();
     const data = await this.fetch<{ tasks: Task[] }>(`/tasks${qs ? `?${qs}` : ""}`);
     return data.tasks;
   }
 
-  async createTask(task: { title: string; description?: string; priority?: string; assigned_to?: string; due_date?: string; tags?: string[] }): Promise<{ ok: boolean; task_number: number }> {
+  async createTask(task: {
+    title: string;
+    description?: string;
+    priority?: string;
+    assigned_to?: string;
+    due_date?: string;
+    tags?: string[];
+    parent_task_number?: number;
+    estimated_hours?: number;
+    recurring?: { interval: string };
+    links?: { type: string; ref: string }[];
+    event?: string;
+  }): Promise<{ ok: boolean; task_number: number }> {
     const config = await getConfig();
     const res = await fetch(`${config.apiUrl}/tasks`, {
       method: "POST",

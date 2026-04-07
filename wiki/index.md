@@ -2,7 +2,7 @@
 
 System documentation for the astar.sh platform. Each section covers one subsystem — architecture, data model, and how the pieces connect.
 
-**Last updated:** 2026-04-06
+**Last updated:** 2026-04-07
 
 ## Sections
 
@@ -11,6 +11,7 @@ System documentation for the astar.sh platform. Each section covers one subsyste
 | [Auth](auth/) | Microsoft SSO, per-agent auth, MSAL token persistence | `cli/src/lib/auth.ts` |
 | [Agents](agents/) | Agent lifecycle, workstations, heartbeat, hire/retire | `cli/src/commands/agent.ts`, `supabase/functions/skills-api/index.ts` |
 | [Tasks](tasks/) | Task model, subtasks, links, triage, recurring | `cli/src/commands/todo.ts`, `supabase/functions/skills-api/index.ts` |
+| [Events](events/) | First-class events with goals, attendees, and linked tasks | `cli/src/commands/events.ts`, `supabase/functions/skills-api/index.ts` |
 | [Audit](audit/) | Event sourcing, entity types, actions, channels | `supabase/functions/skills-api/index.ts` |
 | [News](news/) | Intelligence pipeline, quality validation, sources | `supabase/functions/mcp-server/index.ts` |
 | [Skills](skills/) | Skill packaging, install/push, versioning, diff | `cli/src/commands/skill.ts` |

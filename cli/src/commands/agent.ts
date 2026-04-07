@@ -256,7 +256,7 @@ export function registerAgentCommands(program: Command) {
     .command("info <slug>")
     .description("Show agent details and recent activity")
     .action(async (slug: string) => {
-      const token = await optionalAuth();
+      const token = await requireAuth();
       const api = new AstarAPI(token);
       try {
         const { agent: a, activity } = await api.getAgent(slug);
@@ -366,7 +366,7 @@ export function registerAgentCommands(program: Command) {
     .command("logs <slug>")
     .description("Show agent audit trail")
     .action(async (slug: string) => {
-      const token = await optionalAuth();
+      const token = await requireAuth();
       const api = new AstarAPI(token);
       try {
         const events = await api.queryAudit({ actor_agent_id: slug, limit: 20 });

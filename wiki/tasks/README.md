@@ -21,6 +21,7 @@ Core task management with subtasks, polymorphic links, agent triage, and recurri
 | completed_at | timestamptz | Set on completion |
 | source | text | human, agent, feedback, system |
 | tags | text[] | Array |
+| event_id | uuid | FK → events (optional) |
 | parent_task_id | uuid | FK → tasks (subtask hierarchy) |
 | confidence | numeric | AI-generated confidence 0-1 |
 | requires_triage | boolean | Agent-created tasks default true |
@@ -48,6 +49,13 @@ When a task with links is completed:
 - Parent shows `[done/total]` progress indicator
 - Completing parent with open subtasks is blocked (unless `force=true`)
 - `include_subtasks` API parameter fetches full hierarchy in one query
+
+## Event linkage
+
+- Tasks can belong to one event via `event_id`
+- CLI: `astar todo --event <slug>` filters your tasks to a single event
+- CLI: `astar todo "Prep slides" --event fintech-bergen` creates work directly inside event context
+- Event detail views show all linked tasks and subtasks together
 
 ## Triage workflow
 
