@@ -356,57 +356,6 @@ export type Database = {
         }
         Relationships: []
       }
-      events: {
-        Row: {
-          attendees: Json
-          created_at: string
-          created_by: string
-          date: string | null
-          date_tentative: boolean
-          goal: string
-          id: string
-          location: string | null
-          slug: string
-          status: string
-          title: string
-          type: string
-          updated_at: string
-          visibility: string
-        }
-        Insert: {
-          attendees?: Json
-          created_at?: string
-          created_by: string
-          date?: string | null
-          date_tentative?: boolean
-          goal: string
-          id?: string
-          location?: string | null
-          slug: string
-          status?: string
-          title: string
-          type?: string
-          updated_at?: string
-          visibility?: string
-        }
-        Update: {
-          attendees?: Json
-          created_at?: string
-          created_by?: string
-          date?: string | null
-          date_tentative?: boolean
-          goal?: string
-          id?: string
-          location?: string | null
-          slug?: string
-          status?: string
-          title?: string
-          type?: string
-          updated_at?: string
-          visibility?: string
-        }
-        Relationships: []
-      }
       feedback: {
         Row: {
           author_email: string
@@ -731,7 +680,6 @@ export type Database = {
           created_by: string
           description: string | null
           due_date: string | null
-          event_id: string | null
           estimated_hours: number | null
           id: string
           parent_task_id: string | null
@@ -757,7 +705,6 @@ export type Database = {
           created_by: string
           description?: string | null
           due_date?: string | null
-          event_id?: string | null
           estimated_hours?: number | null
           id?: string
           parent_task_id?: string | null
@@ -783,7 +730,6 @@ export type Database = {
           created_by?: string
           description?: string | null
           due_date?: string | null
-          event_id?: string | null
           estimated_hours?: number | null
           id?: string
           parent_task_id?: string | null
@@ -800,13 +746,6 @@ export type Database = {
           visibility?: string | null
         }
         Relationships: [
-          {
-            foreignKeyName: "tasks_event_id_fkey"
-            columns: ["event_id"]
-            isOneToOne: false
-            referencedRelation: "events"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "tasks_parent_task_id_fkey"
             columns: ["parent_task_id"]
