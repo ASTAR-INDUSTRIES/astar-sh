@@ -83,6 +83,7 @@ export type Database = {
           machine: string | null
           name: string
           owner: string
+          project_id: string | null
           role: string | null
           scopes: string[] | null
           skill_slug: string | null
@@ -98,6 +99,7 @@ export type Database = {
           machine?: string | null
           name: string
           owner: string
+          project_id?: string | null
           role?: string | null
           scopes?: string[] | null
           skill_slug?: string | null
@@ -113,13 +115,22 @@ export type Database = {
           machine?: string | null
           name?: string
           owner?: string
+          project_id?: string | null
           role?: string | null
           scopes?: string[] | null
           skill_slug?: string | null
           slug?: string
           status?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "agents_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       audit_events: {
         Row: {
@@ -133,6 +144,7 @@ export type Database = {
           entity_id: string | null
           entity_type: string
           id: string
+          project_id: string | null
           state_after: Json | null
           state_before: Json | null
           timestamp: string
@@ -148,6 +160,7 @@ export type Database = {
           entity_id?: string | null
           entity_type: string
           id?: string
+          project_id?: string | null
           state_after?: Json | null
           state_before?: Json | null
           timestamp?: string
@@ -163,11 +176,20 @@ export type Database = {
           entity_id?: string | null
           entity_type?: string
           id?: string
+          project_id?: string | null
           state_after?: Json | null
           state_before?: Json | null
           timestamp?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "audit_events_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       cli_events: {
         Row: {
@@ -356,6 +378,68 @@ export type Database = {
         }
         Relationships: []
       }
+      events: {
+        Row: {
+          attendees: Json
+          created_at: string
+          created_by: string
+          date: string | null
+          date_tentative: boolean
+          goal: string
+          id: string
+          location: string | null
+          project_id: string | null
+          slug: string
+          status: string
+          title: string
+          type: string
+          updated_at: string
+          visibility: string
+        }
+        Insert: {
+          attendees?: Json
+          created_at?: string
+          created_by: string
+          date?: string | null
+          date_tentative?: boolean
+          goal: string
+          id?: string
+          location?: string | null
+          project_id?: string | null
+          slug: string
+          status?: string
+          title: string
+          type?: string
+          updated_at?: string
+          visibility?: string
+        }
+        Update: {
+          attendees?: Json
+          created_at?: string
+          created_by?: string
+          date?: string | null
+          date_tentative?: boolean
+          goal?: string
+          id?: string
+          location?: string | null
+          project_id?: string | null
+          slug?: string
+          status?: string
+          title?: string
+          type?: string
+          updated_at?: string
+          visibility?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "events_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       feedback: {
         Row: {
           author_email: string
@@ -495,6 +579,7 @@ export type Database = {
           created_by: string | null
           date: string
           id: string
+          project_id: string | null
           title: string
         }
         Insert: {
@@ -503,6 +588,7 @@ export type Database = {
           created_by?: string | null
           date: string
           id?: string
+          project_id?: string | null
           title: string
         }
         Update: {
@@ -511,7 +597,52 @@ export type Database = {
           created_by?: string | null
           date?: string
           id?: string
+          project_id?: string | null
           title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "milestones_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      projects: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          members: string[]
+          name: string
+          owner: string
+          slug: string
+          updated_at: string
+          visibility: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          members?: string[]
+          name: string
+          owner: string
+          slug: string
+          updated_at?: string
+          visibility?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          members?: string[]
+          name?: string
+          owner?: string
+          slug?: string
+          updated_at?: string
+          visibility?: string
         }
         Relationships: []
       }
@@ -680,10 +811,12 @@ export type Database = {
           created_by: string
           description: string | null
           due_date: string | null
+          event_id: string | null
           estimated_hours: number | null
           id: string
           parent_task_id: string | null
           priority: string
+          project_id: string | null
           recurring: Json | null
           requires_triage: boolean
           search_vector: unknown
@@ -705,10 +838,12 @@ export type Database = {
           created_by: string
           description?: string | null
           due_date?: string | null
+          event_id?: string | null
           estimated_hours?: number | null
           id?: string
           parent_task_id?: string | null
           priority?: string
+          project_id?: string | null
           recurring?: Json | null
           requires_triage?: boolean
           search_vector?: unknown
@@ -730,10 +865,12 @@ export type Database = {
           created_by?: string
           description?: string | null
           due_date?: string | null
+          event_id?: string | null
           estimated_hours?: number | null
           id?: string
           parent_task_id?: string | null
           priority?: string
+          project_id?: string | null
           recurring?: Json | null
           requires_triage?: boolean
           search_vector?: unknown
@@ -747,10 +884,24 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "tasks_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "tasks_parent_task_id_fkey"
             columns: ["parent_task_id"]
             isOneToOne: false
             referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
             referencedColumns: ["id"]
           },
         ]

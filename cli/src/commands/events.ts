@@ -98,7 +98,7 @@ function renderLinkedTasks(tasks: Task[]) {
   table(["#", "Task", "Status", "Priority", "Due"], rows);
 }
 
-async function renderEventList(api: AstarAPI, filters: { status?: string; type?: string; month?: string; search?: string }) {
+async function renderEventList(api: AstarAPI, filters: { status?: string; type?: string; month?: string; search?: string; project?: string }) {
   const items = await api.listEvents(filters);
   if (!items.length) {
     console.log(`${c.dim}No events found.${c.reset}`);
@@ -107,13 +107,14 @@ async function renderEventList(api: AstarAPI, filters: { status?: string; type?:
 
   console.log("");
   table(
-    ["Slug", "Event", "Type", "Status", "Date", "Location"],
+    ["Slug", "Event", "Type", "Status", "Date", "Project", "Location"],
     items.map((event) => [
       `${c.cyan}${event.slug}${c.reset}`,
       truncate(event.title, 28),
       `${typeColors[event.type] || c.dim}${event.type}${c.reset}`,
       `${statusColors[event.status] || c.dim}${event.status}${c.reset}`,
       `${c.dim}${fmtDate(event.date, event.date_tentative)}${c.reset}`,
+      truncate(event.project?.slug || "—", 12),
       truncate(event.location || "—", 18),
     ])
   );
@@ -134,6 +135,7 @@ export function registerEventCommands(program: Command) {
     .option("-l, --location <text>", "Location")
     .option("--slug <slug>", "Custom slug")
     .option("--visibility <visibility>", "Visibility: private, team, public", "team")
+    .option("--project <slug>", "Attach to a project")
     .option("--internal <name>", "Internal attendee (repeatable)", collect, [])
     .option("--external <attendee>", "External attendee as name|org|role (repeatable)", collect, [])
     .action(async (title: string | undefined, opts: {
@@ -145,6 +147,7 @@ export function registerEventCommands(program: Command) {
       location?: string;
       slug?: string;
       visibility: string;
+      project?: string;
       internal?: string[];
       external?: string[];
     }) => {
@@ -152,7 +155,7 @@ export function registerEventCommands(program: Command) {
         const token = await requireAuth();
         const api = new AstarAPI(token);
         try {
-          await renderEventList(api, { status: opts.status, type: opts.type });
+          await renderEventList(api, { status: opts.status, type: opts.type, project: opts.project });
         } catch (e: any) {
           console.error(`${c.red}✗${c.reset} ${e.message}`);
           process.exit(1);
@@ -180,11 +183,13 @@ export function registerEventCommands(program: Command) {
           date_tentative: opts.tentative,
           location: opts.location,
           visibility: opts.visibility,
+          project: opts.project,
           attendees,
         });
         const typeColor = typeColors[opts.type || "attending"] || c.dim;
         const dateStr = opts.date ? ` ${c.dim}(${fmtDate(opts.date, opts.tentative)})${c.reset}` : "";
-        console.log(`${c.green}✓${c.reset} Event created ${typeColor}${result.slug}${c.reset}${dateStr}`);
+        const projectStr = opts.project ? ` ${c.dim}#${opts.project}${c.reset}` : "";
+        console.log(`${c.green}✓${c.reset} Event created ${typeColor}${result.slug}${c.reset}${dateStr}${projectStr}`);
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} ${e.message}`);
         process.exit(1);
@@ -198,7 +203,8 @@ export function registerEventCommands(program: Command) {
     .option("-t, --type <type>", "Filter: arranged, speaking, attending, podcast")
     .option("-m, --month <month>", "Filter by month (YYYY-MM)")
     .option("--search <text>", "Search title, goal, or location")
-    .action(async (opts: { status?: string; type?: string; month?: string; search?: string }) => {
+    .option("--project <slug>", "Filter to a single project")
+    .action(async (opts: { status?: string; type?: string; month?: string; search?: string; project?: string }) => {
       const token = await requireAuth();
       const api = new AstarAPI(token);
 
@@ -229,6 +235,7 @@ export function registerEventCommands(program: Command) {
         console.log("");
         console.log(`  ${c.dim}Date${c.reset} ${fmtDate(event.date, event.date_tentative)}`);
         console.log(`  ${c.dim}Location${c.reset} ${event.location || "—"}`);
+        if (event.project?.slug) console.log(`  ${c.dim}Project${c.reset} ${event.project.slug} · ${event.project.name}`);
         console.log(`  ${c.dim}Visibility${c.reset} ${event.visibility}`);
         console.log(`  ${c.dim}Created by${c.reset} ${event.created_by.split("@")[0]}`);
 
@@ -266,6 +273,8 @@ export function registerEventCommands(program: Command) {
     .option("-l, --location <text>", "Location")
     .option("--clear-location", "Remove the location")
     .option("--visibility <visibility>", "Visibility: private, team, public")
+    .option("--project <slug>", "Attach to a project")
+    .option("--clear-project", "Remove the project attachment")
     .option("--internal <name>", "Replace internal attendees (repeatable)", collect, [])
     .option("--external <attendee>", "Replace external attendees as name|org|role (repeatable)", collect, [])
     .option("--clear-attendees", "Remove all attendees")
@@ -281,6 +290,8 @@ export function registerEventCommands(program: Command) {
       location?: string;
       clearLocation?: boolean;
       visibility?: string;
+      project?: string;
+      clearProject?: boolean;
       internal?: string[];
       external?: string[];
       clearAttendees?: boolean;
@@ -297,6 +308,8 @@ export function registerEventCommands(program: Command) {
       if (opts.location) patch.location = opts.location;
       if (opts.clearLocation) patch.location = null;
       if (opts.visibility) patch.visibility = opts.visibility;
+      if (opts.project) patch.project = opts.project;
+      if (opts.clearProject) patch.project = null;
       if (opts.clearAttendees) patch.attendees = [];
       if ((opts.internal?.length || 0) > 0 || (opts.external?.length || 0) > 0) {
         patch.attendees = parseAttendees(opts.internal, opts.external);

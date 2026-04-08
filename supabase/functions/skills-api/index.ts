@@ -35,6 +35,7 @@ async function logAudit(opts: {
   channel?: string;
   raw_input?: any;
   context?: any;
+  project_id?: string | null;
 }) {
   try {
     const sb = getSupabase();
@@ -133,6 +134,17 @@ async function validateMsToken(req: Request): Promise<{ email: string; name: str
 }
 
 type AuthUser = { email: string; name: string };
+type ProjectRecord = {
+  id: string;
+  slug: string;
+  name: string;
+  description?: string | null;
+  visibility: string;
+  owner: string;
+  members?: string[] | null;
+  created_at: string;
+  updated_at: string;
+};
 
 function slugify(value: string): string {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -142,27 +154,44 @@ function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-function canAccessEvent(event: any, user: { email: string }): boolean {
-  return event.visibility === "public" || event.visibility === "team" || event.created_by === user.email;
+function isStaffEmail(email?: string | null): boolean {
+  return !!email?.endsWith("@astarconsulting.no");
 }
 
-function canAccessTask(task: any, user: AuthUser): boolean {
-  if (!task) return false;
-  if (task.visibility === "public" || task.visibility === "team") return true;
-  return task.created_by === user.email || task.assigned_to === user.email;
+function normalizeProjectMembers(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => String(entry || "").trim().toLowerCase())
+    .filter(Boolean);
 }
 
-function canModifyTask(task: any, user: AuthUser): boolean {
-  return !!task && (task.created_by === user.email || task.assigned_to === user.email);
+function parseProjectMembers(value: unknown): string[] {
+  const members = normalizeProjectMembers(Array.isArray(value) ? value : value ? [value] : []);
+  return [...new Set(members.filter((email) => isStaffEmail(email)))];
 }
 
-async function listOwnedAgentSlugs(sb: ReturnType<typeof getSupabase>, ownerEmail: string): Promise<Set<string>> {
-  const { data } = await sb.from("agents").select("slug").eq("owner", ownerEmail);
-  return new Set((data || []).map((agent: any) => agent.slug).filter(Boolean));
+function projectSummary(project: any) {
+  if (!project) return null;
+  return {
+    id: project.id,
+    slug: project.slug,
+    name: project.name,
+    visibility: project.visibility,
+    owner: project.owner,
+  };
 }
 
-function canReadAuditEvent(event: any, user: AuthUser, ownedAgentSlugs: Set<string>): boolean {
-  return event.actor_email === user.email || (!!event.actor_agent_id && ownedAgentSlugs.has(event.actor_agent_id));
+function canAccessProject(project: any, user: AuthUser): boolean {
+  if (!project) return false;
+  if (project.visibility === "public") return isStaffEmail(user.email);
+  if (project.visibility === "team") {
+    return project.owner === user.email || normalizeProjectMembers(project.members).includes(user.email.toLowerCase());
+  }
+  return project.owner === user.email;
+}
+
+function canModifyProject(project: any, user: AuthUser): boolean {
+  return !!project && project.owner === user.email;
 }
 
 function eventSummary(event: any) {
@@ -176,7 +205,79 @@ function eventSummary(event: any) {
     date: event.date,
     date_tentative: event.date_tentative,
     location: event.location,
+    project_id: event.project_id || null,
+    project: event.project || null,
   };
+}
+
+async function buildProjectMap(sb: ReturnType<typeof getSupabase>, projectIds: string[]): Promise<Map<string, ProjectRecord>> {
+  if (!projectIds.length) return new Map();
+  const { data: projects } = await sb.from("projects").select("*").in("id", projectIds);
+  return new Map((projects || []).map((project: any) => [project.id, project]));
+}
+
+async function hydrateRecordsWithProjects(sb: ReturnType<typeof getSupabase>, records: any[]) {
+  const rows = records.filter(Boolean);
+  if (!rows.length) return new Map<string, ProjectRecord>();
+  const projectIds = [...new Set(rows.map((record) => record.project_id).filter(Boolean))];
+  const projectMap = await buildProjectMap(sb, projectIds);
+  for (const record of rows) {
+    record.project = record.project_id ? projectSummary(projectMap.get(record.project_id)) || null : null;
+  }
+  return projectMap;
+}
+
+async function resolveProjectRef(sb: ReturnType<typeof getSupabase>, ref: string) {
+  if (!ref) return null;
+  const query = sb.from("projects").select("*");
+  const { data } = isUuid(ref)
+    ? await query.eq("id", ref).maybeSingle()
+    : await query.eq("slug", ref).maybeSingle();
+  return data || null;
+}
+
+function canAccessEvent(event: any, user: AuthUser, project?: any | null): boolean {
+  if (!event) return false;
+  if (event.visibility === "private") return event.created_by === user.email;
+  if (project) return canAccessProject(project, user);
+  return event.visibility === "public" || event.visibility === "team" || event.created_by === user.email;
+}
+
+function canAccessTask(task: any, user: AuthUser, project?: any | null): boolean {
+  if (!task) return false;
+  if (task.visibility === "private") {
+    return task.created_by === user.email || task.assigned_to === user.email;
+  }
+  if (project) return canAccessProject(project, user);
+  if (task.visibility === "public" || task.visibility === "team") return true;
+  return task.created_by === user.email || task.assigned_to === user.email;
+}
+
+function canAccessMilestone(milestone: any, user: AuthUser, project?: any | null): boolean {
+  if (!milestone) return false;
+  if (project) return canAccessProject(project, user);
+  return isStaffEmail(user.email);
+}
+
+function canAccessAgent(agent: any, user: AuthUser, project?: any | null): boolean {
+  if (!agent) return false;
+  if (project) return canAccessProject(project, user);
+  return isStaffEmail(user.email);
+}
+
+function canModifyTask(task: any, user: AuthUser): boolean {
+  return !!task && (task.created_by === user.email || task.assigned_to === user.email);
+}
+
+async function listOwnedAgentSlugs(sb: ReturnType<typeof getSupabase>, ownerEmail: string): Promise<Set<string>> {
+  const { data } = await sb.from("agents").select("slug").eq("owner", ownerEmail);
+  return new Set((data || []).map((agent: any) => agent.slug).filter(Boolean));
+}
+
+function canReadAuditEvent(event: any, user: AuthUser, ownedAgentSlugs: Set<string>, project?: any | null): boolean {
+  return event.actor_email === user.email
+    || (!!event.actor_agent_id && ownedAgentSlugs.has(event.actor_agent_id))
+    || (!!project && canAccessProject(project, user));
 }
 
 async function resolveEventRef(sb: ReturnType<typeof getSupabase>, ref: string) {
@@ -185,6 +286,7 @@ async function resolveEventRef(sb: ReturnType<typeof getSupabase>, ref: string) 
   const { data } = isUuid(ref)
     ? await query.eq("id", ref).maybeSingle()
     : await query.eq("slug", ref).maybeSingle();
+  if (data) await hydrateRecordsWithProjects(sb, [data]);
   return data || null;
 }
 
@@ -200,12 +302,20 @@ function collectTaskNodes(tasks: any[]): any[] {
   return nodes;
 }
 
-async function hydrateTasksWithEvents(sb: ReturnType<typeof getSupabase>, tasks: any[]) {
+async function hydrateTasksWithContext(sb: ReturnType<typeof getSupabase>, tasks: any[]) {
   const nodes = collectTaskNodes(tasks);
+  if (!nodes.length) return;
+
+  await hydrateRecordsWithProjects(sb, nodes);
+
   const eventIds = [...new Set(nodes.map((task) => task.event_id).filter(Boolean))];
-  if (!eventIds.length) return;
+  if (!eventIds.length) {
+    for (const task of nodes) task.event = null;
+    return;
+  }
 
   const { data: events } = await sb.from("events").select("*").in("id", eventIds);
+  await hydrateRecordsWithProjects(sb, events || []);
   const eventMap = new Map((events || []).map((event: any) => [event.id, eventSummary(event)]));
 
   for (const task of nodes) {
@@ -213,7 +323,7 @@ async function hydrateTasksWithEvents(sb: ReturnType<typeof getSupabase>, tasks:
   }
 }
 
-async function logEventAudit(eventId: string, eventSlug: string, actor: { email: string; name: string }, action: string, opts: { state_before?: any; state_after?: any; channel?: string } = {}) {
+async function logEventAudit(eventId: string, eventSlug: string, actor: { email: string; name: string }, action: string, opts: { state_before?: any; state_after?: any; channel?: string; project_id?: string | null } = {}) {
   await logAudit({
     actor_email: actor.email,
     actor_name: actor.name,
@@ -225,6 +335,7 @@ async function logEventAudit(eventId: string, eventSlug: string, actor: { email:
     state_after: opts.state_after,
     channel: opts.channel || "api",
     context: { event_uuid: eventId },
+    project_id: opts.project_id || null,
   });
 }
 
@@ -442,6 +553,219 @@ app.get("/news/:slug", async (c) => {
   return c.json({ article }, 200, corsHeaders);
 });
 
+// ── GET /projects — list projects ───────────────────────────────────
+app.get("/projects", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const search = (c.req.query("search") || "").trim().toLowerCase();
+  const sb = getSupabase();
+  const { data, error } = await sb.from("projects").select("*").order("updated_at", { ascending: false }).limit(100);
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+  let projects = (data || []).filter((project: any) => canAccessProject(project, user));
+  if (search) {
+    projects = projects.filter((project: any) =>
+      [project.slug, project.name, project.description].some((field) => String(field || "").toLowerCase().includes(search))
+    );
+  }
+
+  return c.json({
+    projects: projects.map((project: any) => ({
+      ...project,
+      project: projectSummary(project),
+    })),
+  }, 200, corsHeaders);
+});
+
+// ── POST /projects — create project ────────────────────────────────
+app.post("/projects", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const body = await c.req.json();
+  if (!body.name) return c.json({ error: "name is required" }, 400, corsHeaders);
+
+  const slug = body.slug ? slugify(body.slug) : slugify(body.name);
+  if (!slug) return c.json({ error: "slug could not be derived from name" }, 400, corsHeaders);
+
+  const owner = String(body.owner || user.email).trim().toLowerCase();
+  if (!isStaffEmail(owner)) return c.json({ error: "owner must be an @astarconsulting.no email" }, 400, corsHeaders);
+
+  const members = parseProjectMembers(body.members);
+  const sb = getSupabase();
+  const { data, error } = await sb.from("projects").insert({
+    slug,
+    name: body.name,
+    description: body.description || null,
+    visibility: body.visibility || "team",
+    owner,
+    members: members.filter((member) => member !== owner),
+  }).select("*").single();
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+  await logAudit({
+    actor_email: user.email,
+    actor_name: user.name,
+    actor_type: "human",
+    entity_type: "project",
+    entity_id: data.slug,
+    action: "created",
+    channel: "api",
+    project_id: data.id,
+    state_after: {
+      name: data.name,
+      visibility: data.visibility,
+      owner: data.owner,
+      members: data.members,
+    },
+  });
+
+  return c.json({ ok: true, slug: data.slug }, 200, corsHeaders);
+});
+
+// ── GET /projects/:slug — project detail + linked work ─────────────
+app.get("/projects/:slug", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const ref = c.req.param("slug");
+  const sb = getSupabase();
+  const project = await resolveProjectRef(sb, ref);
+  if (!project || !canAccessProject(project, user)) return c.json({ error: "Project not found" }, 404, corsHeaders);
+
+  const [
+    tasksResult,
+    eventsResult,
+    agentsResult,
+    milestonesResult,
+  ] = await Promise.all([
+    sb.from("tasks")
+      .select("*")
+      .eq("project_id", project.id)
+      .is("parent_task_id", null)
+      .is("archived_at", null)
+      .order("created_at", { ascending: false })
+      .limit(50),
+    sb.from("events")
+      .select("*")
+      .eq("project_id", project.id)
+      .order("date", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: false })
+      .limit(50),
+    sb.from("agents")
+      .select("*")
+      .eq("project_id", project.id)
+      .order("created_at", { ascending: false })
+      .limit(50),
+    sb.from("milestones")
+      .select("*")
+      .eq("project_id", project.id)
+      .order("date", { ascending: false })
+      .limit(50),
+  ]);
+
+  if (tasksResult.error) return c.json({ error: tasksResult.error.message }, 500, corsHeaders);
+  if (eventsResult.error) return c.json({ error: eventsResult.error.message }, 500, corsHeaders);
+  if (agentsResult.error) return c.json({ error: agentsResult.error.message }, 500, corsHeaders);
+  if (milestonesResult.error) return c.json({ error: milestonesResult.error.message }, 500, corsHeaders);
+
+  const tasks = (tasksResult.data || []).filter((task: any) => canAccessTask(task, user, project));
+  const events = (eventsResult.data || []).filter((event: any) => canAccessEvent(event, user, project));
+  const agents = (agentsResult.data || []).filter((agent: any) => canAccessAgent(agent, user, project));
+  const milestones = (milestonesResult.data || []).filter((milestone: any) => canAccessMilestone(milestone, user, project));
+
+  await hydrateTasksWithContext(sb, tasks as any[]);
+  await hydrateRecordsWithProjects(sb, events as any[]);
+  await hydrateRecordsWithProjects(sb, agents as any[]);
+  await hydrateRecordsWithProjects(sb, milestones as any[]);
+
+  return c.json({
+    project: {
+      ...project,
+      project: projectSummary(project),
+    },
+    tasks,
+    events,
+    agents,
+    milestones,
+  }, 200, corsHeaders);
+});
+
+// ── PATCH /projects/:slug — update project ─────────────────────────
+app.patch("/projects/:slug", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const ref = c.req.param("slug");
+  const body = await c.req.json();
+  const sb = getSupabase();
+  const project = await resolveProjectRef(sb, ref);
+  if (!project || !canAccessProject(project, user)) return c.json({ error: "Project not found" }, 404, corsHeaders);
+  if (!canModifyProject(project, user)) return c.json({ error: "Only the project owner can update this project" }, 403, corsHeaders);
+
+  const patch: any = { updated_at: new Date().toISOString() };
+  const before: Record<string, any> = {};
+  const after: Record<string, any> = {};
+
+  if (body.name !== undefined) {
+    patch.name = body.name;
+    before.name = project.name;
+    after.name = body.name;
+  }
+  if (body.slug !== undefined) {
+    const slug = slugify(body.slug);
+    if (!slug) return c.json({ error: "slug could not be derived from input" }, 400, corsHeaders);
+    patch.slug = slug;
+    before.slug = project.slug;
+    after.slug = slug;
+  }
+  if (body.description !== undefined) {
+    patch.description = body.description || null;
+    before.description = project.description || null;
+    after.description = patch.description;
+  }
+  if (body.visibility !== undefined) {
+    patch.visibility = body.visibility;
+    before.visibility = project.visibility;
+    after.visibility = body.visibility;
+  }
+  if (body.owner !== undefined) {
+    const owner = String(body.owner || "").trim().toLowerCase();
+    if (!isStaffEmail(owner)) return c.json({ error: "owner must be an @astarconsulting.no email" }, 400, corsHeaders);
+    patch.owner = owner;
+    before.owner = project.owner;
+    after.owner = owner;
+  }
+  if (body.members !== undefined) {
+    const members = parseProjectMembers(body.members);
+    const nextOwner = patch.owner || project.owner;
+    patch.members = members.filter((member) => member !== nextOwner);
+    before.members = normalizeProjectMembers(project.members);
+    after.members = patch.members;
+  }
+
+  if (!Object.keys(after).length) return c.json({ error: "No fields to update" }, 400, corsHeaders);
+
+  const { error } = await sb.from("projects").update(patch).eq("id", project.id);
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+  await logAudit({
+    actor_email: user.email,
+    actor_name: user.name,
+    actor_type: "human",
+    entity_type: "project",
+    entity_id: patch.slug || project.slug,
+    action: "updated",
+    channel: "api",
+    project_id: project.id,
+    state_before: before,
+    state_after: after,
+  });
+
+  return c.json({ ok: true, slug: patch.slug || project.slug }, 200, corsHeaders);
+});
+
 // ── GET /events — list events ───────────────────────────────────────
 app.get("/events", async (c) => {
   const user = await validateMsToken(c.req.raw);
@@ -450,14 +774,19 @@ app.get("/events", async (c) => {
   const status = c.req.query("status");
   const type = c.req.query("type");
   const month = c.req.query("month");
+  const projectRef = c.req.query("project");
   const search = (c.req.query("search") || "").trim().toLowerCase();
   const limit = Math.min(parseInt(c.req.query("limit") || "20"), 50);
   const fetchLimit = search ? 100 : limit;
 
   const sb = getSupabase();
+  if (projectRef) {
+    const project = await resolveProjectRef(sb, projectRef);
+    if (!project) return c.json({ error: `Project "${projectRef}" not found` }, 404, corsHeaders);
+    if (!canAccessProject(project, user)) return c.json({ error: "Forbidden" }, 403, corsHeaders);
+  }
   let query = sb.from("events")
     .select("*")
-    .or(`visibility.eq.public,visibility.eq.team,created_by.eq.${user.email}`)
     .order("date", { ascending: true, nullsFirst: false })
     .order("created_at", { ascending: false })
     .limit(fetchLimit);
@@ -465,18 +794,24 @@ app.get("/events", async (c) => {
   if (status) query = query.eq("status", status);
   if (type) query = query.eq("type", type);
   if (month) query = query.gte("date", `${month}-01`).lte("date", `${month}-31`);
+  if (projectRef) {
+    const project = await resolveProjectRef(sb, projectRef);
+    query = query.eq("project_id", project!.id);
+  }
 
   const { data, error } = await query;
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
-  let events = data || [];
+  const events = data || [];
+  await hydrateRecordsWithProjects(sb, events as any[]);
+  let visibleEvents = events.filter((event: any) => canAccessEvent(event, user, event.project));
   if (search) {
-    events = events.filter((event: any) =>
+    visibleEvents = visibleEvents.filter((event: any) =>
       [event.title, event.goal, event.location, event.slug].some((field) => String(field || "").toLowerCase().includes(search))
     );
   }
 
-  return c.json({ events: events.slice(0, limit) }, 200, corsHeaders);
+  return c.json({ events: visibleEvents.slice(0, limit) }, 200, corsHeaders);
 });
 
 // ── GET /events/:slug — single event ────────────────────────────────
@@ -488,7 +823,7 @@ app.get("/events/:slug", async (c) => {
   const sb = getSupabase();
   const event = await resolveEventRef(sb, ref);
   if (!event) return c.json({ error: "Event not found" }, 404, corsHeaders);
-  if (!canAccessEvent(event, user)) return c.json({ error: "Forbidden" }, 403, corsHeaders);
+  if (!canAccessEvent(event, user, event.project)) return c.json({ error: "Forbidden" }, 403, corsHeaders);
 
   const { data: tasks, error } = await sb.from("tasks")
     .select("*")
@@ -510,10 +845,14 @@ app.get("/events/:slug", async (c) => {
       for (const subtask of subtasks) (byParent[subtask.parent_task_id] ||= []).push(subtask);
       for (const task of tasks as any[]) task.subtasks = byParent[task.id] || [];
     }
-    await hydrateTasksWithEvents(sb, tasks as any[]);
+    await hydrateTasksWithContext(sb, tasks as any[]);
+    for (const task of tasks as any[]) {
+      task.subtasks = (task.subtasks || []).filter((subtask: any) => canAccessTask(subtask, user, subtask.project || event.project));
+    }
   }
 
-  return c.json({ event, tasks: tasks || [] }, 200, corsHeaders);
+  const visibleTasks = (tasks || []).filter((task: any) => canAccessTask(task, user, task.project || event.project));
+  return c.json({ event, tasks: visibleTasks }, 200, corsHeaders);
 });
 
 // ── POST /events — create event ─────────────────────────────────────
@@ -529,6 +868,14 @@ app.post("/events", async (c) => {
   const slug = body.slug ? slugify(body.slug) : slugify(body.title);
   if (!slug) return c.json({ error: "slug could not be derived from title" }, 400, corsHeaders);
 
+  let projectId = null;
+  if (body.project) {
+    const project = await resolveProjectRef(sb, body.project);
+    if (!project) return c.json({ error: `Project "${body.project}" not found` }, 404, corsHeaders);
+    if (!canAccessProject(project, user)) return c.json({ error: "Forbidden" }, 403, corsHeaders);
+    projectId = project.id;
+  }
+
   const { data, error } = await sb.from("events").insert({
     slug,
     title: body.title,
@@ -541,6 +888,7 @@ app.post("/events", async (c) => {
     attendees: Array.isArray(body.attendees) ? body.attendees : [],
     visibility: body.visibility || "team",
     created_by: user.email,
+    project_id: projectId,
   }).select("*").single();
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
@@ -552,6 +900,7 @@ app.post("/events", async (c) => {
       date: data.date,
       location: data.location,
     },
+    project_id: data.project_id,
   });
 
   return c.json({ ok: true, slug: data.slug }, 200, corsHeaders);
@@ -580,13 +929,31 @@ app.patch("/events/:slug", async (c) => {
       after[field] = body[field];
     }
   }
+  if (body.project !== undefined) {
+    if (!body.project) {
+      patch.project_id = null;
+      before.project_id = event.project_id || null;
+      after.project_id = null;
+    } else {
+      const project = await resolveProjectRef(sb, body.project);
+      if (!project) return c.json({ error: `Project "${body.project}" not found` }, 404, corsHeaders);
+      if (!canAccessProject(project, user)) return c.json({ error: "Forbidden" }, 403, corsHeaders);
+      patch.project_id = project.id;
+      before.project_id = event.project_id || null;
+      after.project_id = project.id;
+    }
+  }
 
   if (!Object.keys(after).length) return c.json({ error: "No fields to update" }, 400, corsHeaders);
 
   const { error } = await sb.from("events").update(patch).eq("id", event.id);
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
-  await logEventAudit(event.id, event.slug, user, "updated", { state_before: before, state_after: after });
+  await logEventAudit(event.id, event.slug, user, "updated", {
+    state_before: before,
+    state_after: after,
+    project_id: patch.project_id ?? event.project_id ?? null,
+  });
 
   return c.json({ ok: true, slug: event.slug }, 200, corsHeaders);
 });
@@ -726,15 +1093,29 @@ app.patch("/feedback/:id", async (c) => {
 
 // ── GET /milestones — list milestones ────────────────────────────────
 app.get("/milestones", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
   const month = c.req.query("month");
+  const projectRef = c.req.query("project");
   const sb = getSupabase();
   let query = sb.from("milestones").select("*").order("date", { ascending: false }).limit(50);
   if (month) {
     query = query.gte("date", `${month}-01`).lte("date", `${month}-31`);
   }
+  if (projectRef) {
+    const project = await resolveProjectRef(sb, projectRef);
+    if (!project) return c.json({ error: `Project "${projectRef}" not found` }, 404, corsHeaders);
+    if (!canAccessProject(project, user)) return c.json({ error: "Forbidden" }, 403, corsHeaders);
+    query = query.eq("project_id", project.id);
+  }
   const { data, error } = await query;
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
-  return c.json({ milestones: data || [] }, 200, corsHeaders);
+  const milestones = data || [];
+  await hydrateRecordsWithProjects(sb, milestones as any[]);
+  return c.json({
+    milestones: milestones.filter((milestone: any) => canAccessMilestone(milestone, user, milestone.project)),
+  }, 200, corsHeaders);
 });
 
 // ── POST /milestones — create milestone ─────────────────────────────
@@ -746,16 +1127,33 @@ app.post("/milestones", async (c) => {
   if (!body.title) return c.json({ error: "title is required" }, 400, corsHeaders);
 
   const sb = getSupabase();
+  let projectId = null;
+  if (body.project) {
+    const project = await resolveProjectRef(sb, body.project);
+    if (!project) return c.json({ error: `Project "${body.project}" not found` }, 404, corsHeaders);
+    if (!canAccessProject(project, user)) return c.json({ error: "Forbidden" }, 403, corsHeaders);
+    projectId = project.id;
+  }
+
   const { error } = await sb.from("milestones").insert({
     title: body.title,
     date: body.date || new Date().toISOString().split("T")[0],
     category: body.category || "general",
     created_by: user.name,
+    project_id: projectId,
   });
 
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
-  await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "milestone", action: "created", channel: "api", state_after: { title: body.title } });
+  await logAudit({
+    actor_email: user.email,
+    actor_name: user.name,
+    entity_type: "milestone",
+    action: "created",
+    channel: "api",
+    project_id: projectId,
+    state_after: { title: body.title, category: body.category || "general" },
+  });
 
   return c.json({ ok: true }, 200, corsHeaders);
 });
@@ -934,8 +1332,10 @@ app.post("/ask/:agent_slug", async (c) => {
   const slug = c.req.param("agent_slug");
   const sb = getSupabase();
 
-  const { data: agent } = await sb.from("agents").select("slug, status").eq("slug", slug).single();
+  const { data: agent } = await sb.from("agents").select("*").eq("slug", slug).single();
   if (!agent) return c.json({ error: `Agent '${slug}' not found` }, 404, corsHeaders);
+  await hydrateRecordsWithProjects(sb, [agent]);
+  if (!canAccessAgent(agent, user, agent.project)) return c.json({ error: `Agent '${slug}' not found` }, 404, corsHeaders);
   if (agent.status !== "active") return c.json({ error: `Agent '${slug}' is ${agent.status}` }, 400, corsHeaders);
 
   const body = await c.req.json();
@@ -957,7 +1357,16 @@ app.post("/ask/:agent_slug", async (c) => {
 
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
-  await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "inbox", entity_id: data.id, action: "submitted", channel: "api", state_after: { agent_slug: slug, type } });
+  await logAudit({
+    actor_email: user.email,
+    actor_name: user.name,
+    entity_type: "inbox",
+    entity_id: data.id,
+    action: "submitted",
+    channel: "api",
+    project_id: agent.project_id || null,
+    state_after: { agent_slug: slug, type },
+  });
 
   return c.json({ ok: true, id: data.id, type }, 200, corsHeaders);
 });
@@ -1096,7 +1505,7 @@ app.patch("/ask/:agent_slug/:id", async (c) => {
 });
 
 // ── Task audit helper ────────────────────────────────────────────────
-async function logTaskAudit(taskId: string, taskNumber: string | number, actor: string, actorType: string, action: string, opts: { state_before?: any; state_after?: any; channel?: string } = {}) {
+async function logTaskAudit(taskId: string, taskNumber: string | number, actor: string, actorType: string, action: string, opts: { state_before?: any; state_after?: any; channel?: string; project_id?: string | null } = {}) {
   await logAudit({
     actor_email: actor,
     actor_type: actorType,
@@ -1107,6 +1516,7 @@ async function logTaskAudit(taskId: string, taskNumber: string | number, actor: 
     state_after: opts.state_after,
     channel: opts.channel || "api",
     context: { task_uuid: taskId },
+    project_id: opts.project_id || null,
   });
 }
 
@@ -1121,20 +1531,45 @@ app.post("/tasks", async (c) => {
   const sb = getSupabase();
 
   let parentId = null;
+  let parentProjectId = null;
   if (body.parent_task_number) {
     const { data: parent } = await sb.from("tasks").select("*").eq("task_number", body.parent_task_number).single();
-    if (parent && !canAccessTask(parent, user)) {
+    if (parent) await hydrateRecordsWithProjects(sb, [parent]);
+    if (parent && !canAccessTask(parent, user, parent.project)) {
       return c.json({ error: `Parent task #${body.parent_task_number} not found` }, 404, corsHeaders);
     }
-    if (parent) parentId = parent.id;
+    if (parent) {
+      parentId = parent.id;
+      parentProjectId = parent.project_id || null;
+    }
   }
 
   let eventId = null;
+  let eventProjectId = null;
+  let eventSlug = null;
   if (body.event) {
     const event = await resolveEventRef(sb, body.event);
     if (!event) return c.json({ error: `Event "${body.event}" not found` }, 404, corsHeaders);
-    if (!canAccessEvent(event, user)) return c.json({ error: "Forbidden" }, 403, corsHeaders);
+    if (!canAccessEvent(event, user, event.project)) return c.json({ error: "Forbidden" }, 403, corsHeaders);
     eventId = event.id;
+    eventProjectId = event.project_id || null;
+    eventSlug = event.slug;
+  }
+
+  let projectId = null;
+  if (body.project) {
+    const project = await resolveProjectRef(sb, body.project);
+    if (!project) return c.json({ error: `Project "${body.project}" not found` }, 404, corsHeaders);
+    if (!canAccessProject(project, user)) return c.json({ error: "Forbidden" }, 403, corsHeaders);
+    projectId = project.id;
+  }
+
+  for (const scopedProjectId of [parentProjectId, eventProjectId]) {
+    if (!scopedProjectId) continue;
+    if (projectId && projectId !== scopedProjectId) {
+      return c.json({ error: "Parent task, event, and project must belong to the same project" }, 400, corsHeaders);
+    }
+    projectId = scopedProjectId;
   }
 
   const isAgent = body.source === "agent";
@@ -1153,6 +1588,8 @@ app.post("/tasks", async (c) => {
     recurring: body.recurring || null,
     estimated_hours: body.estimated_hours ?? null,
     event_id: eventId,
+    visibility: body.visibility || "private",
+    project_id: projectId,
   }).select("task_number, id").single();
 
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
@@ -1163,7 +1600,16 @@ app.post("/tasks", async (c) => {
     }
   }
 
-  await logTaskAudit(data.id, data.task_number, user.email, isAgent ? "agent" : "human", "created", { state_after: { title: body.title, priority: body.priority || "medium", assigned_to: body.assigned_to || user.email } });
+  await logTaskAudit(data.id, data.task_number, user.email, isAgent ? "agent" : "human", "created", {
+    state_after: {
+      title: body.title,
+      priority: body.priority || "medium",
+      assigned_to: body.assigned_to || user.email,
+      project_id: projectId,
+      event: eventSlug,
+    },
+    project_id: projectId,
+  });
 
   return c.json({ ok: true, task_number: data.task_number }, 200, corsHeaders);
 });
@@ -1181,10 +1627,13 @@ app.get("/tasks", async (c) => {
   const triage = c.req.query("triage");
   const parent = c.req.query("parent");
   const eventRef = c.req.query("event");
+  const projectRef = c.req.query("project");
   const maxTasks = 50;
   const fetchLimit = 200;
 
   const sb = getSupabase();
+  let filterProject: any = null;
+  let filterEvent: any = null;
   let query = sb.from("tasks").select("*").is("archived_at", null).order("created_at", { ascending: false }).limit(fetchLimit);
 
   if (triage === "true") {
@@ -1215,9 +1664,17 @@ app.get("/tasks", async (c) => {
   if (priority) query = query.eq("priority", priority);
 
   if (eventRef) {
-    const event = await resolveEventRef(sb, eventRef);
-    if (!event) return c.json({ error: `Event "${eventRef}" not found` }, 404, corsHeaders);
-    query = query.eq("event_id", event.id);
+    filterEvent = await resolveEventRef(sb, eventRef);
+    if (!filterEvent) return c.json({ error: `Event "${eventRef}" not found` }, 404, corsHeaders);
+    if (!canAccessEvent(filterEvent, user, filterEvent.project)) return c.json({ error: "Forbidden" }, 403, corsHeaders);
+    query = query.eq("event_id", filterEvent.id);
+  }
+
+  if (projectRef) {
+    filterProject = await resolveProjectRef(sb, projectRef);
+    if (!filterProject) return c.json({ error: `Project "${projectRef}" not found` }, 404, corsHeaders);
+    if (!canAccessProject(filterProject, user)) return c.json({ error: "Forbidden" }, 403, corsHeaders);
+    query = query.eq("project_id", filterProject.id);
   }
 
   if (due) {
@@ -1236,22 +1693,31 @@ app.get("/tasks", async (c) => {
 
   const { data, error } = await query;
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
-  const visibleTasks = (data || []).filter((task: any) => canAccessTask(task, user)).slice(0, maxTasks);
+  const tasks = data || [];
 
   const includeSubtasks = c.req.query("include_subtasks") === "true";
-  if (includeSubtasks && visibleTasks.length && !parent) {
-    const parentIds = visibleTasks.map((t: any) => t.id);
+  if (includeSubtasks && tasks.length && !parent) {
+    const parentIds = tasks.map((t: any) => t.id);
     const { data: subs } = await sb.from("tasks").select("*").in("parent_task_id", parentIds).is("archived_at", null).order("task_number", { ascending: true });
     if (subs?.length) {
       const subsByParent: Record<string, any[]> = {};
-      for (const s of subs.filter((task: any) => canAccessTask(task, user))) { (subsByParent[s.parent_task_id] ||= []).push(s); }
-      for (const t of visibleTasks as any[]) { t.subtasks = subsByParent[t.id] || []; }
+      for (const subtask of subs) (subsByParent[subtask.parent_task_id] ||= []).push(subtask);
+      for (const task of tasks as any[]) task.subtasks = subsByParent[task.id] || [];
     }
   }
 
-  if (visibleTasks.length) {
-    await hydrateTasksWithEvents(sb, visibleTasks as any[]);
+  if (tasks.length) {
+    await hydrateTasksWithContext(sb, tasks as any[]);
+    for (const task of tasks as any[]) {
+      task.subtasks = (task.subtasks || []).filter((subtask: any) =>
+        canAccessTask(subtask, user, subtask.project || filterProject || filterEvent?.project || null)
+      );
+    }
   }
+
+  const visibleTasks = tasks
+    .filter((task: any) => canAccessTask(task, user, task.project || filterProject || filterEvent?.project || null))
+    .slice(0, maxTasks);
 
   return c.json({ tasks: visibleTasks }, 200, corsHeaders);
 });
@@ -1369,19 +1835,18 @@ app.get("/tasks/:number", async (c) => {
 
   const { data: task, error } = await sb.from("tasks").select("*").eq("task_number", num).single();
   if (error || !task) return c.json({ error: "Task not found" }, 404, corsHeaders);
-  if (!canAccessTask(task, user)) return c.json({ error: "Task not found" }, 404, corsHeaders);
+  await hydrateRecordsWithProjects(sb, [task]);
+  if (!canAccessTask(task, user, task.project)) return c.json({ error: "Task not found" }, 404, corsHeaders);
 
   const { data: activity } = await sb.from("audit_events").select("*").eq("entity_type", "task").eq("entity_id", String(task.task_number)).order("timestamp", { ascending: false }).limit(20);
   const { data: subtasks } = await sb.from("tasks").select("*").eq("parent_task_id", task.id).order("task_number", { ascending: true });
   const { data: links } = await sb.from("task_links").select("*").eq("task_id", task.id).order("created_at", { ascending: true });
-  const visibleSubtasks = (subtasks || []).filter((subtask: any) => canAccessTask(subtask, user));
+  const hydratedTask = { ...task, subtasks: subtasks || [] };
+  await hydrateTasksWithContext(sb, [hydratedTask] as any[]);
+  const visibleSubtasks = (hydratedTask.subtasks || []).filter((subtask: any) => canAccessTask(subtask, user, subtask.project || task.project));
 
-  const hydratedTask = { ...task, subtasks: visibleSubtasks };
-  await hydrateTasksWithEvents(sb, [hydratedTask] as any[]);
   Object.assign(task, { event: hydratedTask.event });
-  for (let i = 0; i < visibleSubtasks.length; i++) {
-    Object.assign(visibleSubtasks[i], { event: hydratedTask.subtasks?.[i]?.event || null });
-  }
+  Object.assign(task, { project: hydratedTask.project });
 
   return c.json({ task, activity: activity || [], subtasks: visibleSubtasks, links: links || [] }, 200, corsHeaders);
 });
@@ -1396,7 +1861,8 @@ app.patch("/tasks/:number", async (c) => {
 
   const { data: task, error: fetchErr } = await sb.from("tasks").select("*").eq("task_number", num).single();
   if (fetchErr || !task) return c.json({ error: "Task not found" }, 404, corsHeaders);
-  if (!canAccessTask(task, user)) return c.json({ error: "Task not found" }, 404, corsHeaders);
+  await hydrateRecordsWithProjects(sb, [task]);
+  if (!canAccessTask(task, user, task.project)) return c.json({ error: "Task not found" }, 404, corsHeaders);
 
   if (!canModifyTask(task, user)) {
     return c.json({ error: "Only the creator or assignee can modify this task" }, 403, corsHeaders);
@@ -1405,11 +1871,22 @@ app.patch("/tasks/:number", async (c) => {
   const body = await c.req.json();
   const patch: any = { updated_at: new Date().toISOString() };
   const changes: Record<string, any> = {};
+  let nextProjectId = task.project_id || null;
 
-  for (const field of ["status", "priority", "assigned_to", "due_date", "description", "tags"]) {
+  for (const field of ["status", "priority", "assigned_to", "due_date", "description", "tags", "visibility"]) {
     if (body[field] !== undefined) {
       changes[field] = { from: task[field], to: body[field] };
       patch[field] = body[field];
+    }
+  }
+  if (body.project !== undefined) {
+    if (!body.project) {
+      nextProjectId = null;
+    } else {
+      const project = await resolveProjectRef(sb, body.project);
+      if (!project) return c.json({ error: `Project "${body.project}" not found` }, 404, corsHeaders);
+      if (!canAccessProject(project, user)) return c.json({ error: "Forbidden" }, 403, corsHeaders);
+      nextProjectId = project.id;
     }
   }
   if (body.event !== undefined) {
@@ -1419,9 +1896,13 @@ app.patch("/tasks/:number", async (c) => {
     } else {
       const event = await resolveEventRef(sb, body.event);
       if (!event) return c.json({ error: `Event "${body.event}" not found` }, 404, corsHeaders);
-      if (!canAccessEvent(event, user)) return c.json({ error: "Forbidden" }, 403, corsHeaders);
+      if (!canAccessEvent(event, user, event.project)) return c.json({ error: "Forbidden" }, 403, corsHeaders);
+      if (event.project_id && nextProjectId && nextProjectId !== event.project_id) {
+        return c.json({ error: "Task project and event project must match" }, 400, corsHeaders);
+      }
       patch.event_id = event.id;
       changes.event_id = { from: task.event_id, to: event.id };
+      if (event.project_id) nextProjectId = event.project_id;
     }
   }
   if (body.parent_task_number !== undefined) {
@@ -1431,23 +1912,19 @@ app.patch("/tasks/:number", async (c) => {
     } else {
       const { data: parentTask } = await sb.from("tasks").select("*").eq("task_number", body.parent_task_number).single();
       if (!parentTask) return c.json({ error: `Parent task #${body.parent_task_number} not found` }, 404, corsHeaders);
-      if (!canAccessTask(parentTask, user)) return c.json({ error: `Parent task #${body.parent_task_number} not found` }, 404, corsHeaders);
+      await hydrateRecordsWithProjects(sb, [parentTask]);
+      if (!canAccessTask(parentTask, user, parentTask.project)) return c.json({ error: `Parent task #${body.parent_task_number} not found` }, 404, corsHeaders);
+      if (parentTask.project_id && nextProjectId && nextProjectId !== parentTask.project_id) {
+        return c.json({ error: "Task project and parent task project must match" }, 400, corsHeaders);
+      }
       patch.parent_task_id = parentTask.id;
       changes.parent_task_id = { from: task.parent_task_id, to: parentTask.id };
+      if (parentTask.project_id) nextProjectId = parentTask.project_id;
     }
   }
-
-  if (body.parent_task_number !== undefined) {
-    if (body.parent_task_number === 0) {
-      patch.parent_task_id = null;
-      changes.parent_task_id = { from: task.parent_task_id, to: null };
-    } else {
-      const { data: parentTask } = await sb.from("tasks").select("*").eq("task_number", body.parent_task_number).single();
-      if (!parentTask) return c.json({ error: `Parent task #${body.parent_task_number} not found` }, 404, corsHeaders);
-      if (!canAccessTask(parentTask, user)) return c.json({ error: `Parent task #${body.parent_task_number} not found` }, 404, corsHeaders);
-      patch.parent_task_id = parentTask.id;
-      changes.parent_task_id = { from: task.parent_task_id, to: parentTask.id };
-    }
+  if (nextProjectId !== task.project_id) {
+    patch.project_id = nextProjectId;
+    changes.project_id = { from: task.project_id || null, to: nextProjectId };
   }
 
   if (body.status === "completed") {
@@ -1467,7 +1944,11 @@ app.patch("/tasks/:number", async (c) => {
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
   const action = body.status === "completed" ? "completed" : body.assigned_to ? "assigned" : "updated";
-  await logTaskAudit(task.id, num, user.email, "human", action, { state_before: Object.fromEntries(Object.entries(changes).map(([k, v]: any) => [k, v.from])), state_after: Object.fromEntries(Object.entries(changes).map(([k, v]: any) => [k, v.to])) });
+  await logTaskAudit(task.id, num, user.email, "human", action, {
+    state_before: Object.fromEntries(Object.entries(changes).map(([k, v]: any) => [k, v.from])),
+    state_after: Object.fromEntries(Object.entries(changes).map(([k, v]: any) => [k, v.to])),
+    project_id: patch.project_id ?? task.project_id ?? null,
+  });
 
   if (body.status === "completed") {
     const { data: taskLinks } = await sb.from("task_links").select("*").eq("task_id", task.id);
@@ -1477,10 +1958,19 @@ app.patch("/tasks/:number", async (c) => {
           await sb.from("feedback").update({ status: "done" }).eq("id", link.link_ref);
         }
         if (link.link_type === "milestone") {
-          await sb.from("milestones").insert({ title: task.title, date: new Date().toISOString().split("T")[0], category: "product", created_by: user.name });
+          await sb.from("milestones").insert({
+            title: task.title,
+            date: new Date().toISOString().split("T")[0],
+            category: "product",
+            created_by: user.name,
+            project_id: patch.project_id ?? task.project_id ?? null,
+          });
         }
       } catch (e: any) {
-        await logTaskAudit(task.id, num, "system", "system", "link_effect_failed", { state_after: { link_type: link.link_type, error: e.message } });
+        await logTaskAudit(task.id, num, "system", "system", "link_effect_failed", {
+          state_after: { link_type: link.link_type, error: e.message },
+          project_id: patch.project_id ?? task.project_id ?? null,
+        });
       }
     }
 
@@ -1497,9 +1987,15 @@ app.patch("/tasks/:number", async (c) => {
           due_date: dueDate.toISOString().split("T")[0],
           source: "system", tags: task.tags, recurring: task.recurring,
           parent_task_id: task.parent_task_id || task.id, event_id: task.event_id,
+          visibility: task.visibility,
+          project_id: patch.project_id ?? task.project_id ?? null,
         }).select("task_number, id").single();
         if (nextTask) {
-          await logTaskAudit(nextTask.id, nextTask.task_number, "system", "system", "recurring_created", { state_after: { from_task: task.task_number }, channel: "system" });
+          await logTaskAudit(nextTask.id, nextTask.task_number, "system", "system", "recurring_created", {
+            state_after: { from_task: task.task_number },
+            channel: "system",
+            project_id: patch.project_id ?? task.project_id ?? null,
+          });
         }
       } catch {}
     }
@@ -1517,14 +2013,18 @@ app.post("/tasks/:number/links", async (c) => {
   const sb = getSupabase();
   const { data: task } = await sb.from("tasks").select("*").eq("task_number", num).single();
   if (!task) return c.json({ error: "Task not found" }, 404, corsHeaders);
-  if (!canAccessTask(task, user)) return c.json({ error: "Task not found" }, 404, corsHeaders);
+  await hydrateRecordsWithProjects(sb, [task]);
+  if (!canAccessTask(task, user, task.project)) return c.json({ error: "Task not found" }, 404, corsHeaders);
   if (!canModifyTask(task, user)) return c.json({ error: "Only the creator or assignee can modify this task" }, 403, corsHeaders);
 
   const body = await c.req.json();
   if (!body.link_type || !body.link_ref) return c.json({ error: "link_type and link_ref required" }, 400, corsHeaders);
 
   await sb.from("task_links").insert({ task_id: task.id, link_type: body.link_type, link_ref: body.link_ref });
-  await logTaskAudit(task.id, num, user.email, "human", "linked", { state_after: { link_type: body.link_type, link_ref: body.link_ref } });
+  await logTaskAudit(task.id, num, user.email, "human", "linked", {
+    state_after: { link_type: body.link_type, link_ref: body.link_ref },
+    project_id: task.project_id || null,
+  });
 
   return c.json({ ok: true }, 200, corsHeaders);
 });
@@ -1539,15 +2039,19 @@ app.patch("/tasks/:number/triage", async (c) => {
   const sb = getSupabase();
   const { data: task } = await sb.from("tasks").select("*").eq("task_number", num).single();
   if (!task) return c.json({ error: "Task not found" }, 404, corsHeaders);
-  if (!canAccessTask(task, user)) return c.json({ error: "Task not found" }, 404, corsHeaders);
+  await hydrateRecordsWithProjects(sb, [task]);
+  if (!canAccessTask(task, user, task.project)) return c.json({ error: "Task not found" }, 404, corsHeaders);
   if (!canModifyTask(task, user)) return c.json({ error: "Only the creator or assignee can modify this task" }, 403, corsHeaders);
 
   if (body.action === "accept") {
     await sb.from("tasks").update({ requires_triage: false, updated_at: new Date().toISOString() }).eq("id", task.id);
-    await logTaskAudit(task.id, num, user.email, "human", "triage_accepted", {});
+    await logTaskAudit(task.id, num, user.email, "human", "triage_accepted", { project_id: task.project_id || null });
   } else if (body.action === "dismiss") {
     await sb.from("tasks").update({ status: "cancelled", archived_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", task.id);
-    await logTaskAudit(task.id, num, user.email, "human", "triage_dismissed", { state_after: { reason: body.reason || "" } });
+    await logTaskAudit(task.id, num, user.email, "human", "triage_dismissed", {
+      state_after: { reason: body.reason || "" },
+      project_id: task.project_id || null,
+    });
   } else {
     return c.json({ error: "action must be accept or dismiss" }, 400, corsHeaders);
   }
@@ -1565,14 +2069,19 @@ app.delete("/tasks/:number", async (c) => {
 
   const { data: task, error: fetchErr } = await sb.from("tasks").select("*").eq("task_number", num).single();
   if (fetchErr || !task) return c.json({ error: "Task not found" }, 404, corsHeaders);
-  if (!canAccessTask(task, user)) return c.json({ error: "Task not found" }, 404, corsHeaders);
+  await hydrateRecordsWithProjects(sb, [task]);
+  if (!canAccessTask(task, user, task.project)) return c.json({ error: "Task not found" }, 404, corsHeaders);
 
   if (user.email !== task.created_by) {
     return c.json({ error: "Only the creator can cancel this task" }, 403, corsHeaders);
   }
 
   await sb.from("tasks").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", task.id);
-  await logTaskAudit(task.id, num, user.email, "human", "cancelled", { state_before: { status: "open" }, state_after: { status: "cancelled" } });
+  await logTaskAudit(task.id, num, user.email, "human", "cancelled", {
+    state_before: { status: "open" },
+    state_after: { status: "cancelled" },
+    project_id: task.project_id || null,
+  });
 
   return c.json({ ok: true }, 200, corsHeaders);
 });
@@ -1585,6 +2094,7 @@ app.get("/audit", async (c) => {
 
   const entityType = c.req.query("entity_type");
   const entityId = c.req.query("entity_id");
+  const projectRef = c.req.query("project");
   const actor = c.req.query("actor");
   const actorAgentId = c.req.query("actor_agent_id");
   const channel = c.req.query("channel");
@@ -1597,10 +2107,10 @@ app.get("/audit", async (c) => {
   const fetchLimit = Math.min(Math.max(maxLimit * 10, 100), 500);
   const ownedAgentSlugs = await listOwnedAgentSlugs(sb, user.email);
 
-  if (actor && actor !== user.email) {
+  if (actor && actor !== user.email && !projectRef) {
     return c.json({ error: "Forbidden" }, 403, corsHeaders);
   }
-  if (actorAgentId && !ownedAgentSlugs.has(actorAgentId)) {
+  if (actorAgentId && !ownedAgentSlugs.has(actorAgentId) && !projectRef) {
     return c.json({ error: "Forbidden" }, 403, corsHeaders);
   }
 
@@ -1608,6 +2118,12 @@ app.get("/audit", async (c) => {
 
   if (entityType) query = query.eq("entity_type", entityType);
   if (entityId) query = query.eq("entity_id", entityId);
+  if (projectRef) {
+    const project = await resolveProjectRef(sb, projectRef);
+    if (!project) return c.json({ error: `Project "${projectRef}" not found` }, 404, corsHeaders);
+    if (!canAccessProject(project, user)) return c.json({ error: "Forbidden" }, 403, corsHeaders);
+    query = query.eq("project_id", project.id);
+  }
   if (actor) query = query.eq("actor_email", actor);
   if (actorAgentId) query = query.eq("actor_agent_id", actorAgentId);
   if (channel) query = query.eq("channel", channel);
@@ -1616,7 +2132,11 @@ app.get("/audit", async (c) => {
 
   const { data, error } = await query;
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
-  const visibleEvents = (data || []).filter((event: any) => canReadAuditEvent(event, user, ownedAgentSlugs)).slice(0, maxLimit);
+  const events = data || [];
+  await hydrateRecordsWithProjects(sb, events as any[]);
+  const visibleEvents = events
+    .filter((event: any) => canReadAuditEvent(event, user, ownedAgentSlugs, event.project))
+    .slice(0, maxLimit);
   return c.json({ events: visibleEvents }, 200, corsHeaders);
 });
 
@@ -1719,6 +2239,13 @@ app.post("/agents", async (c) => {
   if (!body.slug || !body.name) return c.json({ error: "slug and name required" }, 400, corsHeaders);
 
   const sb = getSupabase();
+  let projectId = null;
+  if (body.project) {
+    const project = await resolveProjectRef(sb, body.project);
+    if (!project) return c.json({ error: `Project "${body.project}" not found` }, 404, corsHeaders);
+    if (!canAccessProject(project, user)) return c.json({ error: "Forbidden" }, 403, corsHeaders);
+    projectId = project.id;
+  }
   const { error } = await sb.from("agents").insert({
     slug: body.slug,
     name: body.name,
@@ -1729,21 +2256,48 @@ app.post("/agents", async (c) => {
     scopes: body.scopes || [],
     machine: body.machine || null,
     config: body.config || {},
+    project_id: projectId,
   });
 
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
-  await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "agent", entity_id: body.slug, action: "registered", channel: "api", state_after: { name: body.name, scopes: body.scopes } });
+  await logAudit({
+    actor_email: user.email,
+    actor_name: user.name,
+    entity_type: "agent",
+    entity_id: body.slug,
+    action: "registered",
+    channel: "api",
+    project_id: projectId,
+    state_after: { name: body.name, scopes: body.scopes, project_id: projectId },
+  });
 
   return c.json({ ok: true, slug: body.slug }, 200, corsHeaders);
 });
 
 // ── GET /agents — list all agents ───────────────────────────────────
 app.get("/agents", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const status = c.req.query("status");
+  const projectRef = c.req.query("project");
   const sb = getSupabase();
-  const { data, error } = await sb.from("agents").select("*").order("created_at", { ascending: false });
+  let query = sb.from("agents").select("*").order("created_at", { ascending: false });
+  if (status) query = query.eq("status", status);
+  if (projectRef) {
+    const project = await resolveProjectRef(sb, projectRef);
+    if (!project) return c.json({ error: `Project "${projectRef}" not found` }, 404, corsHeaders);
+    if (!canAccessProject(project, user)) return c.json({ error: "Forbidden" }, 403, corsHeaders);
+    query = query.eq("project_id", project.id);
+  }
+  const { data, error } = await query;
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
-  return c.json({ agents: data || [] }, 200, corsHeaders);
+  const agents = data || [];
+  await hydrateRecordsWithProjects(sb, agents as any[]);
+  return c.json({
+    agents: agents.filter((agent: any) => canAccessAgent(agent, user, agent.project)),
+  }, 200, corsHeaders);
 });
 
 // ── GET /agents/:slug — single agent + activity ─────────────────────
@@ -1756,9 +2310,11 @@ app.get("/agents/:slug", async (c) => {
 
   const { data: agent, error } = await sb.from("agents").select("*").eq("slug", slug).single();
   if (error || !agent) return c.json({ error: "Agent not found" }, 404, corsHeaders);
+  await hydrateRecordsWithProjects(sb, [agent]);
+  if (!canAccessAgent(agent, user, agent.project)) return c.json({ error: "Agent not found" }, 404, corsHeaders);
 
   let activity: any[] = [];
-  if (agent.owner === user.email || agent.email === user.email) {
+  if (agent.owner === user.email || agent.email === user.email || canAccessAgent(agent, user, agent.project)) {
     const { data } = await sb.from("audit_events").select("*").eq("actor_agent_id", slug).order("timestamp", { ascending: false }).limit(10);
     activity = data || [];
   }
@@ -1774,10 +2330,25 @@ app.patch("/agents/:slug", async (c) => {
   const slug = c.req.param("slug");
   const body = await c.req.json();
   const sb = getSupabase();
+  const { data: agent, error: fetchErr } = await sb.from("agents").select("*").eq("slug", slug).single();
+  if (fetchErr || !agent) return c.json({ error: "Agent not found" }, 404, corsHeaders);
+  await hydrateRecordsWithProjects(sb, [agent]);
+  if (!canAccessAgent(agent, user, agent.project)) return c.json({ error: "Agent not found" }, 404, corsHeaders);
+  if (agent.owner !== user.email) return c.json({ error: "Only the owner can update this agent" }, 403, corsHeaders);
 
   const patch: any = {};
   for (const field of ["status", "scopes", "config", "machine", "skill_slug", "email", "role"]) {
     if (body[field] !== undefined) patch[field] = body[field];
+  }
+  if (body.project !== undefined) {
+    if (!body.project) {
+      patch.project_id = null;
+    } else {
+      const project = await resolveProjectRef(sb, body.project);
+      if (!project) return c.json({ error: `Project "${body.project}" not found` }, 404, corsHeaders);
+      if (!canAccessProject(project, user)) return c.json({ error: "Forbidden" }, 403, corsHeaders);
+      patch.project_id = project.id;
+    }
   }
 
   if (Object.keys(patch).length === 0) return c.json({ error: "Nothing to update" }, 400, corsHeaders);
@@ -1786,7 +2357,16 @@ app.patch("/agents/:slug", async (c) => {
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
   const action = body.status ? "status_changed" : "updated";
-  await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "agent", entity_id: slug, action, channel: "api", state_after: patch });
+  await logAudit({
+    actor_email: user.email,
+    actor_name: user.name,
+    entity_type: "agent",
+    entity_id: slug,
+    action,
+    channel: "api",
+    project_id: patch.project_id ?? agent.project_id ?? null,
+    state_after: patch,
+  });
 
   return c.json({ ok: true }, 200, corsHeaders);
 });
@@ -1796,7 +2376,7 @@ app.post("/agents/:slug/heartbeat", async (c) => {
   const slug = c.req.param("slug");
   const sb = getSupabase();
 
-  const { data: agent, error: fetchErr } = await sb.from("agents").select("status, scopes, last_seen").eq("slug", slug).single();
+  const { data: agent, error: fetchErr } = await sb.from("agents").select("status, scopes, last_seen, project_id").eq("slug", slug).single();
   if (fetchErr || !agent) return c.json({ error: "Agent not found" }, 404, corsHeaders);
 
   const now = new Date().toISOString();
@@ -1805,7 +2385,15 @@ app.post("/agents/:slug/heartbeat", async (c) => {
   const lastSeen = agent.last_seen ? new Date(agent.last_seen) : null;
   const gap = lastSeen ? (Date.now() - lastSeen.getTime()) / 1000 : Infinity;
   if (gap > 300) {
-    await logAudit({ actor_agent_id: slug, actor_type: "agent", entity_type: "agent", entity_id: slug, action: "heartbeat", channel: "system" });
+    await logAudit({
+      actor_agent_id: slug,
+      actor_type: "agent",
+      entity_type: "agent",
+      entity_id: slug,
+      action: "heartbeat",
+      channel: "system",
+      project_id: agent.project_id || null,
+    });
   }
 
   return c.json({ status: agent.status, scopes: agent.scopes }, 200, corsHeaders);

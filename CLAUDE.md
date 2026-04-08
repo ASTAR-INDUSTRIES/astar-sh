@@ -1,6 +1,6 @@
 ## Versioning
 
-- Current version: `0.0.62`
+- Current version: `0.0.63`
 - Only bump `0.0.x` per commit. Each commit = one patch bump.
 - **NEVER** bump `0.x.0` without Erik's explicit written approval.
 - **NEVER** bump `x.0.0` without Erik's explicit written approval.

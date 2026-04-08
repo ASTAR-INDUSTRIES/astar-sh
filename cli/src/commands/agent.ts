@@ -16,10 +16,6 @@ async function requireAuth(): Promise<string> {
   }
 }
 
-async function optionalAuth(): Promise<string | undefined> {
-  try { return await getToken(); } catch { return undefined; }
-}
-
 function relativeTime(iso: string | null | undefined): string {
   if (!iso) return `${c.dim}never${c.reset}`;
   const diff = Date.now() - new Date(iso).getTime();
@@ -214,11 +210,12 @@ export function registerAgentCommands(program: Command) {
   agent
     .command("list")
     .description("List all registered agents")
-    .action(async () => {
-      const token = await optionalAuth();
+    .option("--project <slug>", "Filter to a single project")
+    .action(async (opts: { project?: string }) => {
+      const token = await requireAuth();
       const api = new AstarAPI(token);
       try {
-        const agents = await api.listAgents();
+        const agents = await api.listAgents({ project: opts.project });
         if (!agents.length) {
           console.log(`${c.dim}No agents registered.${c.reset}`);
           console.log(`  Register with: ${c.cyan}astar agent register --slug cfa --name "Chief Financial Agent"${c.reset}`);
@@ -227,7 +224,7 @@ export function registerAgentCommands(program: Command) {
 
         console.log("");
         table(
-          ["Slug", "Name", "Status", "Last Seen", "Owner"],
+          ["Slug", "Name", "Status", "Project", "Last Seen", "Owner"],
           agents.map((a) => {
             const sc = statusColors[a.status] || c.dim;
             const seen = relativeTime(a.last_seen);
@@ -237,6 +234,7 @@ export function registerAgentCommands(program: Command) {
               `${c.cyan}${a.slug}${c.reset}`,
               a.name,
               `${sc}${a.status}${c.reset}`,
+              `${c.dim}${a.project?.slug || "—"}${c.reset}`,
               seenStr,
               `${c.dim}${a.owner.split("@")[0]}${c.reset}`,
             ];
@@ -268,6 +266,7 @@ export function registerAgentCommands(program: Command) {
         if (a.email) console.log(`  ${c.dim}email:${c.reset}   ${a.email}`);
         console.log(`  ${c.dim}owner:${c.reset}   ${a.owner}`);
         if (a.skill_slug) console.log(`  ${c.dim}skill:${c.reset}   ${a.skill_slug}`);
+        if (a.project?.slug) console.log(`  ${c.dim}project:${c.reset} ${a.project.slug} · ${a.project.name}`);
         console.log(`  ${c.dim}status:${c.reset}  ${sc}${a.status}${c.reset}`);
         if (a.machine) console.log(`  ${c.dim}machine:${c.reset} ${a.machine}`);
         if (a.scopes?.length) console.log(`  ${c.dim}scopes:${c.reset}  ${a.scopes.join(` ${c.dim}·${c.reset} `)}`);
@@ -297,6 +296,7 @@ export function registerAgentCommands(program: Command) {
     .option("--scopes <scopes>", "Comma-separated scopes")
     .option("--machine <machine>", "Machine it runs on")
     .option("--owner <email>", "Owner email (defaults to you)")
+    .option("--project <slug>", "Attach to a project")
     .action(async (opts) => {
       const token = await requireAuth();
       const api = new AstarAPI(token);
@@ -309,8 +309,10 @@ export function registerAgentCommands(program: Command) {
           scopes: opts.scopes?.split(",").map((s: string) => s.trim()) || [],
           machine: opts.machine,
           owner: opts.owner,
+          project: opts.project,
         });
-        console.log(`${c.green}✓${c.reset} Agent ${c.cyan}${result.slug}${c.reset} registered`);
+        const projectStr = opts.project ? ` ${c.dim}#${opts.project}${c.reset}` : "";
+        console.log(`${c.green}✓${c.reset} Agent ${c.cyan}${result.slug}${c.reset} registered${projectStr}`);
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} ${e.message}`);
         process.exit(1);
@@ -433,6 +435,7 @@ export function registerAgentCommands(program: Command) {
     .option("--scopes <scopes>", "Comma-separated scopes")
     .option("--machine <machine>", "Machine identifier")
     .option("--owner <email>", "Owner email")
+    .option("--project <slug>", "Attach to a project")
     .option("--interval <seconds>", "Heartbeat interval in seconds", "30")
     .option("--max-beats <number>", "Max heartbeats per day (circuit breaker)", "100")
     .option("--skip-auth", "Skip Microsoft login (authenticate later with astar agent login)")
@@ -450,7 +453,7 @@ export function registerAgentCommands(program: Command) {
       try {
         console.log(`  ${c.dim}1/6${c.reset} Registering in agent registry...`);
         try {
-          await api.registerAgent({ slug, name: opts.name, email: opts.email, skill_slug: opts.skill, scopes, machine: opts.machine, owner: opts.owner });
+          await api.registerAgent({ slug, name: opts.name, email: opts.email, skill_slug: opts.skill, scopes, machine: opts.machine, owner: opts.owner, project: opts.project });
         } catch (e: any) {
           if (e.message?.includes("duplicate") || e.message?.includes("already")) {
             console.log(`  ${c.dim}     Already registered${c.reset}`);
@@ -541,6 +544,7 @@ claude -p "You are ${opts.name} running in heartbeat mode (beat $((BEATS + 1))/$
         console.log(`  ${c.dim}slug:${c.reset}      ${c.cyan}${slug}${c.reset}`);
         console.log(`  ${c.dim}email:${c.reset}     ${opts.email}`);
         if (opts.skill) console.log(`  ${c.dim}skill:${c.reset}     ${opts.skill}`);
+        if (opts.project) console.log(`  ${c.dim}project:${c.reset}   ${opts.project}`);
         console.log(`  ${c.dim}scopes:${c.reset}    ${scopes.join(", ") || "none"}`);
         console.log(`  ${c.dim}heartbeat:${c.reset} every ${opts.interval}s`);
         console.log(`  ${c.dim}workspace:${c.reset} ${agentDir}`);
@@ -604,6 +608,9 @@ function scopesToTools(scopes: string[]): string {
     "feedback.read": ["list_feedback"],
     "feedback.write": ["submit_feedback"],
     "agent.read": ["list_agents", "get_agent"],
+    "project.create": ["create_project"],
+    "project.read": ["list_projects", "get_project"],
+    "project.write": ["update_project"],
     "milestone.create": ["create_milestone"],
     "milestone.read": ["list_milestones"],
   };

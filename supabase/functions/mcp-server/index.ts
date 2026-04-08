@@ -33,6 +33,7 @@ const TOOL_SCOPES: Record<string, string> = {
   create_skill: "skill.create", update_skill: "skill.write", delete_skill: "skill.delete", list_skills: "skill.read", get_skill: "skill.read", upload_skill_file: "skill.write", delete_skill_file: "skill.delete", get_skill_history: "skill.read",
   create_news: "news.create", update_news: "news.write", delete_news: "news.delete", list_news: "news.read",
   submit_feedback: "feedback.write", list_feedback: "feedback.read", update_feedback: "feedback.write",
+  create_project: "project.create", list_projects: "project.read", get_project: "project.read", update_project: "project.write",
   create_event: "event.create", list_events: "event.read", get_event: "event.read", update_event: "event.write",
   create_milestone: "milestone.create", list_milestones: "milestone.read",
   ask_agent: "inbox.write", list_inbox: "inbox.read", read_inbox: "inbox.read", respond_inbox: "inbox.respond",
@@ -105,19 +106,96 @@ function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-async function resolveEventRef(sb: ReturnType<typeof adminClient>, ref: string) {
+function isStaffEmail(email?: string | null): boolean {
+  return !!email?.endsWith("@astarconsulting.no");
+}
+
+function normalizeProjectMembers(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => String(entry || "").trim().toLowerCase()).filter(Boolean);
+}
+
+function projectSummary(project: any) {
+  if (!project) return null;
+  return {
+    id: project.id,
+    slug: project.slug,
+    name: project.name,
+    visibility: project.visibility,
+    owner: project.owner,
+  };
+}
+
+function canAccessProject(project: any, user: { email: string }): boolean {
+  if (!project) return false;
+  if (project.visibility === "public") return isStaffEmail(user.email);
+  if (project.visibility === "team") {
+    return project.owner === user.email || normalizeProjectMembers(project.members).includes(user.email.toLowerCase());
+  }
+  return project.owner === user.email;
+}
+
+async function buildProjectMap(sb: ReturnType<typeof adminClient>, projectIds: string[]) {
+  if (!projectIds.length) return new Map<string, any>();
+  const { data: projects } = await sb.from("projects").select("*").in("id", projectIds);
+  return new Map((projects || []).map((project: any) => [project.id, project]));
+}
+
+async function hydrateRecordsWithProjects(sb: ReturnType<typeof adminClient>, records: any[]) {
+  const rows = records.filter(Boolean);
+  if (!rows.length) return new Map<string, any>();
+  const projectIds = [...new Set(rows.map((record) => record.project_id).filter(Boolean))];
+  const projectMap = await buildProjectMap(sb, projectIds);
+  for (const record of rows) {
+    record.project = record.project_id ? projectSummary(projectMap.get(record.project_id)) || null : null;
+  }
+  return projectMap;
+}
+
+async function resolveProjectRef(sb: ReturnType<typeof adminClient>, ref: string) {
   if (!ref) return null;
-  const query = sb.from("events").select("*");
+  const query = sb.from("projects").select("*");
   const { data } = isUuid(ref)
     ? await query.eq("id", ref).maybeSingle()
     : await query.eq("slug", ref).maybeSingle();
   return data || null;
 }
 
-function canAccessTask(task: any, user: { email: string }): boolean {
+async function resolveEventRef(sb: ReturnType<typeof adminClient>, ref: string) {
+  if (!ref) return null;
+  const query = sb.from("events").select("*");
+  const { data } = isUuid(ref)
+    ? await query.eq("id", ref).maybeSingle()
+    : await query.eq("slug", ref).maybeSingle();
+  if (data) await hydrateRecordsWithProjects(sb, [data]);
+  return data || null;
+}
+
+function canAccessEvent(event: any, user: { email: string }, project?: any | null): boolean {
+  if (!event) return false;
+  if (event.visibility === "private") return event.created_by === user.email;
+  if (project) return canAccessProject(project, user);
+  return event.visibility === "public" || event.visibility === "team" || event.created_by === user.email;
+}
+
+function canAccessTask(task: any, user: { email: string }, project?: any | null): boolean {
   if (!task) return false;
+  if (task.visibility === "private") return task.created_by === user.email || task.assigned_to === user.email;
+  if (project) return canAccessProject(project, user);
   if (task.visibility === "public" || task.visibility === "team") return true;
   return task.created_by === user.email || task.assigned_to === user.email;
+}
+
+function canAccessMilestone(milestone: any, user: { email: string }, project?: any | null): boolean {
+  if (!milestone) return false;
+  if (project) return canAccessProject(project, user);
+  return isStaffEmail(user.email);
+}
+
+function canAccessAgent(agent: any, user: { email: string }, project?: any | null): boolean {
+  if (!agent) return false;
+  if (project) return canAccessProject(project, user);
+  return isStaffEmail(user.email);
 }
 
 function canModifyTask(task: any, user: { email: string }): boolean {
@@ -129,8 +207,10 @@ async function listOwnedAgentSlugs(sb: ReturnType<typeof adminClient>, ownerEmai
   return new Set((data || []).map((agent: any) => agent.slug).filter(Boolean));
 }
 
-function canReadAuditEvent(event: any, user: { email: string }, ownedAgentSlugs: Set<string>): boolean {
-  return event.actor_email === user.email || (!!event.actor_agent_id && ownedAgentSlugs.has(event.actor_agent_id));
+function canReadAuditEvent(event: any, user: { email: string }, ownedAgentSlugs: Set<string>, project?: any | null): boolean {
+  return event.actor_email === user.email
+    || (!!event.actor_agent_id && ownedAgentSlugs.has(event.actor_agent_id))
+    || (!!project && canAccessProject(project, user));
 }
 
 // ── CORS ───────────────────────────────────────────────────────────────
@@ -644,6 +724,62 @@ const TOOLS = [
       required: ["id", "status"],
     },
   },
+  // ── Project Tools ──────────────────────────────────────────────────
+  {
+    name: "create_project",
+    description: "Create a first-class project and define who can see it",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Project name" },
+        slug: { type: "string", description: "Custom slug (optional)" },
+        description: { type: "string", description: "Short description" },
+        visibility: { type: "string", enum: ["private", "team", "public"], description: "Project visibility (default: team)" },
+        owner: { type: "string", description: "Owner email (default: caller)" },
+        members: { type: "array", items: { type: "string" }, description: "Project member emails" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "list_projects",
+    description: "List the projects you can access",
+    inputSchema: {
+      type: "object",
+      properties: {
+        search: { type: "string", description: "Search slug, name, or description" },
+        limit: { type: "number", description: "Max results (default 20)" },
+      },
+    },
+  },
+  {
+    name: "get_project",
+    description: "Get one project and the work attached to it",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: { type: "string", description: "Project slug or UUID" },
+      },
+      required: ["slug"],
+    },
+  },
+  {
+    name: "update_project",
+    description: "Update project metadata or membership",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: { type: "string", description: "Project slug or UUID" },
+        name: { type: "string" },
+        new_slug: { type: "string", description: "Updated slug" },
+        description: { type: "string" },
+        visibility: { type: "string", enum: ["private", "team", "public"] },
+        owner: { type: "string" },
+        members: { type: "array", items: { type: "string" } },
+      },
+      required: ["slug"],
+    },
+  },
   // ── Event Tools ────────────────────────────────────────────────────
   {
     name: "create_event",
@@ -675,6 +811,7 @@ const TOOLS = [
           },
         },
         visibility: { type: "string", enum: ["private", "team", "public"], description: "Event visibility (default: team)" },
+        project: { type: "string", description: "Project slug or UUID" },
       },
       required: ["title", "goal"],
     },
@@ -689,6 +826,7 @@ const TOOLS = [
         type: { type: "string", enum: ["arranged", "speaking", "attending", "podcast"] },
         month: { type: "string", description: "Filter by month (YYYY-MM)" },
         search: { type: "string", description: "Search title, goal, location, or slug" },
+        project: { type: "string", description: "Filter to a project slug or UUID" },
         limit: { type: "number", description: "Max results (default 20)" },
       },
     },
@@ -733,6 +871,7 @@ const TOOLS = [
           },
         },
         visibility: { type: "string", enum: ["private", "team", "public"] },
+        project: { type: "string", description: "Project slug or UUID. Pass empty string to clear." },
       },
       required: ["slug"],
     },
@@ -747,6 +886,7 @@ const TOOLS = [
         title: { type: "string", description: "What was shipped?" },
         category: { type: "string", enum: ["general", "contract", "technical", "product", "team"], description: "Category (default: general)" },
         date: { type: "string", description: "Date (YYYY-MM-DD, default: today)" },
+        project: { type: "string", description: "Project slug or UUID" },
       },
       required: ["title"],
     },
@@ -758,6 +898,7 @@ const TOOLS = [
       type: "object",
       properties: {
         month: { type: "string", description: "Filter by month (YYYY-MM)" },
+        project: { type: "string", description: "Filter to a project slug or UUID" },
         limit: { type: "number", description: "Max results (default 20)" },
       },
     },
@@ -877,6 +1018,7 @@ const TOOLS = [
         recurring: { type: "string", enum: ["weekly", "monthly", "quarterly"], description: "Recurring interval" },
         links: { type: "array", items: { type: "object", properties: { type: { type: "string" }, ref: { type: "string" } }, required: ["type", "ref"] }, description: "Links to skills, news, URLs" },
         event: { type: "string", description: "Event slug or UUID" },
+        project: { type: "string", description: "Project slug or UUID" },
         visibility: { type: "string", enum: ["private", "team", "public"], description: "Task visibility (default: private)" },
       },
       required: ["title"],
@@ -895,6 +1037,7 @@ const TOOLS = [
         due_date: { type: "string", description: "New due date (YYYY-MM-DD)" },
         description: { type: "string" },
         event: { type: "string", description: "Event slug or UUID" },
+        project: { type: "string", description: "Project slug or UUID. Pass empty string to clear." },
         visibility: { type: "string", enum: ["private", "team", "public"], description: "Task visibility" },
         parent_task_number: { type: "number", description: "Set parent task (makes this a subtask). Use 0 to remove parent." },
         reason: { type: "string", description: "Why this change is being made (for audit trail)" },
@@ -925,6 +1068,7 @@ const TOOLS = [
         priority: { type: "string", enum: ["low", "medium", "high", "critical"] },
         search: { type: "string", description: "Search title/description" },
         event: { type: "string", description: "Filter to an event slug or UUID" },
+        project: { type: "string", description: "Filter to a project slug or UUID" },
         limit: { type: "number", description: "Max results (default 20)" },
         include_all: { type: "boolean", description: "Disabled until server-enforced admin claims exist" },
       },
@@ -1023,6 +1167,7 @@ const TOOLS = [
       properties: {
         entity_type: { type: "string", description: "Filter: task, skill, news, feedback, inquiry, milestone" },
         entity_id: { type: "string", description: "Filter by entity ID (task number, slug, etc.)" },
+        project: { type: "string", description: "Filter by project slug or UUID" },
         actor_email: { type: "string", description: "Filter by actor email" },
         actor_agent_id: { type: "string", description: "Filter by agent ID (e.g. 'cfa')" },
         channel: { type: "string", enum: ["cli", "mcp", "api", "dashboard", "system"], description: "Filter by channel" },
@@ -1039,6 +1184,7 @@ const TOOLS = [
       type: "object",
       properties: {
         status: { type: "string", enum: ["active", "paused", "retired"] },
+        project: { type: "string", description: "Filter to a project slug or UUID" },
       },
     },
   },
@@ -1064,6 +1210,7 @@ const TOOLS = [
         skill_slug: { type: "string", description: "Skill that defines behavior" },
         scopes: { type: "array", items: { type: "string" }, description: "Allowed tool scopes" },
         machine: { type: "string", description: "Machine the agent runs on" },
+        project: { type: "string", description: "Project slug or UUID" },
       },
       required: ["slug", "name"],
     },
@@ -1517,11 +1664,160 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       return [{ type: "text", text: `✓ Feedback updated to "${args.status}".` }];
     }
 
+    // ── Projects ───────────────────────────────────────────────────
+    case "create_project": {
+      const sb = adminClient();
+      const slug = args.slug ? slugify(args.slug) : slugify(args.name);
+      if (!slug) return [{ type: "text", text: "Error: Could not derive a slug from the project name." }];
+      const owner = String(args.owner || user.email).trim().toLowerCase();
+      if (!isStaffEmail(owner)) return [{ type: "text", text: "Error: owner must be an @astarconsulting.no email." }];
+      const members = [...new Set(normalizeProjectMembers(args.members).filter((email) => isStaffEmail(email) && email !== owner))];
+      const { data, error } = await sb.from("projects").insert({
+        slug,
+        name: args.name,
+        description: args.description || null,
+        visibility: args.visibility || "team",
+        owner,
+        members,
+      }).select("*").single();
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      await sb.from("audit_events").insert({
+        actor_email: user.email,
+        actor_type: actorType,
+        actor_agent_id: actorAgentId,
+        entity_type: "project",
+        entity_id: data.slug,
+        action: "created",
+        channel: "mcp",
+        project_id: data.id,
+        state_after: { name: data.name, visibility: data.visibility, owner: data.owner, members: data.members },
+      });
+      return [{ type: "text", text: `✓ Project ${data.slug} created.` }];
+    }
+
+    case "list_projects": {
+      const sb = adminClient();
+      const limit = Math.min(args.limit || 20, 50);
+      const { data, error } = await sb.from("projects").select("*").order("updated_at", { ascending: false }).limit(100);
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      let projects = (data || []).filter((project: any) => canAccessProject(project, user));
+      if (args.search) {
+        const search = String(args.search).toLowerCase();
+        projects = projects.filter((project: any) =>
+          [project.slug, project.name, project.description].some((field) => String(field || "").toLowerCase().includes(search))
+        );
+      }
+      if (!projects.length) return [{ type: "text", text: "No projects found." }];
+      const out = projects.slice(0, limit).map((project: any) => {
+        const members = normalizeProjectMembers(project.members);
+        return `${project.slug} [${project.visibility}] ${project.name} (${project.owner.split("@")[0]}${members.length ? `, ${members.length} member(s)` : ""})`;
+      }).join("\n");
+      return [{ type: "text", text: out }];
+    }
+
+    case "get_project": {
+      const sb = adminClient();
+      const project = await resolveProjectRef(sb, args.slug);
+      if (!project || !canAccessProject(project, user)) return [{ type: "text", text: "Error: Project not found." }];
+
+      const [tasksResult, eventsResult, agentsResult, milestonesResult] = await Promise.all([
+        sb.from("tasks").select("*").eq("project_id", project.id).is("parent_task_id", null).is("archived_at", null).order("created_at", { ascending: false }).limit(25),
+        sb.from("events").select("*").eq("project_id", project.id).order("date", { ascending: true, nullsFirst: false }).order("created_at", { ascending: false }).limit(25),
+        sb.from("agents").select("*").eq("project_id", project.id).order("created_at", { ascending: false }).limit(25),
+        sb.from("milestones").select("*").eq("project_id", project.id).order("date", { ascending: false }).limit(25),
+      ]);
+      if (tasksResult.error) return [{ type: "text", text: `Error: ${tasksResult.error.message}` }];
+      if (eventsResult.error) return [{ type: "text", text: `Error: ${eventsResult.error.message}` }];
+      if (agentsResult.error) return [{ type: "text", text: `Error: ${agentsResult.error.message}` }];
+      if (milestonesResult.error) return [{ type: "text", text: `Error: ${milestonesResult.error.message}` }];
+
+      const tasks = tasksResult.data || [];
+      const events = eventsResult.data || [];
+      const agents = agentsResult.data || [];
+      const milestones = milestonesResult.data || [];
+      await hydrateRecordsWithProjects(sb, [...events, ...agents, ...milestones]);
+      await hydrateRecordsWithProjects(sb, tasks);
+
+      const visibleTasks = tasks.filter((task: any) => canAccessTask(task, user, project));
+      const visibleEvents = events.filter((event: any) => canAccessEvent(event, user, project));
+      const visibleAgents = agents.filter((agent: any) => canAccessAgent(agent, user, project));
+      const visibleMilestones = milestones.filter((milestone: any) => canAccessMilestone(milestone, user, project));
+
+      let out = `${project.name}\nSlug: ${project.slug}\nVisibility: ${project.visibility}\nOwner: ${project.owner}`;
+      if (project.description) out += `\n${project.description}`;
+      const members = normalizeProjectMembers(project.members);
+      if (members.length) out += `\nMembers: ${members.join(", ")}`;
+      if (visibleTasks.length) out += `\n\nTasks:\n${visibleTasks.map((task: any) => `  #${task.task_number} [${task.status}] ${task.priority} — ${task.title}`).join("\n")}`;
+      if (visibleEvents.length) out += `\n\nEvents:\n${visibleEvents.map((event: any) => `  ${event.slug} [${event.status}] ${event.title}`).join("\n")}`;
+      if (visibleAgents.length) out += `\n\nAgents:\n${visibleAgents.map((agent: any) => `  ${agent.slug} [${agent.status}] ${agent.name}`).join("\n")}`;
+      if (visibleMilestones.length) out += `\n\nMilestones:\n${visibleMilestones.map((milestone: any) => `  ${milestone.date} [${milestone.category}] ${milestone.title}`).join("\n")}`;
+      return [{ type: "text", text: out }];
+    }
+
+    case "update_project": {
+      const sb = adminClient();
+      const project = await resolveProjectRef(sb, args.slug);
+      if (!project || !canAccessProject(project, user)) return [{ type: "text", text: "Error: Project not found." }];
+      if (project.owner !== user.email) return [{ type: "text", text: "Denied: only the project owner can update this project." }];
+
+      const patch: any = { updated_at: new Date().toISOString() };
+      const stateBefore: Record<string, any> = {};
+      const stateAfter: Record<string, any> = {};
+      if (args.name !== undefined) { patch.name = args.name; stateBefore.name = project.name; stateAfter.name = args.name; }
+      if (args.new_slug !== undefined) {
+        const nextSlug = slugify(args.new_slug);
+        if (!nextSlug) return [{ type: "text", text: "Error: Could not derive a slug from the new slug value." }];
+        patch.slug = nextSlug;
+        stateBefore.slug = project.slug;
+        stateAfter.slug = nextSlug;
+      }
+      if (args.description !== undefined) { patch.description = args.description || null; stateBefore.description = project.description || null; stateAfter.description = patch.description; }
+      if (args.visibility !== undefined) { patch.visibility = args.visibility; stateBefore.visibility = project.visibility; stateAfter.visibility = args.visibility; }
+      if (args.owner !== undefined) {
+        const owner = String(args.owner || "").trim().toLowerCase();
+        if (!isStaffEmail(owner)) return [{ type: "text", text: "Error: owner must be an @astarconsulting.no email." }];
+        patch.owner = owner;
+        stateBefore.owner = project.owner;
+        stateAfter.owner = owner;
+      }
+      if (args.members !== undefined) {
+        const owner = patch.owner || project.owner;
+        patch.members = [...new Set(normalizeProjectMembers(args.members).filter((email) => isStaffEmail(email) && email !== owner))];
+        stateBefore.members = normalizeProjectMembers(project.members);
+        stateAfter.members = patch.members;
+      }
+      if (!Object.keys(stateAfter).length) return [{ type: "text", text: "Error: No fields to update." }];
+      const { error } = await sb.from("projects").update(patch).eq("id", project.id);
+      if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      await sb.from("audit_events").insert({
+        actor_email: user.email,
+        actor_type: actorType,
+        actor_agent_id: actorAgentId,
+        entity_type: "project",
+        entity_id: patch.slug || project.slug,
+        action: "updated",
+        channel: "mcp",
+        project_id: project.id,
+        state_before: stateBefore,
+        state_after: stateAfter,
+      });
+      return [{ type: "text", text: `✓ Project ${patch.slug || project.slug} updated.` }];
+    }
+
     // ── Events ────────────────────────────────────────────────────
     case "create_event": {
       const sb = adminClient();
       const slug = args.slug ? slugify(args.slug) : slugify(args.title);
       if (!slug) return [{ type: "text", text: "Error: Could not derive a slug from the title." }];
+      let projectId = null;
+      let projectLabel = "";
+      if (args.project) {
+        const project = await resolveProjectRef(sb, args.project);
+        if (!project) return [{ type: "text", text: `Error: Project '${args.project}' not found.` }];
+        if (!canAccessProject(project, user)) return [{ type: "text", text: "Denied: you cannot attach this event to that project." }];
+        projectId = project.id;
+        projectLabel = project.slug;
+      }
       const { data, error } = await sb.from("events").insert({
         slug,
         title: args.title,
@@ -1534,6 +1830,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
         attendees: Array.isArray(args.attendees) ? args.attendees : [],
         visibility: args.visibility || "team",
         created_by: user.email,
+        project_id: projectId,
       }).select("id, slug, title, date, date_tentative").single();
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
       await sb.from("audit_events").insert({
@@ -1544,40 +1841,51 @@ async function handleTool(name: string, args: any, user: { email: string; userId
         entity_id: data.slug,
         action: "created",
         channel: "mcp",
+        project_id: projectId,
         state_after: { title: args.title, goal: args.goal, type: args.type || "attending", status: args.status || "tentative" },
         context: { event_uuid: data.id },
       });
       const when = data.date ? ` (${data.date}${data.date_tentative ? ", tentative" : ""})` : "";
-      return [{ type: "text", text: `✓ Event ${data.slug} created${when}.` }];
+      const projectSuffix = projectLabel ? ` #${projectLabel}` : "";
+      return [{ type: "text", text: `✓ Event ${data.slug} created${when}${projectSuffix}.` }];
     }
 
     case "list_events": {
       const sb = adminClient();
       const limit = Math.min(args.limit || 20, 50);
       const fetchLimit = args.search ? 100 : limit;
+      let filterProject: any = null;
       let query = sb.from("events")
         .select("*")
-        .or(`visibility.eq.public,visibility.eq.team,created_by.eq.${user.email}`)
         .order("date", { ascending: true, nullsFirst: false })
         .order("created_at", { ascending: false })
         .limit(fetchLimit);
       if (args.status) query = query.eq("status", args.status);
       if (args.type) query = query.eq("type", args.type);
       if (args.month) query = query.gte("date", `${args.month}-01`).lte("date", `${args.month}-31`);
+      if (args.project) {
+        filterProject = await resolveProjectRef(sb, args.project);
+        if (!filterProject) return [{ type: "text", text: `Error: Project '${args.project}' not found.` }];
+        if (!canAccessProject(filterProject, user)) return [{ type: "text", text: "Denied: you cannot read that project." }];
+        query = query.eq("project_id", filterProject.id);
+      }
       const { data, error } = await query;
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
-      let events = data || [];
+      const events = data || [];
+      await hydrateRecordsWithProjects(sb, events as any[]);
+      let visibleEvents = events.filter((event: any) => canAccessEvent(event, user, event.project || filterProject));
       if (args.search) {
         const search = String(args.search).toLowerCase();
-        events = events.filter((event: any) =>
+        visibleEvents = visibleEvents.filter((event: any) =>
           [event.slug, event.title, event.goal, event.location].some((field) => String(field || "").toLowerCase().includes(search))
         );
       }
-      if (!events.length) return [{ type: "text", text: "No events found." }];
-      const out = events.slice(0, limit).map((event: any) => {
+      if (!visibleEvents.length) return [{ type: "text", text: "No events found." }];
+      const out = visibleEvents.slice(0, limit).map((event: any) => {
         const when = event.date ? `${event.date}${event.date_tentative ? " (tentative)" : ""}` : "TBD";
         const where = event.location ? ` · ${event.location}` : "";
-        return `${event.slug} [${event.status}] ${event.type} — ${event.title} (${when})${where}`;
+        const projectLabel = event.project?.slug ? ` #${event.project.slug}` : "";
+        return `${event.slug} [${event.status}] ${event.type} — ${event.title} (${when})${where}${projectLabel}`;
       }).join("\n");
       return [{ type: "text", text: out }];
     }
@@ -1586,27 +1894,32 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const sb = adminClient();
       const event = await resolveEventRef(sb, args.slug);
       if (!event) return [{ type: "text", text: "Error: Event not found." }];
-      if (event.visibility === "private" && event.created_by !== user.email) return [{ type: "text", text: "Error: Forbidden." }];
+      if (!canAccessEvent(event, user, event.project)) return [{ type: "text", text: "Error: Forbidden." }];
 
       const { data: tasks } = await sb.from("tasks")
-        .select("id, task_number, title, status, priority, assigned_to, due_date, parent_task_id")
+        .select("*")
         .eq("event_id", event.id)
         .is("archived_at", null)
         .order("task_number", { ascending: true });
-
-      const topLevel = (tasks || []).filter((task: any) => !task.parent_task_id);
-      const subtasks = (tasks || []).filter((task: any) => task.parent_task_id);
+      const allTasks = tasks || [];
+      await hydrateRecordsWithProjects(sb, allTasks);
+      const topLevel = allTasks.filter((task: any) => !task.parent_task_id && canAccessTask(task, user, task.project || event.project));
+      const subtasks = allTasks.filter((task: any) => task.parent_task_id);
       const subtasksByParent: Record<string, any[]> = {};
-      for (const task of subtasks) (subtasksByParent[task.parent_task_id] ||= []).push(task);
+      for (const task of subtasks.filter((task: any) => canAccessTask(task, user, task.project || event.project))) {
+        (subtasksByParent[task.parent_task_id] ||= []).push(task);
+      }
 
       let out = `${event.title}\nSlug: ${event.slug}\nType: ${event.type} | Status: ${event.status}\nGoal: ${event.goal}\nDate: ${event.date || "TBD"}${event.date_tentative ? " (tentative)" : ""}\nLocation: ${event.location || "none"}\nVisibility: ${event.visibility}`;
+      if (event.project?.slug) out += `\nProject: ${event.project.slug} — ${event.project.name}`;
       if (event.attendees?.length) {
         out += `\n\nAttendees:\n${event.attendees.map((attendee: any) => `  - ${attendee.kind}: ${attendee.name}${attendee.org ? ` (${attendee.org}${attendee.role ? ` · ${attendee.role}` : ""})` : attendee.role ? ` (${attendee.role})` : ""}`).join("\n")}`;
       }
       if (topLevel.length) {
         const lines: string[] = [];
         for (const task of topLevel) {
-          lines.push(`  #${task.task_number} [${task.status}] ${task.priority} — ${task.title}`);
+          const projectLabel = task.project?.slug ? ` #${task.project.slug}` : "";
+          lines.push(`  #${task.task_number} [${task.status}] ${task.priority} — ${task.title}${projectLabel}`);
           for (const subtask of subtasksByParent[task.id] || []) {
             lines.push(`    - #${subtask.task_number} [${subtask.status}] ${subtask.title}`);
           }
@@ -1632,6 +1945,20 @@ async function handleTool(name: string, args: any, user: { email: string; userId
           stateAfter[field] = (args as any)[field];
         }
       }
+      if (args.project !== undefined) {
+        if (!args.project) {
+          patch.project_id = null;
+          stateBefore.project_id = event.project_id || null;
+          stateAfter.project_id = null;
+        } else {
+          const project = await resolveProjectRef(sb, args.project);
+          if (!project) return [{ type: "text", text: `Error: Project '${args.project}' not found.` }];
+          if (!canAccessProject(project, user)) return [{ type: "text", text: "Denied: you cannot attach this event to that project." }];
+          patch.project_id = project.id;
+          stateBefore.project_id = event.project_id || null;
+          stateAfter.project_id = project.id;
+        }
+      }
       if (!Object.keys(stateAfter).length) return [{ type: "text", text: "Error: No fields to update." }];
       const { error } = await sb.from("events").update(patch).eq("id", event.id);
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
@@ -1643,6 +1970,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
         entity_id: event.slug,
         action: "updated",
         channel: "mcp",
+        project_id: patch.project_id ?? event.project_id ?? null,
         state_before: stateBefore,
         state_after: stateAfter,
         context: { event_uuid: event.id },
@@ -1653,26 +1981,58 @@ async function handleTool(name: string, args: any, user: { email: string; userId
     // ── Milestones ──────────────────────────────────────────────────
     case "create_milestone": {
       const sb = adminClient();
+      let projectId = null;
+      let projectLabel = "";
+      if (args.project) {
+        const project = await resolveProjectRef(sb, args.project);
+        if (!project) return [{ type: "text", text: `Error: Project '${args.project}' not found.` }];
+        if (!canAccessProject(project, user)) return [{ type: "text", text: "Denied: you cannot attach this milestone to that project." }];
+        projectId = project.id;
+        projectLabel = project.slug;
+      }
       const { error } = await sb.from("milestones").insert({
         title: args.title,
         date: args.date || new Date().toISOString().split("T")[0],
         category: args.category || "general",
         created_by: user.email.split("@")[0],
+        project_id: projectId,
       });
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
-      return [{ type: "text", text: `✓ Shipped: "${args.title}"` }];
+      await sb.from("audit_events").insert({
+        actor_email: user.email,
+        actor_type: actorType,
+        actor_agent_id: actorAgentId,
+        entity_type: "milestone",
+        action: "created",
+        channel: "mcp",
+        project_id: projectId,
+        state_after: { title: args.title, category: args.category || "general" },
+      });
+      return [{ type: "text", text: `✓ Shipped: "${args.title}"${projectLabel ? ` #${projectLabel}` : ""}` }];
     }
 
     case "list_milestones": {
       const sb = adminClient();
+      let filterProject: any = null;
       let query = sb.from("milestones").select("*").order("date", { ascending: false }).limit(args.limit || 20);
       if (args.month) {
         query = query.gte("date", `${args.month}-01`).lte("date", `${args.month}-31`);
       }
+      if (args.project) {
+        filterProject = await resolveProjectRef(sb, args.project);
+        if (!filterProject) return [{ type: "text", text: `Error: Project '${args.project}' not found.` }];
+        if (!canAccessProject(filterProject, user)) return [{ type: "text", text: "Denied: you cannot read that project." }];
+        query = query.eq("project_id", filterProject.id);
+      }
       const { data, error } = await query;
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
-      if (!data?.length) return [{ type: "text", text: "No milestones found." }];
-      const out = data.map((m: any) => `${m.date} — [${m.category}] ${m.title} (${m.created_by || "unknown"})`).join("\n");
+      const milestones = data || [];
+      await hydrateRecordsWithProjects(sb, milestones as any[]);
+      const visibleMilestones = milestones.filter((milestone: any) => canAccessMilestone(milestone, user, milestone.project || filterProject));
+      if (!visibleMilestones.length) return [{ type: "text", text: "No milestones found." }];
+      const out = visibleMilestones.map((milestone: any) =>
+        `${milestone.date} — [${milestone.category}] ${milestone.title} (${milestone.created_by || "unknown"}${milestone.project?.slug ? ` · #${milestone.project.slug}` : ""})`
+      ).join("\n");
       return [{ type: "text", text: out }];
     }
 
@@ -1680,8 +2040,10 @@ async function handleTool(name: string, args: any, user: { email: string; userId
     case "ask_agent": {
       const sb = adminClient();
       const slug = args.agent_slug;
-      const { data: agent } = await sb.from("agents").select("slug, status").eq("slug", slug).single();
+      const { data: agent } = await sb.from("agents").select("*").eq("slug", slug).single();
       if (!agent) return [{ type: "text", text: `Error: Agent '${slug}' not found.` }];
+      await hydrateRecordsWithProjects(sb, [agent]);
+      if (!canAccessAgent(agent, user, agent.project)) return [{ type: "text", text: `Error: Agent '${slug}' not found.` }];
       if (agent.status !== "active") return [{ type: "text", text: `Error: Agent '${slug}' is ${agent.status}.` }];
       const lower = args.content.toLowerCase().trim();
       const type = args.type || (lower.includes("?") || /^(what|how|why|when|who|where|is |are |can |do |does )/.test(lower) ? "question" : /^review|review this|check this/.test(lower) ? "review" : "action");
@@ -1689,6 +2051,17 @@ async function handleTool(name: string, args: any, user: { email: string; userId
         agent_slug: slug, type, content: args.content, author_email: user.email, author_name: user.email.split("@")[0],
       }).select("id").single();
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      await sb.from("audit_events").insert({
+        actor_email: user.email,
+        actor_type: actorType,
+        actor_agent_id: actorAgentId,
+        entity_type: "inbox",
+        entity_id: data.id,
+        action: "submitted",
+        channel: "mcp",
+        project_id: agent.project_id || null,
+        state_after: { agent_slug: slug, type },
+      });
       const label = type === "action" ? `Sent to ${slug}. Will be processed shortly.` : `Message sent to ${slug} (${data.id.slice(0, 8)}). Awaiting response.`;
       return [{ type: "text", text: `✓ ${label}` }];
     }
@@ -1774,19 +2147,42 @@ async function handleTool(name: string, args: any, user: { email: string; userId
     case "create_task": {
       const sb = adminClient();
       let parentId = null;
+      let parentProjectId = null;
       if (args.parent_task_number) {
         const { data: p } = await sb.from("tasks").select("*").eq("task_number", args.parent_task_number).single();
-        if (p && !canAccessTask(p, user)) return [{ type: "text", text: `Error: Parent task #${args.parent_task_number} not found.` }];
-        if (p) parentId = p.id;
+        if (p) await hydrateRecordsWithProjects(sb, [p]);
+        if (p && !canAccessTask(p, user, p.project)) return [{ type: "text", text: `Error: Parent task #${args.parent_task_number} not found.` }];
+        if (p) {
+          parentId = p.id;
+          parentProjectId = p.project_id || null;
+        }
       }
       let eventId = null;
       let eventSlug = "";
+      let eventProjectId = null;
       if (args.event) {
         const event = await resolveEventRef(sb, args.event);
         if (!event) return [{ type: "text", text: `Error: Event '${args.event}' not found.` }];
-        if (event.visibility === "private" && event.created_by !== user.email) return [{ type: "text", text: "Denied: you cannot link a private event you do not own." }];
+        if (!canAccessEvent(event, user, event.project)) return [{ type: "text", text: "Denied: you cannot link that event." }];
         eventId = event.id;
         eventSlug = event.slug;
+        eventProjectId = event.project_id || null;
+      }
+      let projectId = null;
+      let projectSlug = "";
+      if (args.project) {
+        const project = await resolveProjectRef(sb, args.project);
+        if (!project) return [{ type: "text", text: `Error: Project '${args.project}' not found.` }];
+        if (!canAccessProject(project, user)) return [{ type: "text", text: "Denied: you cannot attach this task to that project." }];
+        projectId = project.id;
+        projectSlug = project.slug;
+      }
+      for (const scopedProjectId of [parentProjectId, eventProjectId]) {
+        if (!scopedProjectId) continue;
+        if (projectId && projectId !== scopedProjectId) {
+          return [{ type: "text", text: "Error: Parent task, event, and project must belong to the same project." }];
+        }
+        projectId = scopedProjectId;
       }
       const { data, error } = await sb.from("tasks").insert({
         title: args.title,
@@ -1801,6 +2197,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
         recurring: args.recurring ? { interval: args.recurring } : null,
         event_id: eventId,
         visibility: args.visibility || "private",
+        project_id: projectId,
       }).select("task_number, id").single();
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
       if (args.links?.length) {
@@ -1808,30 +2205,67 @@ async function handleTool(name: string, args: any, user: { email: string; userId
           await sb.from("task_links").insert({ task_id: data.id, link_type: link.type, link_ref: link.ref });
         }
       }
-      await sb.from("audit_events").insert({ actor_email: user.email, actor_type: actorType, actor_agent_id: actorAgentId, entity_type: "task", entity_id: String(data.task_number), action: "created", channel: "mcp", state_after: { title: args.title, event: eventSlug || null }, context: { task_uuid: data.id } });
-      const parts = [args.assigned_to ? ` → ${args.assigned_to}` : "", parentId ? ` (subtask of #${args.parent_task_number})` : "", eventSlug ? ` @${eventSlug}` : ""];
+      await sb.from("audit_events").insert({
+        actor_email: user.email,
+        actor_type: actorType,
+        actor_agent_id: actorAgentId,
+        entity_type: "task",
+        entity_id: String(data.task_number),
+        action: "created",
+        channel: "mcp",
+        project_id: projectId,
+        state_after: { title: args.title, event: eventSlug || null, project_id: projectId },
+        context: { task_uuid: data.id },
+      });
+      if (!projectSlug && projectId) {
+        const project = await resolveProjectRef(sb, projectId);
+        projectSlug = project?.slug || "";
+      }
+      const parts = [args.assigned_to ? ` → ${args.assigned_to}` : "", parentId ? ` (subtask of #${args.parent_task_number})` : "", eventSlug ? ` @${eventSlug}` : "", projectSlug ? ` #${projectSlug}` : ""];
       return [{ type: "text", text: `✓ Task #${data.task_number} created: "${args.title}"${parts.join("")}` }];
     }
 
     case "update_task": {
       const sb = adminClient();
-      const { data: task, error: fetchErr } = await sb.from("tasks").select("id, task_number, status, title, description, priority, created_by, assigned_to, due_date, tags, estimated_hours, visibility, parent_task_id, event_id").eq("task_number", args.task_number).single();
+      const { data: task, error: fetchErr } = await sb.from("tasks").select("*").eq("task_number", args.task_number).single();
       if (fetchErr || !task) return [{ type: "text", text: "Error: Task not found." }];
-      if (!canAccessTask(task, user)) return [{ type: "text", text: "Error: Task not found." }];
+      await hydrateRecordsWithProjects(sb, [task]);
+      if (!canAccessTask(task, user, task.project)) return [{ type: "text", text: "Error: Task not found." }];
       if (!canModifyTask(task, user)) return [{ type: "text", text: "Denied: only the creator or assignee can modify this task." }];
       const patch: any = { updated_at: new Date().toISOString() };
       const changes: any = {};
       const stateBefore: Record<string, any> = {};
+      let nextProjectId = task.project_id || null;
       for (const f of ["status", "priority", "assigned_to", "due_date", "description", "visibility"]) {
         if ((args as any)[f] !== undefined) { patch[f] = (args as any)[f]; changes[f] = (args as any)[f]; stateBefore[f] = (task as any)[f]; }
       }
+      if (args.project !== undefined) {
+        if (!args.project) {
+          nextProjectId = null;
+        } else {
+          const project = await resolveProjectRef(sb, args.project);
+          if (!project) return [{ type: "text", text: `Error: Project '${args.project}' not found.` }];
+          if (!canAccessProject(project, user)) return [{ type: "text", text: "Denied: you cannot attach this task to that project." }];
+          nextProjectId = project.id;
+        }
+      }
       if (args.event !== undefined) {
-        const event = await resolveEventRef(sb, args.event);
-        if (!event) return [{ type: "text", text: `Error: Event '${args.event}' not found.` }];
-        if (event.visibility === "private" && event.created_by !== user.email) return [{ type: "text", text: "Denied: you cannot link a private event you do not own." }];
-        patch.event_id = event.id;
-        changes.event_id = event.id;
-        stateBefore.event_id = task.event_id;
+        if (!args.event) {
+          patch.event_id = null;
+          changes.event_id = null;
+          stateBefore.event_id = task.event_id;
+        } else {
+          const event = await resolveEventRef(sb, args.event);
+          if (!event) return [{ type: "text", text: `Error: Event '${args.event}' not found.` }];
+          if (!canAccessEvent(event, user, event.project)) return [{ type: "text", text: "Denied: you cannot link that event." }];
+          if (event.project_id && nextProjectId && nextProjectId !== event.project_id) {
+            return [{ type: "text", text: "Error: Task project and event project must match." }];
+          }
+          patch.event_id = event.id;
+          changes.event_id = event.id;
+          stateBefore.event_id = task.event_id;
+          if (event.project_id) nextProjectId = event.project_id;
+        }
       }
       if (args.parent_task_number !== undefined) {
         if (args.parent_task_number === 0) {
@@ -1841,29 +2275,63 @@ async function handleTool(name: string, args: any, user: { email: string; userId
         } else {
           const { data: parent } = await sb.from("tasks").select("*").eq("task_number", args.parent_task_number).single();
           if (!parent) return [{ type: "text", text: `Error: Parent task #${args.parent_task_number} not found.` }];
-          if (!canAccessTask(parent, user)) return [{ type: "text", text: `Error: Parent task #${args.parent_task_number} not found.` }];
+          await hydrateRecordsWithProjects(sb, [parent]);
+          if (!canAccessTask(parent, user, parent.project)) return [{ type: "text", text: `Error: Parent task #${args.parent_task_number} not found.` }];
+          if (parent.project_id && nextProjectId && nextProjectId !== parent.project_id) {
+            return [{ type: "text", text: "Error: Task project and parent task project must match." }];
+          }
           patch.parent_task_id = parent.id;
           changes.parent_task_id = parent.id;
           stateBefore.parent_task_id = (task as any).parent_task_id;
+          if (parent.project_id) nextProjectId = parent.project_id;
         }
+      }
+      if (nextProjectId !== task.project_id) {
+        patch.project_id = nextProjectId;
+        changes.project_id = nextProjectId;
+        stateBefore.project_id = task.project_id || null;
       }
       if (args.status === "completed") { patch.completed_by = user.email; patch.completed_at = new Date().toISOString(); }
       const { error } = await sb.from("tasks").update(patch).eq("id", task.id);
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
-      await sb.from("audit_events").insert({ actor_email: user.email, actor_type: actorType, actor_agent_id: actorAgentId, entity_type: "task", entity_id: String(args.task_number), action: args.status === "completed" ? "completed" : "updated", channel: "mcp", state_before: stateBefore, state_after: changes, context: { task_uuid: task.id, reason: args.reason || null } });
+      await sb.from("audit_events").insert({
+        actor_email: user.email,
+        actor_type: actorType,
+        actor_agent_id: actorAgentId,
+        entity_type: "task",
+        entity_id: String(args.task_number),
+        action: args.status === "completed" ? "completed" : "updated",
+        channel: "mcp",
+        project_id: patch.project_id ?? task.project_id ?? null,
+        state_before: stateBefore,
+        state_after: changes,
+        context: { task_uuid: task.id, reason: args.reason || null },
+      });
       return [{ type: "text", text: `✓ Task #${args.task_number} updated.` }];
     }
 
     case "complete_task": {
       const sb = adminClient();
-      const { data: task, error: fetchErr } = await sb.from("tasks").select("id, title, status, visibility, created_by, assigned_to").eq("task_number", args.task_number).single();
+      const { data: task, error: fetchErr } = await sb.from("tasks").select("*").eq("task_number", args.task_number).single();
       if (fetchErr || !task) return [{ type: "text", text: "Error: Task not found." }];
-      if (!canAccessTask(task, user)) return [{ type: "text", text: "Error: Task not found." }];
+      await hydrateRecordsWithProjects(sb, [task]);
+      if (!canAccessTask(task, user, task.project)) return [{ type: "text", text: "Error: Task not found." }];
       if (!canModifyTask(task, user)) return [{ type: "text", text: "Denied: only the creator or assignee can complete this task." }];
       if (task.status === "completed") return [{ type: "text", text: `Task #${args.task_number} is already completed.` }];
       const { error } = await sb.from("tasks").update({ status: "completed", completed_by: user.email, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", task.id);
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
-      await sb.from("audit_events").insert({ actor_email: user.email, actor_type: actorType, actor_agent_id: actorAgentId, entity_type: "task", entity_id: String(args.task_number), action: "completed", channel: "mcp", state_before: { status: task.status }, context: { task_uuid: task.id, reason: args.reason || null } });
+      await sb.from("audit_events").insert({
+        actor_email: user.email,
+        actor_type: actorType,
+        actor_agent_id: actorAgentId,
+        entity_type: "task",
+        entity_id: String(args.task_number),
+        action: "completed",
+        channel: "mcp",
+        project_id: task.project_id || null,
+        state_before: { status: task.status },
+        context: { task_uuid: task.id, reason: args.reason || null },
+      });
       return [{ type: "text", text: `✓ Task #${args.task_number} completed: "${task.title}"` }];
     }
 
@@ -1874,20 +2342,33 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       }
       const resultLimit = Math.min(args.limit || 20, 100);
       const fetchLimit = Math.min(Math.max(resultLimit * 10, 100), 500);
-      let query = sb.from("tasks").select("task_number, title, status, priority, assigned_to, due_date, created_at, created_by, visibility, description, event_id").is("archived_at", null).not("status", "eq", "cancelled").order("created_at", { ascending: false }).limit(fetchLimit);
+      let filterProject: any = null;
+      let filterEvent: any = null;
+      let query = sb.from("tasks").select("*").is("archived_at", null).not("status", "eq", "cancelled").order("created_at", { ascending: false }).limit(fetchLimit);
       if (args.assigned_to && args.assigned_to !== "all") query = query.eq("assigned_to", args.assigned_to);
       else if (!args.assigned_to) query = query.eq("assigned_to", user.email);
       if (args.status) query = query.eq("status", args.status);
       if (args.priority) query = query.eq("priority", args.priority);
       if (args.search) query = query.or(`title.ilike.%${args.search}%,description.ilike.%${args.search}%`);
       if (args.event) {
-        const event = await resolveEventRef(sb, args.event);
-        if (!event) return [{ type: "text", text: `Error: Event '${args.event}' not found.` }];
-        query = query.eq("event_id", event.id);
+        filterEvent = await resolveEventRef(sb, args.event);
+        if (!filterEvent) return [{ type: "text", text: `Error: Event '${args.event}' not found.` }];
+        if (!canAccessEvent(filterEvent, user, filterEvent.project)) return [{ type: "text", text: "Denied: you cannot read that event." }];
+        query = query.eq("event_id", filterEvent.id);
+      }
+      if (args.project) {
+        filterProject = await resolveProjectRef(sb, args.project);
+        if (!filterProject) return [{ type: "text", text: `Error: Project '${args.project}' not found.` }];
+        if (!canAccessProject(filterProject, user)) return [{ type: "text", text: "Denied: you cannot read that project." }];
+        query = query.eq("project_id", filterProject.id);
       }
       const { data, error } = await query;
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
-      const visibleTasks = (data || []).filter((task: any) => canAccessTask(task, user)).slice(0, resultLimit);
+      const tasks = data || [];
+      await hydrateRecordsWithProjects(sb, tasks as any[]);
+      const visibleTasks = tasks
+        .filter((task: any) => canAccessTask(task, user, task.project || filterProject || filterEvent?.project || null))
+        .slice(0, resultLimit);
       if (!visibleTasks.length) return [{ type: "text", text: "No tasks found." }];
       const eventIds = [...new Set(visibleTasks.map((task: any) => task.event_id).filter(Boolean))];
       const eventMap = new Map<string, string>();
@@ -1897,7 +2378,8 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       }
       const out = visibleTasks.map((t: any) => {
         const eventLabel = t.event_id ? ` @${eventMap.get(t.event_id) || "event"}` : "";
-        return `#${t.task_number} [${t.status}] ${t.priority} — ${t.title}${eventLabel} (${t.assigned_to?.split("@")[0] || "unassigned"}${t.due_date ? `, due ${t.due_date}` : ""})`;
+        const projectLabel = t.project?.slug ? ` #${t.project.slug}` : "";
+        return `#${t.task_number} [${t.status}] ${t.priority} — ${t.title}${eventLabel}${projectLabel} (${t.assigned_to?.split("@")[0] || "unassigned"}${t.due_date ? `, due ${t.due_date}` : ""})`;
       }).join("\n");
       return [{ type: "text", text: out }];
     }
@@ -1906,12 +2388,14 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const sb = adminClient();
       const { data: task, error: fetchErr } = await sb.from("tasks").select("*").eq("task_number", args.task_number).single();
       if (fetchErr || !task) return [{ type: "text", text: "Error: Task not found." }];
-      if (!canAccessTask(task, user)) return [{ type: "text", text: "Error: Task not found." }];
+      await hydrateRecordsWithProjects(sb, [task]);
+      if (!canAccessTask(task, user, task.project)) return [{ type: "text", text: "Error: Task not found." }];
       const { data: activity } = await sb.from("audit_events").select("*").eq("entity_type", "task").eq("entity_id", String(task.task_number)).order("timestamp", { ascending: false }).limit(10);
-      const { data: subtasks } = await sb.from("tasks").select("task_number, title, status, visibility, created_by, assigned_to").eq("parent_task_id", task.id).order("task_number");
+      const { data: subtasks } = await sb.from("tasks").select("*").eq("parent_task_id", task.id).order("task_number");
       const { data: links } = await sb.from("task_links").select("*").eq("task_id", task.id);
       const event = task.event_id ? await resolveEventRef(sb, task.event_id) : null;
-      const visibleSubtasks = (subtasks || []).filter((subtask: any) => canAccessTask(subtask, user));
+      await hydrateRecordsWithProjects(sb, subtasks || []);
+      const visibleSubtasks = (subtasks || []).filter((subtask: any) => canAccessTask(subtask, user, subtask.project || task.project));
       const actLog = (activity || []).map((a: any) => `  ${a.timestamp.slice(0, 16)} ${(a.actor_email || a.actor_type || "system").split("@")[0]} ${a.action}`).join("\n");
       const subLog = visibleSubtasks.map((s: any) => `  ${s.status === "completed" ? "✓" : " "} #${s.task_number} ${s.title}`).join("\n");
       const linkLog = (links || []).map((l: any) => `  ${l.link_type}: ${l.link_ref}`).join("\n");
@@ -1919,6 +2403,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       if (task.estimated_hours) out += ` | Est: ${task.estimated_hours}h`;
       if (task.recurring) out += ` | Recurring: ${task.recurring.interval}`;
       if (event) out += `\nEvent: ${event.slug} — ${event.title}`;
+      if (task.project?.slug) out += `\nProject: ${task.project.slug} — ${task.project.name}`;
       if (task.description) out += `\n\n${task.description}`;
       if (subLog) out += `\n\nSubtasks:\n${subLog}`;
       if (linkLog) out += `\n\nLinks:\n${linkLog}`;
@@ -1930,9 +2415,21 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const sb = adminClient();
       const { data: task, error: fetchErr } = await sb.from("tasks").select("*").eq("task_number", args.task_number).single();
       if (fetchErr || !task) return [{ type: "text", text: "Error: Task not found." }];
-      if (!canAccessTask(task, user)) return [{ type: "text", text: "Error: Task not found." }];
+      await hydrateRecordsWithProjects(sb, [task]);
+      if (!canAccessTask(task, user, task.project)) return [{ type: "text", text: "Error: Task not found." }];
       if (!canModifyTask(task, user)) return [{ type: "text", text: "Denied: only the creator or assignee can comment on this task." }];
-      await sb.from("audit_events").insert({ actor_email: user.email, actor_type: actorType, actor_agent_id: actorAgentId, entity_type: "task", entity_id: String(args.task_number), action: "commented", channel: "mcp", state_after: { comment: args.comment }, context: { task_uuid: task.id, reason: args.reason || null } });
+      await sb.from("audit_events").insert({
+        actor_email: user.email,
+        actor_type: actorType,
+        actor_agent_id: actorAgentId,
+        entity_type: "task",
+        entity_id: String(args.task_number),
+        action: "commented",
+        channel: "mcp",
+        project_id: task.project_id || null,
+        state_after: { comment: args.comment },
+        context: { task_uuid: task.id, reason: args.reason || null },
+      });
       return [{ type: "text", text: `✓ Comment added to task #${args.task_number}.` }];
     }
 
@@ -1940,10 +2437,22 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const sb = adminClient();
       const { data: task } = await sb.from("tasks").select("*").eq("task_number", args.task_number).single();
       if (!task) return [{ type: "text", text: "Error: Task not found." }];
-      if (!canAccessTask(task, user)) return [{ type: "text", text: "Error: Task not found." }];
+      await hydrateRecordsWithProjects(sb, [task]);
+      if (!canAccessTask(task, user, task.project)) return [{ type: "text", text: "Error: Task not found." }];
       if (!canModifyTask(task, user)) return [{ type: "text", text: "Denied: only the creator or assignee can link this task." }];
       await sb.from("task_links").insert({ task_id: task.id, link_type: args.link_type, link_ref: args.link_ref });
-      await sb.from("audit_events").insert({ actor_email: user.email, actor_type: actorType, actor_agent_id: actorAgentId, entity_type: "task", entity_id: String(args.task_number), action: "linked", channel: "mcp", state_after: { link_type: args.link_type, link_ref: args.link_ref }, context: { task_uuid: task.id } });
+      await sb.from("audit_events").insert({
+        actor_email: user.email,
+        actor_type: actorType,
+        actor_agent_id: actorAgentId,
+        entity_type: "task",
+        entity_id: String(args.task_number),
+        action: "linked",
+        channel: "mcp",
+        project_id: task.project_id || null,
+        state_after: { link_type: args.link_type, link_ref: args.link_ref },
+        context: { task_uuid: task.id },
+      });
       return [{ type: "text", text: `✓ Linked ${args.link_type} "${args.link_ref}" to task #${args.task_number}.` }];
     }
 
@@ -1951,9 +2460,11 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const sb = adminClient();
       const resultLimit = Math.min(args.limit || 20, 100);
       const fetchLimit = Math.min(Math.max(resultLimit * 10, 100), 500);
-      const { data, error } = await sb.from("tasks").select("task_number, title, source, confidence, created_at, visibility, created_by, assigned_to").eq("requires_triage", true).is("archived_at", null).order("created_at", { ascending: false }).limit(fetchLimit);
+      const { data, error } = await sb.from("tasks").select("*").eq("requires_triage", true).is("archived_at", null).order("created_at", { ascending: false }).limit(fetchLimit);
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
-      const visibleTasks = (data || []).filter((task: any) => canAccessTask(task, user)).slice(0, resultLimit);
+      const tasks = data || [];
+      await hydrateRecordsWithProjects(sb, tasks as any[]);
+      const visibleTasks = tasks.filter((task: any) => canAccessTask(task, user, task.project)).slice(0, resultLimit);
       if (!visibleTasks.length) return [{ type: "text", text: "No tasks need triage." }];
       const out = visibleTasks.map((t: any) => `#${t.task_number} [${t.source}${t.confidence ? ` ${(t.confidence * 100).toFixed(0)}%` : ""}] ${t.title}`).join("\n");
       return [{ type: "text", text: `${visibleTasks.length} task(s) need triage:\n${out}` }];
@@ -1963,10 +2474,21 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const sb = adminClient();
       const { data: task } = await sb.from("tasks").select("*").eq("task_number", args.task_number).single();
       if (!task) return [{ type: "text", text: "Error: Task not found." }];
-      if (!canAccessTask(task, user)) return [{ type: "text", text: "Error: Task not found." }];
+      await hydrateRecordsWithProjects(sb, [task]);
+      if (!canAccessTask(task, user, task.project)) return [{ type: "text", text: "Error: Task not found." }];
       if (!canModifyTask(task, user)) return [{ type: "text", text: "Denied: only the creator or assignee can accept this task." }];
       await sb.from("tasks").update({ requires_triage: false, updated_at: new Date().toISOString() }).eq("id", task.id);
-      await sb.from("audit_events").insert({ actor_email: user.email, actor_type: actorType, actor_agent_id: actorAgentId, entity_type: "task", entity_id: String(args.task_number), action: "triage_accepted", channel: "mcp", context: { task_uuid: task.id, reason: args.reason || null } });
+      await sb.from("audit_events").insert({
+        actor_email: user.email,
+        actor_type: actorType,
+        actor_agent_id: actorAgentId,
+        entity_type: "task",
+        entity_id: String(args.task_number),
+        action: "triage_accepted",
+        channel: "mcp",
+        project_id: task.project_id || null,
+        context: { task_uuid: task.id, reason: args.reason || null },
+      });
       return [{ type: "text", text: `✓ Task #${args.task_number} accepted into main list.` }];
     }
 
@@ -1974,10 +2496,21 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const sb = adminClient();
       const { data: task } = await sb.from("tasks").select("*").eq("task_number", args.task_number).single();
       if (!task) return [{ type: "text", text: "Error: Task not found." }];
-      if (!canAccessTask(task, user)) return [{ type: "text", text: "Error: Task not found." }];
+      await hydrateRecordsWithProjects(sb, [task]);
+      if (!canAccessTask(task, user, task.project)) return [{ type: "text", text: "Error: Task not found." }];
       if (!canModifyTask(task, user)) return [{ type: "text", text: "Denied: only the creator or assignee can dismiss this task." }];
       await sb.from("tasks").update({ status: "cancelled", archived_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", task.id);
-      await sb.from("audit_events").insert({ actor_email: user.email, actor_type: actorType, actor_agent_id: actorAgentId, entity_type: "task", entity_id: String(args.task_number), action: "triage_dismissed", channel: "mcp", context: { task_uuid: task.id, reason: args.reason || null } });
+      await sb.from("audit_events").insert({
+        actor_email: user.email,
+        actor_type: actorType,
+        actor_agent_id: actorAgentId,
+        entity_type: "task",
+        entity_id: String(args.task_number),
+        action: "triage_dismissed",
+        channel: "mcp",
+        project_id: task.project_id || null,
+        context: { task_uuid: task.id, reason: args.reason || null },
+      });
       return [{ type: "text", text: `✓ Task #${args.task_number} dismissed.` }];
     }
 
@@ -2024,24 +2557,33 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const resultLimit = Math.min(args.limit || 20, 100);
       const fetchLimit = Math.min(Math.max(resultLimit * 10, 100), 500);
       const ownedAgentSlugs = await listOwnedAgentSlugs(sb, user.email);
-      if (args.actor_email && args.actor_email !== user.email) {
+      let filterProject: any = null;
+      if (args.project) {
+        filterProject = await resolveProjectRef(sb, args.project);
+        if (!filterProject) return [{ type: "text", text: `Error: Project '${args.project}' not found.` }];
+        if (!canAccessProject(filterProject, user)) return [{ type: "text", text: "Denied: you cannot read that project." }];
+      }
+      if (args.actor_email && args.actor_email !== user.email && !filterProject) {
         return [{ type: "text", text: "Denied: you can only query your own audit trail." }];
       }
-      if (args.actor_agent_id && !ownedAgentSlugs.has(args.actor_agent_id)) {
+      if (args.actor_agent_id && !ownedAgentSlugs.has(args.actor_agent_id) && !filterProject) {
         return [{ type: "text", text: `Denied: agent '${args.actor_agent_id}' is not owned by you.` }];
       }
       let query = sb.from("audit_events").select("*").order("timestamp", { ascending: false }).limit(fetchLimit);
       if (args.entity_type) query = query.eq("entity_type", args.entity_type);
       if (args.entity_id) query = query.eq("entity_id", args.entity_id);
+      if (filterProject) query = query.eq("project_id", filterProject.id);
       if (args.actor_email) query = query.eq("actor_email", args.actor_email);
       if (args.actor_agent_id) query = query.eq("actor_agent_id", args.actor_agent_id);
       if (args.channel) query = query.eq("channel", args.channel);
       if (args.action) query = query.eq("action", args.action);
       const { data, error } = await query;
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
-      const visibleEvents = (data || []).filter((event: any) => canReadAuditEvent(event, user, ownedAgentSlugs)).slice(0, resultLimit);
+      const events = data || [];
+      await hydrateRecordsWithProjects(sb, events as any[]);
+      const visibleEvents = events.filter((event: any) => canReadAuditEvent(event, user, ownedAgentSlugs, event.project)).slice(0, resultLimit);
       if (!visibleEvents.length) return [{ type: "text", text: "No audit events found." }];
-      const out = visibleEvents.map((e: any) => `${e.timestamp.slice(0, 16)} [${e.channel || "?"}] ${e.actor_email?.split("@")[0] || e.actor_type} → ${e.entity_type}${e.entity_id ? " #" + e.entity_id : ""} ${e.action}`).join("\n");
+      const out = visibleEvents.map((e: any) => `${e.timestamp.slice(0, 16)} [${e.channel || "?"}] ${e.actor_email?.split("@")[0] || e.actor_type} → ${e.entity_type}${e.entity_id ? " #" + e.entity_id : ""} ${e.action}${e.project?.slug ? ` #${e.project.slug}` : ""}`).join("\n");
       return [{ type: "text", text: out }];
     }
 
@@ -2049,12 +2591,22 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const sb = adminClient();
       let query = sb.from("agents").select("*").order("created_at", { ascending: false });
       if (args.status) query = query.eq("status", args.status);
+      let filterProject: any = null;
+      if (args.project) {
+        filterProject = await resolveProjectRef(sb, args.project);
+        if (!filterProject) return [{ type: "text", text: `Error: Project '${args.project}' not found.` }];
+        if (!canAccessProject(filterProject, user)) return [{ type: "text", text: "Denied: you cannot read that project." }];
+        query = query.eq("project_id", filterProject.id);
+      }
       const { data, error } = await query;
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
-      if (!data?.length) return [{ type: "text", text: "No agents registered." }];
-      const out = data.map((a: any) => {
+      const agents = data || [];
+      await hydrateRecordsWithProjects(sb, agents as any[]);
+      const visibleAgents = agents.filter((agent: any) => canAccessAgent(agent, user, agent.project || filterProject));
+      if (!visibleAgents.length) return [{ type: "text", text: "No agents registered." }];
+      const out = visibleAgents.map((a: any) => {
         const seen = a.last_seen ? `last seen ${new Date(a.last_seen).toLocaleTimeString()}` : "never seen";
-        return `[${a.status}] ${a.slug} — ${a.name} (${seen})`;
+        return `[${a.status}] ${a.slug} — ${a.name} (${seen}${a.project?.slug ? ` · #${a.project.slug}` : ""})`;
       }).join("\n");
       return [{ type: "text", text: out }];
     }
@@ -2063,17 +2615,28 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const sb = adminClient();
       const { data: agent } = await sb.from("agents").select("*").eq("slug", args.slug).single();
       if (!agent) return [{ type: "text", text: "Agent not found." }];
+      await hydrateRecordsWithProjects(sb, [agent]);
+      if (!canAccessAgent(agent, user, agent.project)) return [{ type: "text", text: "Agent not found." }];
       let activity: any[] = [];
-      if (agent.owner === user.email || agent.email === user.email) {
+      if (agent.owner === user.email || agent.email === user.email || canAccessAgent(agent, user, agent.project)) {
         const { data } = await sb.from("audit_events").select("*").eq("actor_agent_id", args.slug).order("timestamp", { ascending: false }).limit(10);
         activity = data || [];
       }
       const actLog = (activity || []).map((e: any) => `  ${e.timestamp.slice(0, 16)} ${e.action} ${e.entity_type}${e.entity_id ? " #" + e.entity_id : ""}`).join("\n");
-      return [{ type: "text", text: `${agent.name} (${agent.slug})\nStatus: ${agent.status} | Owner: ${agent.owner}\nEmail: ${agent.email || "none"} | Skill: ${agent.skill_slug || "none"}\nScopes: ${agent.scopes?.join(", ") || "none"}\nMachine: ${agent.machine || "unknown"}\nLast seen: ${agent.last_seen || "never"}\n\nRecent activity:\n${actLog || "  (none)"}` }];
+      return [{ type: "text", text: `${agent.name} (${agent.slug})\nStatus: ${agent.status} | Owner: ${agent.owner}\nEmail: ${agent.email || "none"} | Skill: ${agent.skill_slug || "none"}\nScopes: ${agent.scopes?.join(", ") || "none"}\nMachine: ${agent.machine || "unknown"}\nLast seen: ${agent.last_seen || "never"}${agent.project?.slug ? `\nProject: ${agent.project.slug} — ${agent.project.name}` : ""}\n\nRecent activity:\n${actLog || "  (none)"}` }];
     }
 
     case "register_agent": {
       const sb = adminClient();
+      let projectId = null;
+      let projectSlug = "";
+      if (args.project) {
+        const project = await resolveProjectRef(sb, args.project);
+        if (!project) return [{ type: "text", text: `Error: Project '${args.project}' not found.` }];
+        if (!canAccessProject(project, user)) return [{ type: "text", text: "Denied: you cannot attach this agent to that project." }];
+        projectId = project.id;
+        projectSlug = project.slug;
+      }
       const { error } = await sb.from("agents").insert({
         slug: args.slug,
         name: args.name,
@@ -2082,9 +2645,21 @@ async function handleTool(name: string, args: any, user: { email: string; userId
         skill_slug: args.skill_slug || null,
         scopes: args.scopes || [],
         machine: args.machine || null,
+        project_id: projectId,
       });
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
-      return [{ type: "text", text: `✓ Agent "${args.name}" registered (slug: ${args.slug})` }];
+      await sb.from("audit_events").insert({
+        actor_email: user.email,
+        actor_type: actorType,
+        actor_agent_id: actorAgentId,
+        entity_type: "agent",
+        entity_id: args.slug,
+        action: "registered",
+        channel: "mcp",
+        project_id: projectId,
+        state_after: { name: args.name, scopes: args.scopes || [], project_id: projectId },
+      });
+      return [{ type: "text", text: `✓ Agent "${args.name}" registered (slug: ${args.slug}${projectSlug ? `, #${projectSlug}` : ""})` }];
     }
 
     case "list_etf": {

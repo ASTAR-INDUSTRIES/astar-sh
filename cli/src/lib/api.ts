@@ -65,6 +65,21 @@ export interface EventAttendee {
   email?: string;
 }
 
+export interface ProjectSummary {
+  id: string;
+  slug: string;
+  name: string;
+  visibility: string;
+  owner: string;
+}
+
+export interface Project extends ProjectSummary {
+  description?: string | null;
+  members: string[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface EventSummary {
   id: string;
   slug: string;
@@ -74,6 +89,8 @@ export interface EventSummary {
   date?: string | null;
   date_tentative?: boolean;
   location?: string | null;
+  project_id?: string | null;
+  project?: ProjectSummary | null;
 }
 
 export interface Event extends EventSummary {
@@ -108,6 +125,8 @@ export interface Task {
   tags: string[];
   event_id?: string;
   event?: EventSummary | null;
+  project_id?: string | null;
+  project?: ProjectSummary | null;
   parent_task_id?: string;
   confidence?: number;
   requires_triage?: boolean;
@@ -178,6 +197,8 @@ export interface Agent {
   scopes: string[];
   status: string;
   machine?: string;
+  project_id?: string | null;
+  project?: ProjectSummary | null;
   config?: any;
   last_seen?: string;
   created_at: string;
@@ -193,6 +214,8 @@ export interface AuditEvent {
   entity_type: string;
   entity_id?: string;
   action: string;
+  project_id?: string | null;
+  project?: ProjectSummary | null;
   state_before?: any;
   state_after?: any;
   channel?: string;
@@ -241,6 +264,8 @@ export interface Milestone {
   date: string;
   category: string;
   created_by: string;
+  project_id?: string | null;
+  project?: ProjectSummary | null;
   created_at: string;
 }
 
@@ -364,20 +389,68 @@ export class AstarAPI {
     if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
   }
 
-  async listMilestones(month?: string): Promise<Milestone[]> {
+  async listMilestones(filters?: { month?: string; project?: string } | string): Promise<Milestone[]> {
     const params = new URLSearchParams();
+    const month = typeof filters === "string" ? filters : filters?.month;
+    const project = typeof filters === "string" ? undefined : filters?.project;
     if (month) params.set("month", month);
+    if (project) params.set("project", project);
     const qs = params.toString();
     const data = await this.fetch<{ milestones: Milestone[] }>(`/milestones${qs ? `?${qs}` : ""}`);
     return data.milestones;
   }
 
-  async listEvents(filters?: { status?: string; type?: string; month?: string; search?: string; limit?: number }): Promise<Event[]> {
+  async listProjects(filters?: { search?: string }): Promise<Project[]> {
+    const params = new URLSearchParams();
+    if (filters?.search) params.set("search", filters.search);
+    const qs = params.toString();
+    const data = await this.fetch<{ projects: Project[] }>(`/projects${qs ? `?${qs}` : ""}`);
+    return data.projects;
+  }
+
+  async getProject(slug: string): Promise<{ project: Project; tasks: Task[]; events: Event[]; agents: Agent[]; milestones: Milestone[] }> {
+    return this.fetch(`/projects/${slug}`);
+  }
+
+  async createProject(project: {
+    name: string;
+    slug?: string;
+    description?: string;
+    visibility?: string;
+    owner?: string;
+    members?: string[];
+  }): Promise<{ ok: boolean; slug: string }> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/projects`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(project),
+    });
+    if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+    return res.json();
+  }
+
+  async updateProject(slug: string, updates: Record<string, any>): Promise<{ ok: boolean; slug: string }> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/projects/${slug}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+    return res.json();
+  }
+
+  async listEvents(filters?: { status?: string; type?: string; month?: string; search?: string; project?: string; limit?: number }): Promise<Event[]> {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
     if (filters?.type) params.set("type", filters.type);
     if (filters?.month) params.set("month", filters.month);
     if (filters?.search) params.set("search", filters.search);
+    if (filters?.project) params.set("project", filters.project);
     if (filters?.limit) params.set("limit", String(filters.limit));
     const qs = params.toString();
     const data = await this.fetch<{ events: Event[] }>(`/events${qs ? `?${qs}` : ""}`);
@@ -399,6 +472,7 @@ export class AstarAPI {
     location?: string;
     attendees?: EventAttendee[];
     visibility?: string;
+    project?: string;
   }): Promise<{ ok: boolean; slug: string }> {
     const config = await getConfig();
     const res = await fetch(`${config.apiUrl}/events`, {
@@ -424,7 +498,7 @@ export class AstarAPI {
     return res.json();
   }
 
-  async createMilestone(m: { title: string; category?: string; date?: string }): Promise<void> {
+  async createMilestone(m: { title: string; category?: string; date?: string; project?: string }): Promise<void> {
     const config = await getConfig();
     const res = await fetch(`${config.apiUrl}/milestones`, {
       method: "POST",
@@ -495,7 +569,7 @@ export class AstarAPI {
     return res.json();
   }
 
-  async listTasks(filters?: { status?: string; priority?: string; assigned_to?: string; due?: string; search?: string; event?: string; include_subtasks?: boolean }): Promise<Task[]> {
+  async listTasks(filters?: { status?: string; priority?: string; assigned_to?: string; due?: string; search?: string; event?: string; project?: string; include_subtasks?: boolean }): Promise<Task[]> {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
     if (filters?.priority) params.set("priority", filters.priority);
@@ -503,6 +577,7 @@ export class AstarAPI {
     if (filters?.due) params.set("due", filters.due);
     if (filters?.search) params.set("search", filters.search);
     if (filters?.event) params.set("event", filters.event);
+    if (filters?.project) params.set("project", filters.project);
     if (filters?.include_subtasks) params.set("include_subtasks", "true");
     const qs = params.toString();
     const data = await this.fetch<{ tasks: Task[] }>(`/tasks${qs ? `?${qs}` : ""}`);
@@ -521,6 +596,7 @@ export class AstarAPI {
     recurring?: { interval: string };
     links?: { type: string; ref: string }[];
     event?: string;
+    project?: string;
   }): Promise<{ ok: boolean; task_number: number }> {
     const config = await getConfig();
     const res = await fetch(`${config.apiUrl}/tasks`, {
@@ -590,10 +666,11 @@ export class AstarAPI {
     return this.fetch("/status");
   }
 
-  async queryAudit(filters?: { entity_type?: string; entity_id?: string; actor?: string; actor_agent_id?: string; channel?: string; action?: string; since?: string; limit?: number }): Promise<AuditEvent[]> {
+  async queryAudit(filters?: { entity_type?: string; entity_id?: string; project?: string; actor?: string; actor_agent_id?: string; channel?: string; action?: string; since?: string; limit?: number }): Promise<AuditEvent[]> {
     const params = new URLSearchParams();
     if (filters?.entity_type) params.set("entity_type", filters.entity_type);
     if (filters?.entity_id) params.set("entity_id", filters.entity_id);
+    if (filters?.project) params.set("project", filters.project);
     if (filters?.actor) params.set("actor", filters.actor);
     if (filters?.actor_agent_id) params.set("actor_agent_id", filters.actor_agent_id);
     if (filters?.channel) params.set("channel", filters.channel);
@@ -605,8 +682,12 @@ export class AstarAPI {
     return data.events;
   }
 
-  async listAgents(): Promise<Agent[]> {
-    const data = await this.fetch<{ agents: Agent[] }>("/agents");
+  async listAgents(filters?: { status?: string; project?: string }): Promise<Agent[]> {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.project) params.set("project", filters.project);
+    const qs = params.toString();
+    const data = await this.fetch<{ agents: Agent[] }>(`/agents${qs ? `?${qs}` : ""}`);
     return data.agents;
   }
 
@@ -614,7 +695,7 @@ export class AstarAPI {
     return this.fetch(`/agents/${slug}`);
   }
 
-  async registerAgent(agent: { slug: string; name: string; owner?: string; email?: string; skill_slug?: string; scopes?: string[]; machine?: string }): Promise<{ ok: boolean; slug: string }> {
+  async registerAgent(agent: { slug: string; name: string; owner?: string; email?: string; skill_slug?: string; scopes?: string[]; machine?: string; project?: string }): Promise<{ ok: boolean; slug: string }> {
     const config = await getConfig();
     const res = await fetch(`${config.apiUrl}/agents`, {
       method: "POST",

@@ -45,6 +45,7 @@ export function registerAuditCommands(program: Command) {
     .description("Query the audit trail — who did what, when, how")
     .option("--entity <type>", "Filter: task, skill, news, feedback, inquiry, milestone")
     .option("--id <id>", "Filter by entity ID")
+    .option("--project <slug>", "Filter by project slug")
     .option("--actor <email>", "Filter by actor email")
     .option("--agent <id>", "Filter by agent ID (e.g. cfa)")
     .option("--channel <ch>", "Filter: cli, mcp, api, dashboard, system")
@@ -59,6 +60,7 @@ export function registerAuditCommands(program: Command) {
         const events = await api.queryAudit({
           entity_type: opts.entity,
           entity_id: opts.id,
+          project: opts.project,
           actor: opts.actor,
           actor_agent_id: opts.agent,
           channel: opts.channel,
@@ -80,7 +82,9 @@ export function registerAuditCommands(program: Command) {
             const actorName = e.actor_email?.split("@")[0] || e.actor_type;
             const typeIcon = actorTypeIcons[e.actor_type] || "";
             const entityStr = e.entity_id ? `${e.entity_type} #${e.entity_id}` : e.entity_type;
-            const detail = e.state_after?.title || e.state_after?.comment || e.state_after?.type || "";
+            const detail = e.project?.slug
+              ? `${e.project.slug} · ${e.state_after?.title || e.state_after?.comment || e.state_after?.type || ""}`.trim()
+              : e.state_after?.title || e.state_after?.comment || e.state_after?.type || "";
             return [
               `${c.dim}${fmtTime(e.timestamp)}${c.reset}`,
               `${actorName}${c.dim}${typeIcon}${c.reset}`,

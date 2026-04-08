@@ -5,6 +5,16 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.63] - 2026-04-08
+### Added
+- First-class `projects` primitive with owner/member visibility, linked tasks/events/agents/milestones, and project-aware audit metadata
+- `astar projects`, `astar projects info`, and `astar projects update` for creating and inspecting scoped workstreams
+- `--project <slug>` filters and attachments across `astar todo`, `astar events`, `astar shipped`, `astar agent`, REST endpoints, and MCP tools
+
+### Changed
+- Project-linked tasks, events, agents, and milestones now show project labels in CLI output and respect project membership when listed or inspected
+- `astar shipped list` and `astar agent list` now require login because project visibility is staff-scoped instead of anonymous
+
 ## [0.0.62] - 2026-04-07
 ### Added
 - `astar events` command group for creating, listing, inspecting, and updating first-class events with goals, dates, locations, attendees, and visibility
