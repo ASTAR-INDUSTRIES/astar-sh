@@ -83,7 +83,6 @@ export type Database = {
           machine: string | null
           name: string
           owner: string
-          project_id: string | null
           role: string | null
           scopes: string[] | null
           skill_slug: string | null
@@ -99,7 +98,6 @@ export type Database = {
           machine?: string | null
           name: string
           owner: string
-          project_id?: string | null
           role?: string | null
           scopes?: string[] | null
           skill_slug?: string | null
@@ -115,22 +113,13 @@ export type Database = {
           machine?: string | null
           name?: string
           owner?: string
-          project_id?: string | null
           role?: string | null
           scopes?: string[] | null
           skill_slug?: string | null
           slug?: string
           status?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "agents_project_id_fkey"
-            columns: ["project_id"]
-            isOneToOne: false
-            referencedRelation: "projects"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       audit_events: {
         Row: {
@@ -144,7 +133,6 @@ export type Database = {
           entity_id: string | null
           entity_type: string
           id: string
-          project_id: string | null
           state_after: Json | null
           state_before: Json | null
           timestamp: string
@@ -160,7 +148,6 @@ export type Database = {
           entity_id?: string | null
           entity_type: string
           id?: string
-          project_id?: string | null
           state_after?: Json | null
           state_before?: Json | null
           timestamp?: string
@@ -176,20 +163,11 @@ export type Database = {
           entity_id?: string | null
           entity_type?: string
           id?: string
-          project_id?: string | null
           state_after?: Json | null
           state_before?: Json | null
           timestamp?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "audit_events_project_id_fkey"
-            columns: ["project_id"]
-            isOneToOne: false
-            referencedRelation: "projects"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       cli_events: {
         Row: {
@@ -221,6 +199,93 @@ export type Database = {
           skill_title?: string | null
           user_email?: string | null
           user_name?: string | null
+        }
+        Relationships: []
+      }
+      email_send_log: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          id: string
+          message_id: string | null
+          metadata: Json | null
+          recipient_email: string
+          status: string
+          template_name: string
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          message_id?: string | null
+          metadata?: Json | null
+          recipient_email: string
+          status: string
+          template_name: string
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          message_id?: string | null
+          metadata?: Json | null
+          recipient_email?: string
+          status?: string
+          template_name?: string
+        }
+        Relationships: []
+      }
+      email_send_state: {
+        Row: {
+          auth_email_ttl_minutes: number
+          batch_size: number
+          id: number
+          retry_after_until: string | null
+          send_delay_ms: number
+          transactional_email_ttl_minutes: number
+          updated_at: string
+        }
+        Insert: {
+          auth_email_ttl_minutes?: number
+          batch_size?: number
+          id?: number
+          retry_after_until?: string | null
+          send_delay_ms?: number
+          transactional_email_ttl_minutes?: number
+          updated_at?: string
+        }
+        Update: {
+          auth_email_ttl_minutes?: number
+          batch_size?: number
+          id?: number
+          retry_after_until?: string | null
+          send_delay_ms?: number
+          transactional_email_ttl_minutes?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      email_unsubscribe_tokens: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          token: string
+          used_at: string | null
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          token: string
+          used_at?: string | null
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          token?: string
+          used_at?: string | null
         }
         Relationships: []
       }
@@ -378,68 +443,6 @@ export type Database = {
         }
         Relationships: []
       }
-      events: {
-        Row: {
-          attendees: Json
-          created_at: string
-          created_by: string
-          date: string | null
-          date_tentative: boolean
-          goal: string
-          id: string
-          location: string | null
-          project_id: string | null
-          slug: string
-          status: string
-          title: string
-          type: string
-          updated_at: string
-          visibility: string
-        }
-        Insert: {
-          attendees?: Json
-          created_at?: string
-          created_by: string
-          date?: string | null
-          date_tentative?: boolean
-          goal: string
-          id?: string
-          location?: string | null
-          project_id?: string | null
-          slug: string
-          status?: string
-          title: string
-          type?: string
-          updated_at?: string
-          visibility?: string
-        }
-        Update: {
-          attendees?: Json
-          created_at?: string
-          created_by?: string
-          date?: string | null
-          date_tentative?: boolean
-          goal?: string
-          id?: string
-          location?: string | null
-          project_id?: string | null
-          slug?: string
-          status?: string
-          title?: string
-          type?: string
-          updated_at?: string
-          visibility?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "events_project_id_fkey"
-            columns: ["project_id"]
-            isOneToOne: false
-            referencedRelation: "projects"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       feedback: {
         Row: {
           author_email: string
@@ -579,7 +582,6 @@ export type Database = {
           created_by: string | null
           date: string
           id: string
-          project_id: string | null
           title: string
         }
         Insert: {
@@ -588,7 +590,6 @@ export type Database = {
           created_by?: string | null
           date: string
           id?: string
-          project_id?: string | null
           title: string
         }
         Update: {
@@ -597,52 +598,7 @@ export type Database = {
           created_by?: string | null
           date?: string
           id?: string
-          project_id?: string | null
           title?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "milestones_project_id_fkey"
-            columns: ["project_id"]
-            isOneToOne: false
-            referencedRelation: "projects"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      projects: {
-        Row: {
-          created_at: string
-          description: string | null
-          id: string
-          members: string[]
-          name: string
-          owner: string
-          slug: string
-          updated_at: string
-          visibility: string
-        }
-        Insert: {
-          created_at?: string
-          description?: string | null
-          id?: string
-          members?: string[]
-          name: string
-          owner: string
-          slug: string
-          updated_at?: string
-          visibility?: string
-        }
-        Update: {
-          created_at?: string
-          description?: string | null
-          id?: string
-          members?: string[]
-          name?: string
-          owner?: string
-          slug?: string
-          updated_at?: string
-          visibility?: string
         }
         Relationships: []
       }
@@ -730,6 +686,30 @@ export type Database = {
         }
         Relationships: []
       }
+      suppressed_emails: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          metadata: Json | null
+          reason: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          metadata?: Json | null
+          reason: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          metadata?: Json | null
+          reason?: string
+        }
+        Relationships: []
+      }
       task_activity: {
         Row: {
           action: string
@@ -811,12 +791,10 @@ export type Database = {
           created_by: string
           description: string | null
           due_date: string | null
-          event_id: string | null
           estimated_hours: number | null
           id: string
           parent_task_id: string | null
           priority: string
-          project_id: string | null
           recurring: Json | null
           requires_triage: boolean
           search_vector: unknown
@@ -838,12 +816,10 @@ export type Database = {
           created_by: string
           description?: string | null
           due_date?: string | null
-          event_id?: string | null
           estimated_hours?: number | null
           id?: string
           parent_task_id?: string | null
           priority?: string
-          project_id?: string | null
           recurring?: Json | null
           requires_triage?: boolean
           search_vector?: unknown
@@ -865,12 +841,10 @@ export type Database = {
           created_by?: string
           description?: string | null
           due_date?: string | null
-          event_id?: string | null
           estimated_hours?: number | null
           id?: string
           parent_task_id?: string | null
           priority?: string
-          project_id?: string | null
           recurring?: Json | null
           requires_triage?: boolean
           search_vector?: unknown
@@ -884,24 +858,10 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "tasks_event_id_fkey"
-            columns: ["event_id"]
-            isOneToOne: false
-            referencedRelation: "events"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "tasks_parent_task_id_fkey"
             columns: ["parent_task_id"]
             isOneToOne: false
             referencedRelation: "tasks"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "tasks_project_id_fkey"
-            columns: ["project_id"]
-            isOneToOne: false
-            referencedRelation: "projects"
             referencedColumns: ["id"]
           },
         ]
@@ -967,7 +927,31 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      delete_email: {
+        Args: { message_id: number; queue_name: string }
+        Returns: boolean
+      }
+      enqueue_email: {
+        Args: { payload: Json; queue_name: string }
+        Returns: number
+      }
+      move_to_dlq: {
+        Args: {
+          dlq_name: string
+          message_id: number
+          payload: Json
+          source_queue: string
+        }
+        Returns: number
+      }
+      read_email_batch: {
+        Args: { batch_size: number; queue_name: string; vt: number }
+        Returns: {
+          message: Json
+          msg_id: number
+          read_ct: number
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
