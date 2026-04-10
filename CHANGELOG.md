@@ -5,6 +5,12 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.69] - 2026-04-10
+
+### Changed
+- CLI now automatically re-authenticates via device code flow when silent token refresh fails
+- Monitor error messages now distinguish between expired sessions and network/API outages
+
 ## [0.0.68] - 2026-04-10
 
 ## [0.0.67] - 2026-04-10
