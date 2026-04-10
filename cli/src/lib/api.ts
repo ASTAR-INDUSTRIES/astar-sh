@@ -289,10 +289,23 @@ export class AstarAPI {
     const config = await getConfig();
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
-    const res = await fetch(`${config.apiUrl}${path}`, { method: opts?.method || "GET", headers, body: opts?.body });
+
+    let res: Response;
+    try {
+      res = await fetch(`${config.apiUrl}${path}`, { method: opts?.method || "GET", headers, body: opts?.body });
+    } catch (e: any) {
+      const err = new Error(`Network error: ${e.message || "could not reach API"}`);
+      (err as any).code = "NETWORK_ERROR";
+      throw err;
+    }
+
     if (!res.ok) {
       if (res.status === 404) throw new Error("This feature isn't available yet. The API may need to be redeployed.");
-      if (res.status === 401) throw new Error("Session expired. Run 'astar login' to sign in again.");
+      if (res.status === 401) {
+        const err = new Error("Session expired. Run 'astar login' to sign in again.");
+        (err as any).code = "AUTH_EXPIRED";
+        throw err;
+      }
       throw new Error(`API error ${res.status}: ${await res.text()}`);
     }
     return res.json();
