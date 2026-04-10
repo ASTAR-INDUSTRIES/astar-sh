@@ -6,10 +6,10 @@ import { c, table } from "../lib/ui";
 
 const WHISPER_DIR = join(homedir(), ".astar", "whisper");
 const WHISPER_BIN = join(WHISPER_DIR, "whisper-cli");
+const STREAM_BIN = join(WHISPER_DIR, "whisper-stream");
 const MODEL_FILE = join(WHISPER_DIR, "nb-whisper-medium-q5_0.bin");
 const MODEL_URL = "https://huggingface.co/NbAiLab/nb-whisper-medium/resolve/main/ggml-model-q5_0.bin";
 const RECORDINGS_DIR = join(homedir(), ".astar", "recordings");
-const TRANSCRIBE_INTERVAL = 10000;
 
 function hasSox(): boolean {
   try {
@@ -30,7 +30,7 @@ function hasCmake(): boolean {
 }
 
 function hasWhisper(): boolean {
-  return Bun.file(WHISPER_BIN).size > 0;
+  return Bun.file(STREAM_BIN).size > 0;
 }
 
 function hasModel(): boolean {
@@ -72,15 +72,14 @@ async function setupWhisper() {
     const tmpDir = join(WHISPER_DIR, "_build");
     try {
       execSync(`git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git "${tmpDir}"`, { stdio: "inherit" });
-      execSync(`cmake -B "${join(tmpDir, "build")}" -S "${tmpDir}" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF`, { stdio: "inherit" });
+      execSync(`cmake -B "${join(tmpDir, "build")}" -S "${tmpDir}" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DWHISPER_SDL2=ON`, { stdio: "inherit" });
       execSync(`cmake --build "${join(tmpDir, "build")}" --config Release -j$(sysctl -n hw.ncpu)`, { stdio: "inherit" });
-      const builtBin = join(tmpDir, "build", "bin", "whisper-cli");
-      execSync(`cp "${builtBin}" "${WHISPER_BIN}"`);
-      execSync(`chmod +x "${WHISPER_BIN}"`);
-      const ggmlMetal = join(tmpDir, "build", "bin", "ggml-metal.metallib");
-      try { execSync(`cp "${ggmlMetal}" "${join(WHISPER_DIR, "ggml-metal.metallib")}" 2>/dev/null`); } catch {}
+      for (const bin of ["whisper-cli", "whisper-stream"]) {
+        execSync(`cp "${join(tmpDir, "build", "bin", bin)}" "${join(WHISPER_DIR, bin)}"`);
+        execSync(`chmod +x "${join(WHISPER_DIR, bin)}"`);
+      }
       execSync(`rm -rf "${tmpDir}"`);
-      console.log(`  ${c.green}✓${c.reset} whisper-cli built (static)`);
+      console.log(`  ${c.green}✓${c.reset} whisper-cli + whisper-stream built (static)`);
     } catch (e: any) {
       console.error(`  ${c.red}✗${c.reset} Build failed: ${e.message}`);
       execSync(`rm -rf "${tmpDir}"`);
@@ -106,38 +105,9 @@ async function setupWhisper() {
   console.log(`\n  ${c.green}✓${c.reset} Ready. Run ${c.cyan}astar record${c.reset} to start a session.\n`);
 }
 
-function transcribeFile(wavPath: string): string {
-  try {
-    return execSync(
-      `"${WHISPER_BIN}" -m "${MODEL_FILE}" -l no -f "${wavPath}" --no-prints 2>/dev/null`,
-      { encoding: "utf-8", timeout: 120000 }
-    ).trim();
-  } catch {
-    return "";
-  }
-}
-
-function parseWhisperOutput(raw: string): { start: number; text: string }[] {
-  const lines: { start: number; text: string }[] = [];
-  for (const line of raw.split("\n")) {
-    const match = line.match(/^\[(\d{2}):(\d{2}):(\d{2})\.\d+\s*-->\s*\d{2}:\d{2}:\d{2}\.\d+\]\s*(.+)/);
-    if (!match) continue;
-    const [, hh, mm, ss, text] = match;
-    const start = parseInt(hh) * 3600 + parseInt(mm) * 60 + parseInt(ss);
-    const trimmed = text.trim();
-    if (trimmed && !trimmed.match(/^\.*$/)) lines.push({ start, text: trimmed });
-  }
-  return lines;
-}
-
 async function startRecording() {
   if (!hasWhisper() || !hasModel()) {
     console.log(`\n  ${c.yellow}!${c.reset} Whisper not set up. Run ${c.cyan}astar record --setup${c.reset} first.\n`);
-    process.exit(1);
-  }
-
-  if (!hasSox()) {
-    console.log(`\n  ${c.red}✗${c.reset} sox not found. Install with: ${c.cyan}brew install sox${c.reset}\n`);
     process.exit(1);
   }
 
@@ -148,132 +118,107 @@ async function startRecording() {
   const timeStr = `${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
   const filename = `${dateStr}T${timeStr}.md`;
   const filepath = join(RECORDINGS_DIR, filename);
-  const wavPath = join(WHISPER_DIR, `_session_${dateStr}T${timeStr}.wav`);
+  const audioFile = join(WHISPER_DIR, `_session.wav`);
 
-  let segments: { start: number; text: string }[] = [];
+  const lines: string[] = [];
+  let currentLine = "";
   const startTime = Date.now();
-  let running = true;
-  let transcribing = false;
 
-  const sampleRate = 16000;
+  const streamProc = spawn(STREAM_BIN, [
+    "-m", MODEL_FILE,
+    "-l", "no",
+    "--step", "3000",
+    "--length", "8000",
+    "--keep", "200",
+    "--keep-context",
+    "-sa",
+    "-f", audioFile,
+  ], { stdio: ["pipe", "pipe", "pipe"] });
 
-  const recProc = spawn("rec", [
-    "-q", "-r", String(sampleRate), "-c", "1", "-b", "16",
-    wavPath,
-  ], { stdio: ["ignore", "pipe", "pipe"] });
+  let streamOutput = "";
 
-  let pcmBuffer = Buffer.alloc(0);
+  streamProc.stdout!.on("data", (data: Buffer) => {
+    const text = data.toString();
+    streamOutput += text;
 
-  const micMonitor = spawn("sox", [
-    "-q", "-d",
-    "-r", String(sampleRate), "-c", "1", "-b", "16",
-    "-e", "signed-integer", "-t", "raw", "-",
-  ], { stdio: ["ignore", "pipe", "pipe"] });
+    for (const chunk of text.split("\n")) {
+      const clean = chunk.replace(/\x1b\[2K/g, "").trim();
+      if (!clean || clean === "[Start speaking]" || clean.startsWith("init:") || clean.startsWith("whisper_") || clean.startsWith("main:") || clean.startsWith("ggml_")) continue;
+      if (clean.match(/^\.*$/) || clean === "!") continue;
 
-  micMonitor.stdout!.on("data", (data: Buffer) => {
-    pcmBuffer = Buffer.concat([pcmBuffer, data]);
-    if (pcmBuffer.length > 32000) pcmBuffer = pcmBuffer.subarray(pcmBuffer.length - 32000);
+      if (chunk.includes("\x1b[2K")) {
+        currentLine = clean;
+      } else if (clean) {
+        if (currentLine) {
+          lines.push(currentLine);
+          currentLine = "";
+        }
+        lines.push(clean);
+      }
+    }
   });
 
-  function getAudioLevel(): number {
-    if (pcmBuffer.length < 512) return 0;
-    const recent = pcmBuffer.subarray(Math.max(0, pcmBuffer.length - 2048));
-    let sum = 0;
-    for (let i = 0; i < recent.length - 1; i += 2) {
-      const sample = recent.readInt16LE(i);
-      sum += Math.abs(sample);
-    }
-    const avg = sum / (recent.length / 2);
-    return Math.min(1, avg / 4000);
-  }
-
-  function renderMeter(level: number, width: number): string {
-    const filled = Math.round(level * width);
-    const bars = "█".repeat(filled) + "░".repeat(width - filled);
-    if (level > 0.6) return `${c.red}${bars}${c.reset}`;
-    if (level > 0.3) return `${c.yellow}${bars}${c.reset}`;
-    if (level > 0.05) return `${c.green}${bars}${c.reset}`;
-    return `${c.dim}${bars}${c.reset}`;
-  }
+  streamProc.stderr!.on("data", () => {});
 
   function render() {
     const elapsed = (Date.now() - startTime) / 1000;
     const cols = process.stdout.columns || 80;
-    const level = getAudioLevel();
 
     process.stdout.write("\x1b[2J\x1b[H\x1b[?25l");
     const statusRight = `${c.dim}ctrl+c stop${c.reset}`;
     const statusLeft = `  ${c.red}◆${c.reset} ${c.bold}RECORDING${c.reset}  ${c.white}${formatDuration(elapsed)}${c.reset}`;
     console.log(`${statusLeft}${" ".repeat(Math.max(0, cols - 30 - 15))}${statusRight}`);
-    console.log(`  ${c.dim}mic${c.reset} ${renderMeter(level, 24)}`);
     console.log("");
 
-    const maxLines = (process.stdout.rows || 24) - 6;
-    const visible = segments.slice(-maxLines);
-    for (const seg of visible) {
-      console.log(`  ${c.dim}[${formatTimestamp(seg.start)}]${c.reset} ${seg.text}`);
+    const maxLines = (process.stdout.rows || 24) - 5;
+    const allLines = [...lines];
+    if (currentLine) allLines.push(currentLine);
+
+    const visible = allLines.slice(-maxLines);
+    for (const line of visible) {
+      console.log(`  ${line}`);
     }
 
-    if (transcribing) {
-      console.log(`\n  ${c.dim}transcribing...${c.reset}`);
-    } else if (!segments.length) {
+    if (!allLines.length) {
       console.log(`  ${c.dim}listening...${c.reset}`);
     }
   }
 
-  async function runTranscription() {
-    if (transcribing) return;
-    const file = Bun.file(wavPath);
-    if (!(await file.exists()) || file.size < 10000) return;
-
-    transcribing = true;
-    try {
-      const raw = transcribeFile(wavPath);
-      const parsed = parseWhisperOutput(raw);
-      if (parsed.length) segments = parsed;
-    } finally {
-      transcribing = false;
-    }
-  }
-
-  const transcribeTimer = setInterval(() => runTranscription(), TRANSCRIBE_INTERVAL);
-  const renderInterval = setInterval(() => render(), 150);
+  const renderInterval = setInterval(() => render(), 200);
   render();
 
   async function cleanup() {
-    running = false;
-    clearInterval(transcribeTimer);
     clearInterval(renderInterval);
 
-    if (!recProc.killed) recProc.kill("SIGTERM");
-    try { if (!micMonitor.killed) micMonitor.kill("SIGTERM"); } catch {}
-
-    await new Promise((r) => setTimeout(r, 300));
-
-    process.stdout.write("\x1b[2J\x1b[H");
-    console.log(`\n  ${c.dim}Final transcription...${c.reset}\n`);
-
-    const raw = transcribeFile(wavPath);
-    segments = parseWhisperOutput(raw);
+    streamProc.stdin!.end();
+    streamProc.kill("SIGINT");
+    await new Promise((r) => setTimeout(r, 500));
+    if (!streamProc.killed) streamProc.kill("SIGTERM");
 
     const elapsed = (Date.now() - startTime) / 1000;
     const duration = formatDuration(elapsed);
-    const wordCount = segments.reduce((sum, s) => sum + s.text.split(/\s+/).length, 0);
 
-    const lines = [
+    const allLines = [...lines];
+    if (currentLine) allLines.push(currentLine);
+
+    const finalLines = allLines.filter((l) => l && !l.match(/^\.*$/) && l !== "!");
+    const wordCount = finalLines.reduce((sum, l) => sum + l.split(/\s+/).filter(Boolean).length, 0);
+
+    const output = [
       "---",
       `date: ${dateStr}`,
       `start: ${timeStr.slice(0, 2)}:${timeStr.slice(2)}`,
       `duration: ${duration}`,
       `model: nb-whisper-medium-q5_0`,
+      `mode: stream`,
       "---",
       "",
-      ...segments.map((s) => `[${formatTimestamp(s.start)}] ${s.text}`),
+      ...finalLines,
       "",
     ];
 
-    await Bun.write(filepath, lines.join("\n"));
-    try { execSync(`rm -f "${wavPath}"`, { stdio: "pipe" }); } catch {}
+    await Bun.write(filepath, output.join("\n"));
+    try { execSync(`rm -f "${audioFile}"`, { stdio: "pipe" }); } catch {}
 
     process.stdout.write("\x1b[2J\x1b[H\x1b[?25h");
     console.log("");
