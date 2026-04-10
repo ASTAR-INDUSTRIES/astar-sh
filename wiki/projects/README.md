@@ -33,12 +33,14 @@ Project access gates cascade to attached entities. A task in a private project i
 - `astar projects list` — list accessible projects
 - `astar projects info <slug>` — project details with attached tasks, events, agents, milestones
 - `astar projects update <slug>` — update name, description, visibility, members
+- `astar projects delete <slug>` — delete project, unlinks all attached work
 
 **REST** (`supabase/functions/skills-api/index.ts`):
 - `GET /projects` — list (auth required)
 - `POST /projects` — create
 - `GET /projects/:slug` — details + attached work
 - `PATCH /projects/:slug` — update (owner only)
+- `DELETE /projects/:slug` — delete (owner only, unlinks all attached entities)
 
 **MCP** (4 tools):
 - `create_project`, `list_projects`, `get_project`, `update_project`

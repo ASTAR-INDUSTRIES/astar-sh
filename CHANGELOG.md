@@ -5,9 +5,17 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.73] - 2026-04-10
+
 ## [0.0.72] - 2026-04-10
 
+### Changed
+- `astar record` now uses whisper-stream for real-time continuous transcription with sliding corrections instead of batch re-transcription
+
 ## [0.0.71] - 2026-04-10
+
+### Added
+- `astar projects delete <slug>` — deletes a project and unlinks all attached tasks, events, milestones, and agents
 
 ## [0.0.70] - 2026-04-10
 
