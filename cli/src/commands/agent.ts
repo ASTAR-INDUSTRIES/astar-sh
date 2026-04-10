@@ -77,7 +77,12 @@ async function renderAgentMonitor(api: AstarAPI) {
     lastInboxItems = allItems;
     monitorError = "";
   } catch (e: any) {
-    monitorError = e.message?.includes("401") ? "session expired" : "API unreachable";
+    const code = e.code || "";
+    monitorError = code === "AUTH_EXPIRED"
+      ? "session expired — re-run astar login"
+      : code === "NETWORK_ERROR"
+        ? "API unreachable — check your connection"
+        : e.message || "unknown error";
   }
 
   const agents = lastAgents;
