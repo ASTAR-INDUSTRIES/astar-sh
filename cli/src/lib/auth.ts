@@ -5,6 +5,15 @@ import { getConfig, getAuthCache, saveAuthCache, clearAuthCache, paths, ensureAg
 
 const SCOPES = ["openid", "profile", "email"];
 
+function getIdTokenExpiry(idToken: string): number | null {
+  try {
+    const payload = JSON.parse(Buffer.from(idToken.split(".")[1], "base64url").toString());
+    return payload.exp ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
 async function getMsalClient() {
   const config = await getConfig();
   const client = new PublicClientApplication({
@@ -76,9 +85,10 @@ export async function login(): Promise<AuthCache> {
 
   await persistMsalCache(client);
 
+  const token = result.idToken || result.accessToken;
   const cache: AuthCache = {
-    accessToken: result.idToken,
-    expiresAt: result.expiresOn?.getTime() ?? Date.now() + 3600_000,
+    accessToken: token,
+    expiresAt: getIdTokenExpiry(token) ?? result.expiresOn?.getTime() ?? Date.now() + 3600_000,
     homeAccountId: result.account?.homeAccountId,
     account: {
       name: result.account?.name ?? "Unknown",
@@ -133,9 +143,10 @@ export async function loginForAgent(slug: string): Promise<AuthCache> {
   const data = client.getTokenCache().serialize();
   await Bun.write(msalPath, data);
 
+  const agentToken = result.idToken || result.accessToken;
   const cache: AuthCache = {
-    accessToken: result.idToken,
-    expiresAt: result.expiresOn?.getTime() ?? Date.now() + 3600_000,
+    accessToken: agentToken,
+    expiresAt: getIdTokenExpiry(agentToken) ?? result.expiresOn?.getTime() ?? Date.now() + 3600_000,
     homeAccountId: result.account?.homeAccountId,
     account: {
       name: result.account?.name ?? "Unknown",
@@ -185,9 +196,10 @@ async function silentRefresh(cache: AuthCache): Promise<AuthCache | null> {
 
     await persistMsalCache(client);
 
+    const refreshToken = result.idToken || result.accessToken;
     const refreshed: AuthCache = {
-      accessToken: result.idToken,
-      expiresAt: result.expiresOn?.getTime() ?? Date.now() + 3600_000,
+      accessToken: refreshToken,
+      expiresAt: getIdTokenExpiry(refreshToken) ?? result.expiresOn?.getTime() ?? Date.now() + 3600_000,
       homeAccountId: result.account?.homeAccountId,
       account: {
         name: result.account?.name ?? cache.account.name,
