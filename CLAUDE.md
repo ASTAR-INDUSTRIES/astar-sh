@@ -1,18 +1,19 @@
 ## Versioning
 
-- Current version: `0.0.74`
-- Only bump `0.0.x` per commit. Each commit = one patch bump.
+- Current version: `0.0.73`
 - **NEVER** bump `0.x.0` without Erik's explicit written approval.
 - **NEVER** bump `x.0.0` without Erik's explicit written approval.
 - Version lives in `cli/package.json` and `cli/src/index.ts` — keep them in sync.
+- The pre-commit hook auto-bumps `0.0.x` **only** when `[Unreleased]` has content. No changelog entries = no version bump.
 
 ## Changelog
 
-- Update `CHANGELOG.md` with every commit that adds, changes, or fixes user-facing behavior.
-- Add entries under the `## [Unreleased]` header. The pre-commit hook auto-replaces it with the version + date.
+- Add entries under `## [Unreleased]` for commits that add, change, or fix user-facing behavior.
+- The pre-commit hook stamps the version + date and moves entries out of `[Unreleased]` automatically.
 - Use [Keep a Changelog](https://keepachangelog.com) categories: `Added`, `Changed`, `Fixed`, `Removed`.
 - One bullet per change. Describe what the user sees, not implementation details.
 - Skip: internal refactors, comment changes, CI config, non-user-facing fixes.
+- Do NOT leave empty version headers in the changelog.
 
 ## Wiki
 
