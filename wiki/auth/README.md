@@ -19,7 +19,7 @@ Microsoft Entra ID (Azure AD) authentication via MSAL device code flow.
 
 ## Token refresh
 
-`getToken()` checks expiry → attempts `silentRefresh()` via MSAL cache → falls back to re-login prompt.
+`getToken()` checks expiry → attempts `silentRefresh()` via MSAL cache → if that fails and stdin is a TTY, automatically triggers interactive re-login via device code flow → falls back to error if non-interactive.
 
 ## Per-agent auth
 
