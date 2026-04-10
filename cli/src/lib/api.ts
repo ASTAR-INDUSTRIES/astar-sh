@@ -457,6 +457,10 @@ export class AstarAPI {
     return res.json();
   }
 
+  async deleteProject(slug: string): Promise<void> {
+    return this.fetch(`/projects/${slug}`, { method: "DELETE" });
+  }
+
   async listEvents(filters?: { status?: string; type?: string; month?: string; search?: string; project?: string; limit?: number }): Promise<Event[]> {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);

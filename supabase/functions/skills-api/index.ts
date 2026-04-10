@@ -765,6 +765,39 @@ app.patch("/projects/:slug", async (c) => {
   return c.json({ ok: true, slug: patch.slug || project.slug }, 200, corsHeaders);
 });
 
+// ── DELETE /projects/:slug — delete project ─────────────────────────
+app.delete("/projects/:slug", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const ref = c.req.param("slug");
+  const sb = getSupabase();
+  const project = await resolveProjectRef(sb, ref);
+  if (!project || !canAccessProject(project, user)) return c.json({ error: "Project not found" }, 404, corsHeaders);
+  if (!canModifyProject(project, user)) return c.json({ error: "Only the project owner can delete this project" }, 403, corsHeaders);
+
+  await sb.from("tasks").update({ project_id: null }).eq("project_id", project.id);
+  await sb.from("events").update({ project_id: null }).eq("project_id", project.id);
+  await sb.from("milestones").update({ project_id: null }).eq("project_id", project.id);
+  await sb.from("agents").update({ project_id: null }).eq("project_id", project.id);
+
+  const { error } = await sb.from("projects").delete().eq("id", project.id);
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+  await logAudit({
+    actor_email: user.email,
+    actor_name: user.name,
+    actor_type: "human",
+    entity_type: "project",
+    entity_id: project.slug,
+    action: "deleted",
+    channel: "api",
+    state_before: { slug: project.slug, name: project.name, visibility: project.visibility, owner: project.owner },
+  });
+
+  return c.json({ ok: true, deleted: project.slug }, 200, corsHeaders);
+});
+
 // ── GET /events — list events ───────────────────────────────────────
 app.get("/events", async (c) => {
   const user = await validateMsToken(c.req.raw);

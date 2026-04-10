@@ -217,4 +217,19 @@ export function registerProjectCommands(program: Command) {
         process.exit(1);
       }
     });
+
+  projects
+    .command("delete <slug>")
+    .description("Delete a project (unlinks all attached work)")
+    .action(async (slug: string) => {
+      const token = await requireAuth();
+      const api = new AstarAPI(token);
+      try {
+        await api.deleteProject(slug);
+        console.log(`${c.green}✓${c.reset} Project deleted ${c.cyan}${slug}${c.reset}`);
+      } catch (e: any) {
+        console.error(`${c.red}✗${c.reset} ${e.message}`);
+        process.exit(1);
+      }
+    });
 }
