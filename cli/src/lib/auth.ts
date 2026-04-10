@@ -77,7 +77,7 @@ export async function login(): Promise<AuthCache> {
   await persistMsalCache(client);
 
   const cache: AuthCache = {
-    accessToken: result.accessToken,
+    accessToken: result.idToken,
     expiresAt: result.expiresOn?.getTime() ?? Date.now() + 3600_000,
     homeAccountId: result.account?.homeAccountId,
     account: {
@@ -134,7 +134,7 @@ export async function loginForAgent(slug: string): Promise<AuthCache> {
   await Bun.write(msalPath, data);
 
   const cache: AuthCache = {
-    accessToken: result.accessToken,
+    accessToken: result.idToken,
     expiresAt: result.expiresOn?.getTime() ?? Date.now() + 3600_000,
     homeAccountId: result.account?.homeAccountId,
     account: {
@@ -186,7 +186,7 @@ async function silentRefresh(cache: AuthCache): Promise<AuthCache | null> {
     await persistMsalCache(client);
 
     const refreshed: AuthCache = {
-      accessToken: result.accessToken,
+      accessToken: result.idToken,
       expiresAt: result.expiresOn?.getTime() ?? Date.now() + 3600_000,
       homeAccountId: result.account?.homeAccountId,
       account: {

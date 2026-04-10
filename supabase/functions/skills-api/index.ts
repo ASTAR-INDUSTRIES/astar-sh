@@ -127,7 +127,7 @@ async function validateMsToken(req: Request): Promise<{ email: string; name: str
 
     if (payload.exp && payload.exp * 1000 < Date.now()) return null;
 
-    return { email, name: payload.name || email.split("@")[0] };
+    return { email: email.toLowerCase(), name: payload.name || email.split("@")[0] };
   } catch {
     return null;
   }
@@ -245,12 +245,11 @@ function canAccessEvent(event: any, user: AuthUser, project?: any | null): boole
 
 function canAccessTask(task: any, user: AuthUser, project?: any | null): boolean {
   if (!task) return false;
-  if (task.visibility === "private") {
-    return task.created_by === user.email || task.assigned_to === user.email;
-  }
+  const isOwner = task.created_by === user.email || task.assigned_to === user.email;
+  if (task.visibility === "private") return isOwner;
+  if (isOwner) return true;
   if (project) return canAccessProject(project, user);
-  if (task.visibility === "public" || task.visibility === "team") return true;
-  return task.created_by === user.email || task.assigned_to === user.email;
+  return task.visibility === "public" || task.visibility === "team";
 }
 
 function canAccessMilestone(milestone: any, user: AuthUser, project?: any | null): boolean {
@@ -1652,7 +1651,7 @@ app.get("/tasks", async (c) => {
   if (assignedTo && assignedTo !== "all") {
     query = query.eq("assigned_to", assignedTo);
   } else if (!assignedTo && !triage && !parent) {
-    query = query.eq("assigned_to", user.email);
+    query = query.or(`assigned_to.eq.${user.email},created_by.eq.${user.email}`);
   }
 
   if (status) {

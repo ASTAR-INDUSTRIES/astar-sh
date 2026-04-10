@@ -5,6 +5,14 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.65] - 2026-04-10
+
+### Fixed
+- CLI auth: send ID token instead of MS Graph access token, fixing 401 on all protected endpoints
+- Task listing now includes tasks created by the user, not just tasks assigned to them
+- Email comparisons normalized to lowercase, preventing case-mismatch access denials
+- Task access no longer blocked by project gate when user is the creator or assignee
+
 ## [0.0.63] - 2026-04-08
 ### Added
 - First-class `projects` primitive with owner/member visibility, linked tasks/events/agents/milestones, and project-aware audit metadata
