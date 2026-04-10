@@ -17,6 +17,7 @@ import { registerStatusCommand } from "./commands/status";
 import { registerChangelogCommand } from "./commands/changelog";
 import { registerUpdateCommand, checkForUpdates } from "./commands/update";
 import { registerEtfCommands } from "./commands/etf";
+import { registerRecordCommands } from "./commands/record";
 import { getAuthStatus } from "./lib/auth";
 import { AstarAPI } from "./lib/api";
 import { c } from "./lib/ui";
@@ -106,6 +107,7 @@ registerHealthCommand(program);
 registerStatusCommand(program);
 registerChangelogCommand(program);
 registerEtfCommands(program);
+registerRecordCommands(program);
 registerUpdateCommand(program);
 
 await checkForUpdates();

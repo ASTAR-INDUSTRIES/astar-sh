@@ -1,6 +1,6 @@
 # CLI
 
-Bun + Commander CLI with 17 command groups.
+Bun + Commander CLI with 18 command groups.
 
 ## Structure
 
@@ -25,6 +25,7 @@ Root program in `cli/src/index.ts`. Each command module exports a `registerXxxCo
 | changelog | show recent CLI changes |
 | update | self-update via git pull |
 | etf | list, info, performance, news, refresh |
+| record | start session, --setup, list, info |
 
 ## API client
 
@@ -61,4 +62,4 @@ Both support `ctrl+o` to expand/collapse details and `ctrl+c` to exit.
 - `cli/src/lib/api.ts` — API client class
 - `cli/src/lib/auth.ts` — auth helpers
 - `cli/src/lib/ui.ts` — terminal colors, table renderer
-- `cli/src/commands/*.ts` — 17 command modules
+- `cli/src/commands/*.ts` — 18 command modules

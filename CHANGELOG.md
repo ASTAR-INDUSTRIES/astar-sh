@@ -7,6 +7,13 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [0.0.69] - 2026-04-10
 
+### Added
+- `astar record` — live local transcription using NB-Whisper from Nasjonalbiblioteket (2.3% WER Norwegian)
+- `astar record --setup` — auto-builds whisper.cpp and downloads NB-Whisper medium model (~515 MB)
+- `astar record list` — browse saved recordings with numbered list
+- `astar record info [ref]` — view transcript by number, filename, or latest by default
+- Live audio level meter and real-time transcript display during recording sessions
+
 ### Changed
 - CLI now automatically re-authenticates via device code flow when silent token refresh fails
 - Monitor error messages now distinguish between expired sessions and network/API outages
