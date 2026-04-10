@@ -18,6 +18,7 @@ export function registerAuthCommands(program: Command) {
         if (!await isBaseSkillInstalled() && !await isBaseSkillDeclined()) {
           await promptBaseSkillInstall();
         }
+        process.exit(0);
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} ${e.message}`);
         process.exit(1);
