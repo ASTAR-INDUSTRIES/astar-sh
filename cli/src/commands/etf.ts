@@ -111,7 +111,12 @@ async function renderMonitorAll(api: AstarAPI) {
     lastFunds = await api.listEtf();
     monitorError = "";
   } catch (e: any) {
-    monitorError = e.message?.includes("401") ? "session expired — re-run astar login" : "API unreachable";
+    const code = e.code || "";
+    monitorError = code === "AUTH_EXPIRED"
+      ? "session expired — re-run astar login"
+      : code === "NETWORK_ERROR"
+        ? "API unreachable — check your connection"
+        : e.message || "unknown error";
   }
 
   const now = new Date();
@@ -162,7 +167,12 @@ async function renderMonitorSingle(api: AstarAPI, ticker: string) {
     if (intradayNavPoints.length > 120) intradayNavPoints.shift();
     monitorError = "";
   } catch (e: any) {
-    monitorError = e.message?.includes("401") ? "session expired — re-run astar login" : "API unreachable";
+    const code = e.code || "";
+    monitorError = code === "AUTH_EXPIRED"
+      ? "session expired — re-run astar login"
+      : code === "NETWORK_ERROR"
+        ? "API unreachable — check your connection"
+        : e.message || "unknown error";
   }
   if (!lastDetail) return;
 

@@ -2,6 +2,7 @@ import { PublicClientApplication, DeviceCodeRequest } from "@azure/msal-node";
 import { execSync } from "child_process";
 import { createInterface } from "readline";
 import { getConfig, getAuthCache, saveAuthCache, clearAuthCache, paths, ensureAgentDir, type AuthCache } from "./config";
+import { c } from "./ui";
 
 const SCOPES = ["openid", "profile", "email"];
 
@@ -170,14 +171,27 @@ export async function getAuthStatus(): Promise<{ name: string; email: string } |
   return { name: cache.account.name, email: cache.account.username };
 }
 
-export async function getToken(): Promise<string> {
+export async function getToken(opts?: { interactive?: boolean }): Promise<string> {
   const cache = await getAuthCache();
   if (!cache) throw new Error("Not authenticated. Run 'astar login' first.");
 
   if (cache.expiresAt > Date.now()) return cache.accessToken;
 
+  // Token expired — try silent refresh first
   const refreshed = await silentRefresh(cache);
   if (refreshed) return refreshed.accessToken;
+
+  // Silent refresh failed — try interactive re-auth if allowed
+  if (opts?.interactive !== false && process.stdin.isTTY) {
+    console.log(`\n  ${c.yellow}⟳${c.reset} Session expired — refreshing automatically...\n`);
+    try {
+      const result = await login();
+      console.log(`  ${c.green}✓${c.reset} Re-authenticated as ${c.white}${result.account.name}${c.reset}\n`);
+      return result.accessToken;
+    } catch {
+      throw new Error("Session expired and re-authentication failed. Run 'astar login' manually.");
+    }
+  }
 
   throw new Error("Session expired. Run 'astar login' to sign in again.");
 }

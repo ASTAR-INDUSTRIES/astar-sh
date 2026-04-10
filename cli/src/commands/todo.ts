@@ -106,7 +106,12 @@ async function renderMonitor(api: AstarAPI, opts: { mineOnly?: boolean; myEmail?
     lastCompletedTasks = done;
     monitorError = "";
   } catch (e: any) {
-    monitorError = e.message?.includes("401") ? "session expired — re-run astar login" : "API unreachable";
+    const code = e.code || "";
+    monitorError = code === "AUTH_EXPIRED"
+      ? "session expired — re-run astar login"
+      : code === "NETWORK_ERROR"
+        ? "API unreachable — check your connection"
+        : e.message || "unknown error";
   }
   const openTasks = lastOpenTasks;
   const completedTasks = lastCompletedTasks;
