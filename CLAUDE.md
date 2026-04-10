@@ -1,6 +1,6 @@
 ## Versioning
 
-- Current version: `0.0.74`
+- Current version: `0.0.75`
 - **NEVER** bump `0.x.0` without Erik's explicit written approval.
 - **NEVER** bump `x.0.0` without Erik's explicit written approval.
 - Version lives in `cli/package.json` and `cli/src/index.ts` — keep them in sync.

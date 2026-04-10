@@ -5,6 +5,12 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.75] - 2026-04-10
+
+### Fixed
+- Monitor view now starts collapsed by default (ctrl+o to expand)
+- Monitor column alignment fixed — subtask counts and project/event tags no longer push priority/due/assignee columns out of alignment
+
 ## [0.0.74] - 2026-04-10
 
 ### Fixed

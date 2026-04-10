@@ -91,7 +91,7 @@ const priorityBars: Record<string, string> = {
   low: "░",
 };
 
-let monitorExpanded = true;
+let monitorExpanded = false;
 let lastOpenTasks: Task[] = [];
 let lastCompletedTasks: Task[] = [];
 let monitorError = "";
@@ -156,14 +156,21 @@ async function renderMonitor(api: AstarAPI, opts: { mineOnly?: boolean; myEmail?
 
     const subCount = t.subtasks?.length || 0;
     const subDone = t.subtasks?.filter((s) => s.status === "completed").length || 0;
-    const subLabel = subCount > 0 ? ` ${c.dim}[${subDone}/${subCount}]${c.reset}` : "";
-    const scopeLabel = [t.event?.slug ? `${c.dim}@${t.event.slug}${c.reset}` : "", t.project?.slug ? `${c.dim}#${t.project.slug}${c.reset}` : ""].filter(Boolean).join(" ");
+    const subLabel = subCount > 0 ? ` [${subDone}/${subCount}]` : "";
+    const scopeTag = [t.event?.slug ? `@${t.event.slug}` : "", t.project?.slug ? `#${t.project.slug}` : ""].filter(Boolean).join(" ");
+    const suffix = `${subLabel}${scopeTag ? ` ${scopeTag}` : ""}`;
     const isMine = opts.myEmail && t.assigned_to === opts.myEmail;
     const titleColor = isMine && !opts.mineOnly ? c.white : "";
     const titleReset = isMine && !opts.mineOnly ? c.reset : "";
     const assigneeColor = isMine && !opts.mineOnly ? c.white : c.dim;
 
-    console.log(`  ${pColor}${bar}${c.reset} ${c.cyan}${num}${c.reset}${numPad}  ${titleColor}${title}${titleReset}${subLabel}${scopeLabel ? ` ${scopeLabel}` : ""}${titlePad}${pColor}${t.priority.padEnd(9)}${c.reset}${overdue ? c.red : c.dim}${due.padEnd(8)}${c.reset}${assigneeColor}${assignee}${c.reset}`);
+    const maxTitle = titleWidth - suffix.length;
+    const trimmedTitle = t.title.length > maxTitle ? t.title.slice(0, maxTitle - 1) + "…" : t.title;
+    const fullTitle = `${trimmedTitle}${suffix}`;
+    const fullTitlePad = " ".repeat(Math.max(1, titleWidth - fullTitle.length));
+    const renderedTitle = `${titleColor}${trimmedTitle}${titleReset}${suffix ? `${c.dim}${suffix}${c.reset}` : ""}`;
+
+    console.log(`  ${pColor}${bar}${c.reset} ${c.cyan}${num}${c.reset}${numPad}  ${renderedTitle}${fullTitlePad}${pColor}${t.priority.padEnd(9)}${c.reset}${overdue ? c.red : c.dim}${due.padEnd(8)}${c.reset}${assigneeColor}${assignee}${c.reset}`);
 
     if (monitorExpanded && t.description) {
       const desc = t.description.length > descWidth ? t.description.slice(0, descWidth - 1) + "…" : t.description;
