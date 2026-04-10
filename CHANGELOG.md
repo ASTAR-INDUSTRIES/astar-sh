@@ -5,46 +5,32 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.74] - 2026-04-10
+
 ## [0.0.73] - 2026-04-10
-
-## [0.0.72] - 2026-04-10
-
-### Changed
-- `astar record` now uses whisper-stream for real-time continuous transcription with sliding corrections instead of batch re-transcription
-
-## [0.0.71] - 2026-04-10
-
-### Added
-- `astar projects delete <slug>` — deletes a project and unlinks all attached tasks, events, milestones, and agents
-
-## [0.0.70] - 2026-04-10
-
-## [0.0.69] - 2026-04-10
 
 ### Added
 - `astar record` — live local transcription using NB-Whisper from Nasjonalbiblioteket (2.3% WER Norwegian)
-- `astar record --setup` — auto-builds whisper.cpp and downloads NB-Whisper medium model (~515 MB)
+- `astar record --setup` — auto-builds whisper.cpp + whisper-stream and downloads NB-Whisper medium model (~515 MB)
 - `astar record list` — browse saved recordings with numbered list
 - `astar record info [ref]` — view transcript by number, filename, or latest by default
-- Live audio level meter and real-time transcript display during recording sessions
-
-### Changed
-- CLI now automatically re-authenticates via device code flow when silent token refresh fails
-- Monitor error messages now distinguish between expired sessions and network/API outages
-
-## [0.0.68] - 2026-04-10
-
-## [0.0.67] - 2026-04-10
-
-## [0.0.66] - 2026-04-10
-
-## [0.0.65] - 2026-04-10
+- Real-time streaming transcription via whisper-stream with sliding window corrections (3s step, 8s context)
+- `astar projects delete <slug>` — deletes a project and unlinks all attached tasks, events, milestones, and agents
+- Wiki pages for projects, feedback, and shipped subsystems
+- Wiki maintenance rules added to CLAUDE.md
 
 ### Fixed
 - CLI auth: send ID token instead of MS Graph access token, fixing 401 on all protected endpoints
+- Token refresh now uses ID token expiry and handles missing idToken on silent refresh
 - Task listing now includes tasks created by the user, not just tasks assigned to them
 - Email comparisons normalized to lowercase, preventing case-mismatch access denials
 - Task access no longer blocked by project gate when user is the creator or assignee
+- Login command no longer hangs after successful authentication
+
+### Changed
+- CLI now automatically re-authenticates via device code flow when silent token refresh fails
+- AGENTS.md now references CLAUDE.md instead of duplicating version info
+- Wiki CLI docs updated to 18 command groups, MCP docs updated to 61 tools
 
 ## [0.0.63] - 2026-04-08
 ### Added
@@ -70,34 +56,6 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 - Task listing and task detail access now enforce task visibility even when callers request `assigned_to=all` or know a task number
 - MCP task tools now reject `include_all` until server-enforced admin claims exist and no longer bypass task visibility for reads, triage, or task mutations
 - Audit and feedback reads now stop using public-read access by default; users only see their own audit trail and agents they own
-
-## [0.0.60] - 2026-04-06
-
-## [0.0.59] - 2026-04-06
-
-## [0.0.58] - 2026-04-06
-
-## [0.0.57] - 2026-04-06
-
-## [0.0.56] - 2026-04-06
-
-## [0.0.55] - 2026-04-06
-
-## [0.0.54] - 2026-04-06
-
-## [0.0.53] - 2026-04-06
-
-## [0.0.52] - 2026-04-06
-
-## [0.0.51] - 2026-04-06
-
-## [0.0.50] - 2026-04-06
-
-## [0.0.49] - 2026-04-06
-
-## [0.0.48] - 2026-04-06
-
-## [0.0.47] - 2026-04-06
 
 ## [0.0.46] - 2026-04-06
 ### Added
@@ -145,12 +103,6 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 - Wiki structure with subsystem documentation: auth, agents, tasks, audit, news, skills, mcp, cli
 - `wiki/index.md` master index linking all subsystem pages
 - Post-commit Claude Code hook reminding to check wiki updates when committing
-
-## [0.0.40] - 2026-04-06
-
-## [0.0.39] - 2026-04-06
-
-## [0.0.38] - 2026-04-06
 
 ## [0.0.37] - 2026-04-06
 ### Added
