@@ -1,6 +1,6 @@
 # MCP
 
-MCP server providing 57 tools for Claude Code integration.
+MCP server providing 61 tools for Claude Code integration.
 
 ## Request flow
 
@@ -32,6 +32,9 @@ query_content, get_stats
 
 ### Feedback (3)
 submit_feedback, list_feedback, update_feedback
+
+### Projects (4)
+create_project, list_projects, get_project, update_project
 
 ### Events (4)
 create_event, list_events, get_event, update_event
