@@ -1366,6 +1366,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
         author_email: user.email,
       });
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      await sb.from("audit_events").insert({ actor_email: actorEmail, actor_name: actorName, actor_type: actorType, actor_agent_id: agentSlug || null, entity_type: "tweet", action: "created", channel: "mcp", state_after: { content: (args.content || "").slice(0, 100) } });
       return [{ type: "text", text: "✓ Thought posted." }];
     }
     case "list_tweets": {
@@ -1381,6 +1382,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
     case "delete_tweet": {
       const { error } = await sb.from("tweets").delete().eq("id", args.id);
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      await sb.from("audit_events").insert({ actor_email: actorEmail, actor_name: actorName, actor_type: actorType, actor_agent_id: agentSlug || null, entity_type: "tweet", entity_id: args.id, action: "deleted", channel: "mcp" });
       return [{ type: "text", text: "✓ Deleted." }];
     }
     case "query_content": {
@@ -1420,6 +1422,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
         references: refs,
       };
       await sanityMutate([{ createOrReplace: doc }]);
+      await sb.from("audit_events").insert({ actor_email: actorEmail, actor_name: actorName, actor_type: actorType, actor_agent_id: agentSlug || null, entity_type: "skill", entity_id: slug, action: "created", channel: "mcp", state_after: { title: args.title, tags: args.tags } });
       return [{ type: "text", text: `✓ Skill "${args.title}" created (slug: ${slug}).` }];
     }
 
@@ -1434,6 +1437,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       if (args.published !== undefined) patch.published = args.published;
       if (Object.keys(patch).length === 0) return [{ type: "text", text: "No fields to update." }];
       await sanityMutate([{ patch: { id: docId, set: patch } }]);
+      await sb.from("audit_events").insert({ actor_email: actorEmail, actor_name: actorName, actor_type: actorType, actor_agent_id: agentSlug || null, entity_type: "skill", entity_id: docId.replace("knowledgeSkill-", ""), action: "updated", channel: "mcp", state_after: patch });
       return [{ type: "text", text: `✓ Skill updated.` }];
     }
 
@@ -1441,6 +1445,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const docId = await resolveSkillId(args);
       if (!docId) return [{ type: "text", text: "Error: Skill not found." }];
       await sanityMutate([{ delete: { id: docId } }]);
+      await sb.from("audit_events").insert({ actor_email: actorEmail, actor_name: actorName, actor_type: actorType, actor_agent_id: agentSlug || null, entity_type: "skill", entity_id: docId.replace("knowledgeSkill-", ""), action: "deleted", channel: "mcp" });
       return [{ type: "text", text: `✓ Skill deleted.` }];
     }
 
@@ -1484,6 +1489,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
           insert: { after: "references[-1]", items: [fileItem] },
         },
       }]);
+      await sb.from("audit_events").insert({ actor_email: actorEmail, actor_name: actorName, actor_type: actorType, actor_agent_id: agentSlug || null, entity_type: "skill", entity_id: docId.replace("knowledgeSkill-", ""), action: "file_uploaded", channel: "mcp", state_after: { filename: args.filename } });
       return [{ type: "text", text: `✓ File "${args.filename}" added.` }];
     }
 
@@ -1503,6 +1509,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
           unset: [`references[_key=="${ref._key}"]`],
         },
       }]);
+      await sb.from("audit_events").insert({ actor_email: actorEmail, actor_name: actorName, actor_type: actorType, actor_agent_id: agentSlug || null, entity_type: "skill", entity_id: docId.replace("knowledgeSkill-", ""), action: "file_deleted", channel: "mcp", state_after: { filename: args.filename } });
       return [{ type: "text", text: `✓ File "${args.filename}" removed.` }];
     }
 
@@ -1566,6 +1573,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
         published: args.published ?? true,
       };
       await sanityMutate([{ createOrReplace: doc }]);
+      await sb.from("audit_events").insert({ actor_email: actorEmail, actor_name: actorName, actor_type: actorType, actor_agent_id: agentSlug || null, entity_type: "news", entity_id: slug, action: "published", channel: "mcp", state_after: { title: args.title, category: args.category, sources: sources.length, entities: (args.entities || []).map((e: any) => e.name) } });
       const entityNames = (args.entities || []).map((e: any) => e.name).join(", ");
       return [{ type: "text", text: `✓ News "${args.title}" published (slug: ${slug}, ${sources.length} sources${entityNames ? `, entities: ${entityNames}` : ""}).` }];
     }
@@ -1598,6 +1606,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       if (args.continues !== undefined) patch.continues = args.continues;
       if (Object.keys(patch).length === 0) return [{ type: "text", text: "No fields to update." }];
       await sanityMutate([{ patch: { id: docId, set: patch } }]);
+      await sb.from("audit_events").insert({ actor_email: actorEmail, actor_name: actorName, actor_type: actorType, actor_agent_id: agentSlug || null, entity_type: "news", entity_id: docId.replace("newsPost-", ""), action: "updated", channel: "mcp", state_after: patch });
       return [{ type: "text", text: `✓ News post updated.` }];
     }
 
@@ -1605,6 +1614,7 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       const docId = await resolveNewsId(args);
       if (!docId) return [{ type: "text", text: "Error: News post not found." }];
       await sanityMutate([{ delete: { id: docId } }]);
+      await sb.from("audit_events").insert({ actor_email: actorEmail, actor_name: actorName, actor_type: actorType, actor_agent_id: agentSlug || null, entity_type: "news", entity_id: docId.replace("newsPost-", ""), action: "deleted", channel: "mcp" });
       return [{ type: "text", text: `✓ News post deleted.` }];
     }
 
@@ -1625,13 +1635,14 @@ async function handleTool(name: string, args: any, user: { email: string; userId
         emoji: args.emoji,
       });
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      await sb.from("audit_events").insert({ actor_email: actorEmail, actor_name: actorName, actor_type: actorType, actor_agent_id: agentSlug || null, entity_type: "tweet", entity_id: args.tweet_id, action: "reacted", channel: "mcp", state_after: { emoji: args.emoji } });
       return [{ type: "text", text: `✓ Reacted with ${args.emoji}` }];
     }
 
     // ── Feedback ──────────────────────────────────────────────────
     case "submit_feedback": {
       const sb = adminClient();
-      const { error } = await sb.from("feedback").insert({
+      const { data: fbData, error } = await sb.from("feedback").insert({
         content: args.content,
         type: args.type || "feature",
         source: "human",
@@ -1640,8 +1651,9 @@ async function handleTool(name: string, args: any, user: { email: string; userId
         linked_skill: args.linked_skill || null,
         linked_news: args.linked_news || null,
         context: {},
-      });
+      }).select("id").single();
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      await sb.from("audit_events").insert({ actor_email: actorEmail, actor_name: actorName, actor_type: actorType, actor_agent_id: agentSlug || null, entity_type: "feedback", entity_id: fbData?.id, action: "submitted", channel: "mcp", state_after: { type: args.type || "feature" } });
       return [{ type: "text", text: `✓ Feedback submitted.` }];
     }
 
@@ -1657,10 +1669,12 @@ async function handleTool(name: string, args: any, user: { email: string; userId
 
     case "update_feedback": {
       const sb = adminClient();
+      const { data: existing } = await sb.from("feedback").select("status").eq("id", args.id).single();
       const patch: any = { status: args.status };
       if (args.resolution) patch.resolution = args.resolution;
       const { error } = await sb.from("feedback").update(patch).eq("id", args.id);
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      await sb.from("audit_events").insert({ actor_email: actorEmail, actor_name: actorName, actor_type: actorType, actor_agent_id: agentSlug || null, entity_type: "feedback", entity_id: args.id, action: "status_changed", channel: "mcp", state_before: { status: existing?.status }, state_after: patch });
       return [{ type: "text", text: `✓ Feedback updated to "${args.status}".` }];
     }
 

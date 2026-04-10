@@ -5,6 +5,16 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.74] - 2026-04-10
+
+### Fixed
+- Audit: `actor_name` now captured on all task events (was missing due to logTaskAudit wrapper)
+- Audit: `actor_type` added to all API call sites that were missing it (skills, news, feedback, milestones, inquiries, inbox, agents)
+- Audit: `state_before` now captured on feedback status changes, agent updates, and task cancellation (was hardcoded or absent)
+- Audit: `entity_id` now captured on feedback submit and milestone create
+- Audit: project delete now includes `project_id` and `members` in state_before
+- MCP audit: skills create/update/delete, news publish/update/delete, tweets, reactions, and feedback now emit audit events (were completely untracked)
+
 ## [0.0.73] - 2026-04-10
 
 ### Added

@@ -33,7 +33,6 @@ async function logAudit(opts: {
   state_before?: any;
   state_after?: any;
   channel?: string;
-  raw_input?: any;
   context?: any;
   project_id?: string | null;
 }) {
@@ -480,7 +479,7 @@ app.post("/skills", async (c) => {
 
   await sanityMutate([{ createOrReplace: doc }]);
 
-  await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "skill", entity_id: skillSlug, action: "pushed", channel: "api", state_after: { title } });
+  await logAudit({ actor_email: user.email, actor_name: user.name, actor_type: "human", entity_type: "skill", entity_id: skillSlug, action: "pushed", channel: "api", state_after: { title } });
 
   return c.json({ ok: true, slug: skillSlug }, 200, corsHeaders);
 });
@@ -792,7 +791,8 @@ app.delete("/projects/:slug", async (c) => {
     entity_id: project.slug,
     action: "deleted",
     channel: "api",
-    state_before: { slug: project.slug, name: project.name, visibility: project.visibility, owner: project.owner },
+    project_id: project.id,
+    state_before: { slug: project.slug, name: project.name, visibility: project.visibility, owner: project.owner, members: project.members },
   });
 
   return c.json({ ok: true, deleted: project.slug }, 200, corsHeaders);
@@ -1054,7 +1054,7 @@ app.post("/news", async (c) => {
 
   await sanityMutate([{ createOrReplace: doc }]);
 
-  await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "news", entity_id: slug, action: "published", channel: "api", state_after: { title } });
+  await logAudit({ actor_email: user.email, actor_name: user.name, actor_type: "human", entity_type: "news", entity_id: slug, action: "published", channel: "api", state_after: { title, category: body.category } });
 
   return c.json({ ok: true, slug }, 200, corsHeaders);
 });
@@ -1082,7 +1082,7 @@ app.post("/feedback", async (c) => {
   if (!body.content) return c.json({ error: "content is required" }, 400, corsHeaders);
 
   const sb = getSupabase();
-  const { error } = await sb.from("feedback").insert({
+  const { data: fbData, error } = await sb.from("feedback").insert({
     content: body.content,
     type: body.type || "feature",
     source: body.source || "human",
@@ -1091,11 +1091,11 @@ app.post("/feedback", async (c) => {
     linked_skill: body.linked_skill || null,
     linked_news: body.linked_news || null,
     context: body.context || {},
-  });
+  }).select("id").single();
 
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
-  await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "feedback", action: "submitted", channel: "api", state_after: { type: body.type || "feature", content: body.content } });
+  await logAudit({ actor_email: user.email, actor_name: user.name, actor_type: "human", entity_type: "feedback", entity_id: fbData?.id, action: "submitted", channel: "api", state_after: { type: body.type || "feature", content: body.content } });
 
   return c.json({ ok: true }, 200, corsHeaders);
 });
@@ -1109,6 +1109,8 @@ app.patch("/feedback/:id", async (c) => {
   const body = await c.req.json();
   const sb = getSupabase();
 
+  const { data: existing } = await sb.from("feedback").select("status").eq("id", id).single();
+
   const patch: any = {};
   if (body.status) patch.status = body.status;
   if (body.resolution !== undefined) patch.resolution = body.resolution;
@@ -1118,7 +1120,7 @@ app.patch("/feedback/:id", async (c) => {
   const { error } = await sb.from("feedback").update(patch).eq("id", id);
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
-  await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "feedback", entity_id: id, action: "status_changed", channel: "api", state_after: patch });
+  await logAudit({ actor_email: user.email, actor_name: user.name, actor_type: "human", entity_type: "feedback", entity_id: id, action: "status_changed", channel: "api", state_before: { status: existing?.status }, state_after: patch });
 
   return c.json({ ok: true }, 200, corsHeaders);
 });
@@ -1167,24 +1169,26 @@ app.post("/milestones", async (c) => {
     projectId = project.id;
   }
 
-  const { error } = await sb.from("milestones").insert({
+  const { data: msData, error } = await sb.from("milestones").insert({
     title: body.title,
     date: body.date || new Date().toISOString().split("T")[0],
     category: body.category || "general",
     created_by: user.name,
     project_id: projectId,
-  });
+  }).select("id").single();
 
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
   await logAudit({
     actor_email: user.email,
     actor_name: user.name,
+    actor_type: "human",
     entity_type: "milestone",
+    entity_id: msData?.id,
     action: "created",
     channel: "api",
     project_id: projectId,
-    state_after: { title: body.title, category: body.category || "general" },
+    state_after: { title: body.title, category: body.category || "general", date: body.date },
   });
 
   return c.json({ ok: true }, 200, corsHeaders);
@@ -1214,7 +1218,7 @@ app.post("/inquiries", async (c) => {
 
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
-  await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "inquiry", entity_id: data.id, action: "submitted", channel: "api", state_after: { type } });
+  await logAudit({ actor_email: user.email, actor_name: user.name, actor_type: "human", entity_type: "inquiry", entity_id: data.id, action: "submitted", channel: "api", state_after: { type } });
 
   return c.json({ ok: true, id: data.id }, 200, corsHeaders);
 });
@@ -1340,7 +1344,7 @@ app.patch("/inquiries/:id", async (c) => {
       .eq("id", id);
     if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
-    await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "inquiry", entity_id: id, action: "processed", channel: "api", state_after: { status: body.status, response: body.response } });
+    await logAudit({ actor_email: user.email, actor_name: user.name, actor_type: "human", entity_type: "inquiry", entity_id: id, action: "processed", channel: "api", state_after: { status: body.status, response: body.response } });
 
     return c.json({ ok: true }, 200, corsHeaders);
   }
@@ -1392,6 +1396,7 @@ app.post("/ask/:agent_slug", async (c) => {
   await logAudit({
     actor_email: user.email,
     actor_name: user.name,
+    actor_type: "human",
     entity_type: "inbox",
     entity_id: data.id,
     action: "submitted",
@@ -1528,7 +1533,7 @@ app.patch("/ask/:agent_slug/:id", async (c) => {
       .eq("id", id);
     if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
-    await logAudit({ actor_email: user.email, actor_name: user.name, entity_type: "inbox", entity_id: id, action: "processed", channel: "api", state_after: { status: body.status, response: body.response } });
+    await logAudit({ actor_email: user.email, actor_name: user.name, actor_type: "human", entity_type: "inbox", entity_id: id, action: "processed", channel: "api", state_after: { status: body.status, response: body.response } });
 
     return c.json({ ok: true }, 200, corsHeaders);
   }
@@ -1537,9 +1542,10 @@ app.patch("/ask/:agent_slug/:id", async (c) => {
 });
 
 // ── Task audit helper ────────────────────────────────────────────────
-async function logTaskAudit(taskId: string, taskNumber: string | number, actor: string, actorType: string, action: string, opts: { state_before?: any; state_after?: any; channel?: string; project_id?: string | null } = {}) {
+async function logTaskAudit(taskId: string, taskNumber: string | number, actor: string, actorName: string | null, actorType: string, action: string, opts: { state_before?: any; state_after?: any; channel?: string; project_id?: string | null } = {}) {
   await logAudit({
     actor_email: actor,
+    actor_name: actorName,
     actor_type: actorType,
     entity_type: "task",
     entity_id: String(taskNumber),
@@ -1632,7 +1638,7 @@ app.post("/tasks", async (c) => {
     }
   }
 
-  await logTaskAudit(data.id, data.task_number, user.email, isAgent ? "agent" : "human", "created", {
+  await logTaskAudit(data.id, data.task_number, user.email, user.name, isAgent ? "agent" : "human", "created", {
     state_after: {
       title: body.title,
       priority: body.priority || "medium",
@@ -1976,7 +1982,7 @@ app.patch("/tasks/:number", async (c) => {
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
 
   const action = body.status === "completed" ? "completed" : body.assigned_to ? "assigned" : "updated";
-  await logTaskAudit(task.id, num, user.email, "human", action, {
+  await logTaskAudit(task.id, num, user.email, user.name, "human", action, {
     state_before: Object.fromEntries(Object.entries(changes).map(([k, v]: any) => [k, v.from])),
     state_after: Object.fromEntries(Object.entries(changes).map(([k, v]: any) => [k, v.to])),
     project_id: patch.project_id ?? task.project_id ?? null,
@@ -1999,7 +2005,7 @@ app.patch("/tasks/:number", async (c) => {
           });
         }
       } catch (e: any) {
-        await logTaskAudit(task.id, num, "system", "system", "link_effect_failed", {
+        await logTaskAudit(task.id, num, "system", null, "system", "link_effect_failed", {
           state_after: { link_type: link.link_type, error: e.message },
           project_id: patch.project_id ?? task.project_id ?? null,
         });
@@ -2023,7 +2029,7 @@ app.patch("/tasks/:number", async (c) => {
           project_id: patch.project_id ?? task.project_id ?? null,
         }).select("task_number, id").single();
         if (nextTask) {
-          await logTaskAudit(nextTask.id, nextTask.task_number, "system", "system", "recurring_created", {
+          await logTaskAudit(nextTask.id, nextTask.task_number, "system", null, "system", "recurring_created", {
             state_after: { from_task: task.task_number },
             channel: "system",
             project_id: patch.project_id ?? task.project_id ?? null,
@@ -2053,7 +2059,7 @@ app.post("/tasks/:number/links", async (c) => {
   if (!body.link_type || !body.link_ref) return c.json({ error: "link_type and link_ref required" }, 400, corsHeaders);
 
   await sb.from("task_links").insert({ task_id: task.id, link_type: body.link_type, link_ref: body.link_ref });
-  await logTaskAudit(task.id, num, user.email, "human", "linked", {
+  await logTaskAudit(task.id, num, user.email, user.name, "human", "linked", {
     state_after: { link_type: body.link_type, link_ref: body.link_ref },
     project_id: task.project_id || null,
   });
@@ -2077,10 +2083,10 @@ app.patch("/tasks/:number/triage", async (c) => {
 
   if (body.action === "accept") {
     await sb.from("tasks").update({ requires_triage: false, updated_at: new Date().toISOString() }).eq("id", task.id);
-    await logTaskAudit(task.id, num, user.email, "human", "triage_accepted", { project_id: task.project_id || null });
+    await logTaskAudit(task.id, num, user.email, user.name, "human", "triage_accepted", { project_id: task.project_id || null });
   } else if (body.action === "dismiss") {
     await sb.from("tasks").update({ status: "cancelled", archived_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", task.id);
-    await logTaskAudit(task.id, num, user.email, "human", "triage_dismissed", {
+    await logTaskAudit(task.id, num, user.email, user.name, "human", "triage_dismissed", {
       state_after: { reason: body.reason || "" },
       project_id: task.project_id || null,
     });
@@ -2109,8 +2115,8 @@ app.delete("/tasks/:number", async (c) => {
   }
 
   await sb.from("tasks").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", task.id);
-  await logTaskAudit(task.id, num, user.email, "human", "cancelled", {
-    state_before: { status: "open" },
+  await logTaskAudit(task.id, num, user.email, user.name, "human", "cancelled", {
+    state_before: { status: task.status },
     state_after: { status: "cancelled" },
     project_id: task.project_id || null,
   });
@@ -2296,12 +2302,13 @@ app.post("/agents", async (c) => {
   await logAudit({
     actor_email: user.email,
     actor_name: user.name,
+    actor_type: "human",
     entity_type: "agent",
     entity_id: body.slug,
     action: "registered",
     channel: "api",
     project_id: projectId,
-    state_after: { name: body.name, scopes: body.scopes, project_id: projectId },
+    state_after: { name: body.name, scopes: body.scopes, email: body.email, role: body.role, skill_slug: body.skill_slug, project_id: projectId },
   });
 
   return c.json({ ok: true, slug: body.slug }, 200, corsHeaders);
@@ -2392,11 +2399,13 @@ app.patch("/agents/:slug", async (c) => {
   await logAudit({
     actor_email: user.email,
     actor_name: user.name,
+    actor_type: "human",
     entity_type: "agent",
     entity_id: slug,
     action,
     channel: "api",
     project_id: patch.project_id ?? agent.project_id ?? null,
+    state_before: { status: agent.status, scopes: agent.scopes },
     state_after: patch,
   });
 
