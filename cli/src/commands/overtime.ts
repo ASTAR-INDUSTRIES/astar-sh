@@ -631,7 +631,7 @@ async function startOvertime(fileFilter?: string) {
   console.log("");
 }
 
-async function showStatus() {
+async function showStatus(verbose = false) {
   const pids = await readPidFile();
   const slugs = Object.keys(pids);
 
@@ -641,8 +641,10 @@ async function showStatus() {
   }
 
   let token: string | undefined;
+  let api: AstarAPI | undefined;
   try {
     token = await getToken();
+    api = new AstarAPI(token);
   } catch {}
 
   console.log("");
@@ -663,9 +665,8 @@ async function showStatus() {
         : `${c.red}stopped${c.reset}`;
 
     let progress = "—";
-    if (token) {
+    if (api) {
       try {
-        const api = new AstarAPI(token);
         const { subtasks } = await api.getTask(s.taskNumber);
         const done = subtasks.filter((t) => t.status === "completed").length;
         progress = `${done}/${subtasks.length}`;
@@ -686,6 +687,28 @@ async function showStatus() {
   }
 
   table(["Session", "Task", "Progress", "State", "Uptime"], rows);
+
+  if (verbose && api) {
+    for (const slug of slugs) {
+      const s = pids[slug];
+      if (!s.runId) continue;
+      try {
+        const cycles = await api.listOvertimeCycles(s.runId);
+        if (!cycles.length) continue;
+        const last = cycles[cycles.length - 1];
+        const parts: string[] = [];
+        if (last.cost_usd != null) parts.push(`cost ${fmtCost(last.cost_usd)}`);
+        if (last.turns_used != null) parts.push(`turns ${last.turns_used}`);
+        if (last.model) parts.push(`model ${last.model}`);
+        const agentLabel = last.agent === "u" ? `${c.cyan}U${c.reset}` : `${c.magenta}E${c.reset}`;
+        const cycleLabel = `${agentLabel}${c.dim}#${last.cycle_number}${c.reset}`;
+        if (parts.length) {
+          console.log(`  ${c.dim}${slug}${c.reset}  last cycle ${cycleLabel}  ${c.dim}${parts.join("  ")}${c.reset}`);
+        }
+      } catch {}
+    }
+  }
+
   console.log("");
 }
 
@@ -1220,6 +1243,7 @@ function showGuide() {
     ${cy}astar overtime start${r}              spawn agents for all specs
     ${cy}astar overtime start --file auth${r}   specific spec only
     ${cy}astar overtime status${r}              what's running + progress
+    ${cy}astar overtime status --verbose${r}    + last cycle cost/turns/model
     ${cy}astar overtime recap${r}               morning summary
     ${cy}astar overtime stop${r}                kill agents
     ${cy}astar overtime stop --clean${r}        kill + remove worktrees
@@ -1281,7 +1305,8 @@ export function registerOvertimeCommands(program: Command) {
   overtime
     .command("status")
     .description("Check running sessions and progress")
-    .action(showStatus);
+    .option("-v, --verbose", "Show last cycle cost, turns, and model for each session")
+    .action((opts: { verbose?: boolean }) => showStatus(opts.verbose ?? false));
 
   overtime
     .command("recap")
