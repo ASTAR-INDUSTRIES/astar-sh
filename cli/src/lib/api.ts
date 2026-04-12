@@ -282,6 +282,44 @@ export interface FeedbackItem {
   created_at: string;
 }
 
+export interface OvertimeRun {
+  id: string;
+  slug: string;
+  spec_title: string;
+  type: string;
+  parent_task_number?: number | null;
+  started_at: string;
+  completed_at?: string | null;
+  status: string;
+  total_cycles_u: number;
+  total_cycles_e: number;
+  total_rejections: number;
+  total_cost_usd?: number | null;
+  model?: string | null;
+  worktree_path?: string | null;
+  branch_name?: string | null;
+  git_commits: string[];
+}
+
+export interface OvertimeCycle {
+  id: string;
+  run_id: string;
+  agent: "u" | "e";
+  cycle_number: number;
+  started_at: string;
+  completed_at?: string | null;
+  exit_code?: number | null;
+  subtask_number?: number | null;
+  action_taken?: string | null;
+  tokens_in?: number | null;
+  tokens_out?: number | null;
+  cost_usd?: number | null;
+  model?: string | null;
+  tool_calls_count?: number | null;
+  turns_used?: number | null;
+  max_turns?: number | null;
+}
+
 export class AstarAPI {
   constructor(private token?: string) {}
 
@@ -781,5 +819,59 @@ export class AstarAPI {
   async refreshEtfPrices(ticker?: string): Promise<{ ok: boolean; prices_fetched: number; navs_calculated: number }> {
     const qs = ticker ? `?ticker=${ticker.toUpperCase()}` : "";
     return this.fetch(`/etf/refresh-prices${qs}`, { method: "POST" });
+  }
+
+  async createOvertimeRun(run: {
+    slug: string;
+    spec_title: string;
+    type?: string;
+    parent_task_number?: number | null;
+    model?: string | null;
+    worktree_path?: string | null;
+    branch_name?: string | null;
+  }): Promise<{ ok: boolean; id: string }> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/overtime/runs`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(run),
+    });
+    if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+    return res.json();
+  }
+
+  async updateOvertimeRun(id: string, updates: {
+    status?: string;
+    completed_at?: string | null;
+    total_cycles_u?: number;
+    total_cycles_e?: number;
+    total_rejections?: number;
+    total_cost_usd?: number | null;
+    model?: string | null;
+    git_commits?: string[];
+  }): Promise<{ ok: boolean }> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/overtime/runs/${id}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+    return res.json();
+  }
+
+  async listOvertimeRuns(): Promise<OvertimeRun[]> {
+    const data = await this.fetch<{ runs: OvertimeRun[] }>("/overtime/runs");
+    return data.runs;
+  }
+
+  async getOvertimeRun(id: string): Promise<OvertimeRun> {
+    const data = await this.fetch<{ run: OvertimeRun }>(`/overtime/runs/${id}`);
+    return data.run;
+  }
+
+  async listOvertimeCycles(runId: string): Promise<OvertimeCycle[]> {
+    const data = await this.fetch<{ cycles: OvertimeCycle[] }>(`/overtime/runs/${runId}/cycles`);
+    return data.cycles;
   }
 }

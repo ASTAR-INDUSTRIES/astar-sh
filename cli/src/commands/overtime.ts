@@ -763,6 +763,182 @@ async function stopOvertime(opts: { clean?: boolean }) {
   console.log("");
 }
 
+// ── Stats ────────────────────────────────────────────────────────────
+
+function fmtDuration(ms: number): string {
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function fmtCost(usd: number | null | undefined): string {
+  if (usd == null) return c.dim + "—" + c.reset;
+  return `$${usd.toFixed(4)}`;
+}
+
+function statusColor(status: string): string {
+  if (status === "done") return c.green + status + c.reset;
+  if (status === "running") return c.yellow + status + c.reset;
+  if (status === "failed") return c.red + status + c.reset;
+  return c.dim + status + c.reset;
+}
+
+async function showStats(runId?: string) {
+  const token = await requireAuth();
+  const api = new AstarAPI(token);
+
+  if (!runId) {
+    // List recent runs
+    let runs;
+    try {
+      runs = await api.listOvertimeRuns();
+    } catch (e: any) {
+      console.error(`${c.red}✗${c.reset} ${e.message}`);
+      process.exit(1);
+    }
+
+    if (!runs.length) {
+      console.log(`\n  ${c.dim}No overtime runs found.${c.reset}\n`);
+      return;
+    }
+
+    console.log("");
+    console.log(`  ${c.bold}${c.white}OVERTIME RUNS${c.reset}`);
+    console.log("");
+
+    table(
+      ["Slug", "Status", "U", "E", "Reject", "Cost", "Duration"],
+      runs.map((r) => {
+        const dur =
+          r.completed_at
+            ? fmtDuration(new Date(r.completed_at).getTime() - new Date(r.started_at).getTime())
+            : r.status === "running"
+              ? fmtDuration(Date.now() - new Date(r.started_at).getTime()) + "…"
+              : "—";
+        return [
+          `${c.white}${r.slug}${c.reset}`,
+          statusColor(r.status),
+          String(r.total_cycles_u),
+          String(r.total_cycles_e),
+          String(r.total_rejections),
+          fmtCost(r.total_cost_usd),
+          `${c.dim}${dur}${c.reset}`,
+        ];
+      })
+    );
+    console.log("");
+    console.log(`  ${c.dim}Pass a run ID to see per-cycle breakdown: astar overtime stats <id>${c.reset}`);
+    console.log("");
+    return;
+  }
+
+  // Detailed view for a specific run
+  let run;
+  let cycles;
+  try {
+    [run, cycles] = await Promise.all([
+      api.getOvertimeRun(runId),
+      api.listOvertimeCycles(runId),
+    ]);
+  } catch (e: any) {
+    console.error(`${c.red}✗${c.reset} ${e.message}`);
+    process.exit(1);
+  }
+
+  const startMs = new Date(run.started_at).getTime();
+  const endMs = run.completed_at ? new Date(run.completed_at).getTime() : Date.now();
+  const durationMs = endMs - startMs;
+
+  const totalTokensIn = cycles.reduce((a, c) => a + (c.tokens_in ?? 0), 0);
+  const totalTokensOut = cycles.reduce((a, c) => a + (c.tokens_out ?? 0), 0);
+  const totalCost = cycles.reduce((a, c) => a + (c.cost_usd ?? 0), 0);
+
+  const completedCycles = cycles.filter((c) => c.completed_at);
+  const avgCycleMs =
+    completedCycles.length
+      ? completedCycles.reduce((sum, cy) => {
+          const s = new Date(cy.started_at).getTime();
+          const e = new Date(cy.completed_at!).getTime();
+          return sum + (e - s);
+        }, 0) / completedCycles.length
+      : null;
+
+  const subtaskCount = new Set(
+    cycles.filter((c) => c.subtask_number != null).map((c) => c.subtask_number)
+  ).size;
+
+  const costPerSubtask =
+    subtaskCount > 0 && totalCost > 0 ? totalCost / subtaskCount : null;
+
+  console.log("");
+  console.log(`  ${c.bold}${c.white}OVERTIME STATS${c.reset}  ${c.dim}${run.slug}${c.reset}`);
+  console.log("");
+  console.log(`  ${c.dim}Spec:${c.reset}       ${c.white}${run.spec_title}${c.reset}`);
+  console.log(`  ${c.dim}Status:${c.reset}     ${statusColor(run.status)}`);
+  console.log(`  ${c.dim}Branch:${c.reset}     ${c.dim}${run.branch_name || "—"}${c.reset}`);
+  console.log(`  ${c.dim}Started:${c.reset}    ${c.dim}${new Date(run.started_at).toLocaleString()}${c.reset}`);
+  if (run.completed_at) {
+    console.log(`  ${c.dim}Ended:${c.reset}      ${c.dim}${new Date(run.completed_at).toLocaleString()}${c.reset}`);
+  }
+  console.log("");
+  console.log(`  ${c.bold}${c.white}Summary${c.reset}`);
+  console.log(`  ${c.dim}Duration:${c.reset}         ${fmtDuration(durationMs)}`);
+  console.log(`  ${c.dim}U-Agent cycles:${c.reset}   ${run.total_cycles_u}`);
+  console.log(`  ${c.dim}E-Agent cycles:${c.reset}   ${run.total_cycles_e}`);
+  console.log(`  ${c.dim}Rejections:${c.reset}       ${run.total_rejections}`);
+  console.log(`  ${c.dim}Tokens in:${c.reset}        ${totalTokensIn > 0 ? totalTokensIn.toLocaleString() : "—"}`);
+  console.log(`  ${c.dim}Tokens out:${c.reset}       ${totalTokensOut > 0 ? totalTokensOut.toLocaleString() : "—"}`);
+  console.log(`  ${c.dim}Total cost:${c.reset}       ${totalCost > 0 ? `$${totalCost.toFixed(4)}` : "—"}`);
+  console.log(`  ${c.dim}Avg cycle time:${c.reset}   ${avgCycleMs != null ? fmtDuration(avgCycleMs) : "—"}`);
+  console.log(`  ${c.dim}Cost/subtask:${c.reset}     ${costPerSubtask != null ? `$${costPerSubtask.toFixed(4)}` : "—"}`);
+
+  if (cycles.length) {
+    console.log("");
+    console.log(`  ${c.bold}${c.white}Cycles${c.reset}`);
+    console.log("");
+    table(
+      ["#", "Agent", "Subtask", "Action", "Turns", "Tokens", "Cost", "Duration"],
+      cycles.map((cy) => {
+        const cyDur =
+          cy.completed_at
+            ? fmtDuration(new Date(cy.completed_at).getTime() - new Date(cy.started_at).getTime())
+            : "—";
+        const tokens =
+          cy.tokens_in != null || cy.tokens_out != null
+            ? `${(cy.tokens_in ?? 0) + (cy.tokens_out ?? 0)}`
+            : "—";
+        const agentColor = cy.agent === "u" ? c.cyan : c.magenta;
+        return [
+          `${c.dim}${cy.cycle_number}${c.reset}`,
+          `${agentColor}${cy.agent}${c.reset}`,
+          cy.subtask_number != null ? `#${cy.subtask_number}` : `${c.dim}—${c.reset}`,
+          cy.action_taken ? `${c.dim}${cy.action_taken}${c.reset}` : `${c.dim}—${c.reset}`,
+          cy.turns_used != null ? `${cy.turns_used}/${cy.max_turns ?? "?"}` : `${c.dim}—${c.reset}`,
+          `${c.dim}${tokens}${c.reset}`,
+          cy.cost_usd != null ? `$${cy.cost_usd.toFixed(4)}` : `${c.dim}—${c.reset}`,
+          `${c.dim}${cyDur}${c.reset}`,
+        ];
+      })
+    );
+  }
+
+  if (run.git_commits?.length) {
+    console.log("");
+    console.log(`  ${c.dim}Commits (${run.git_commits.length}):${c.reset}`);
+    for (const hash of run.git_commits.slice(0, 10)) {
+      console.log(`    ${c.dim}${hash.slice(0, 12)}${c.reset}`);
+    }
+    if (run.git_commits.length > 10) {
+      console.log(`    ${c.dim}…and ${run.git_commits.length - 10} more${c.reset}`);
+    }
+  }
+
+  console.log("");
+}
+
 // ── Guide ───────────────────────────────────────────────────────────
 
 function showGuide() {
@@ -858,6 +1034,8 @@ function showGuide() {
     ${cy}astar overtime recap${r}               morning summary
     ${cy}astar overtime stop${r}                kill agents
     ${cy}astar overtime stop --clean${r}        kill + remove worktrees
+    ${cy}astar overtime stats${r}                cost, cycles, tokens across all runs
+    ${cy}astar overtime stats <id>${r}           per-cycle breakdown for a specific run
     ${cy}astar overtime guide${r}               this guide
 
   ${c.bold}${w}EXAMPLE USE CASES${r}
@@ -920,6 +1098,13 @@ export function registerOvertimeCommands(program: Command) {
     .command("recap")
     .description("Morning summary of overnight work")
     .action(showRecap);
+
+  overtime
+    .command("stats [run-id]")
+    .description("Show telemetry for overtime runs — list all or detail for a specific run")
+    .action(async (runId?: string) => {
+      await showStats(runId);
+    });
 
   overtime
     .command("guide")

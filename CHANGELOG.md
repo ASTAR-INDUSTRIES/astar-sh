@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 ## [Unreleased]
 
 ### Added
+- `astar overtime stats` — list all runs (duration, cycles, rejections, cost); pass a run ID for per-cycle breakdown with token counts, turns used, avg cycle time, and cost-per-subtask
 - `astar overtime start` creates an `overtime_runs` record at session start; `astar overtime stop` finalizes it with status, completion time, aggregated cycle counts, total cost, and git commits from the branch
 - `overtime` agent loops now capture per-cycle telemetry (tokens, cost, model, turns) from `claude --output-format json` and write cycle records to astar.sh after each invocation
 - `overtime_cycles` DB table — per-cycle telemetry: agent, cycle number, timing, exit code, subtask, action taken, token counts, cost, model, tool calls, and turns

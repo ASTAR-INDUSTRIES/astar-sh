@@ -2816,6 +2816,146 @@ app.post("/etf/:ticker/rebalance", async (c) => {
   return c.json({ ok: true }, 200, corsHeaders);
 });
 
+// ── POST /overtime/runs — create a new run record ─────────────────────
+app.post("/overtime/runs", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const body = await c.req.json();
+  if (!body.slug) return c.json({ error: "slug is required" }, 400, corsHeaders);
+  if (!body.spec_title) return c.json({ error: "spec_title is required" }, 400, corsHeaders);
+
+  const sb = getSupabase();
+  const { data, error } = await sb.from("overtime_runs").insert({
+    slug: body.slug,
+    spec_title: body.spec_title,
+    type: body.type || "dev",
+    parent_task_number: body.parent_task_number ?? null,
+    status: "running",
+    model: body.model ?? null,
+    worktree_path: body.worktree_path ?? null,
+    branch_name: body.branch_name ?? null,
+  }).select("id").single();
+
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+  await logAudit({
+    actor_email: user.email,
+    actor_name: user.name,
+    actor_type: "human",
+    entity_type: "overtime_run",
+    entity_id: data?.id,
+    action: "started",
+    channel: "api",
+    state_after: { slug: body.slug, spec_title: body.spec_title, type: body.type || "dev" },
+  });
+
+  return c.json({ ok: true, id: data!.id }, 200, corsHeaders);
+});
+
+// ── PATCH /overtime/runs/:id — update a run record ────────────────────
+app.patch("/overtime/runs/:id", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const id = c.req.param("id");
+  const body = await c.req.json();
+
+  const sb = getSupabase();
+  const updates: Record<string, any> = {};
+  if (body.status !== undefined) updates.status = body.status;
+  if (body.completed_at !== undefined) updates.completed_at = body.completed_at;
+  if (body.total_cycles_u !== undefined) updates.total_cycles_u = body.total_cycles_u;
+  if (body.total_cycles_e !== undefined) updates.total_cycles_e = body.total_cycles_e;
+  if (body.total_rejections !== undefined) updates.total_rejections = body.total_rejections;
+  if (body.total_cost_usd !== undefined) updates.total_cost_usd = body.total_cost_usd;
+  if (body.model !== undefined) updates.model = body.model;
+  if (body.git_commits !== undefined) updates.git_commits = body.git_commits;
+
+  if (!Object.keys(updates).length) return c.json({ error: "No fields to update" }, 400, corsHeaders);
+
+  const { error } = await sb.from("overtime_runs").update(updates).eq("id", id);
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+
+  return c.json({ ok: true }, 200, corsHeaders);
+});
+
+// ── GET /overtime/runs/:id — get a single run record ──────────────────
+app.get("/overtime/runs/:id", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const id = c.req.param("id");
+  const sb = getSupabase();
+  const { data, error } = await sb.from("overtime_runs").select("*").eq("id", id).single();
+  if (error) return c.json({ error: error.message }, 404, corsHeaders);
+  return c.json({ run: data }, 200, corsHeaders);
+});
+
+// ── GET /overtime/runs — list run records ─────────────────────────────
+app.get("/overtime/runs", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const sb = getSupabase();
+  const { data, error } = await sb.from("overtime_runs")
+    .select("*")
+    .order("started_at", { ascending: false })
+    .limit(50);
+
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+  return c.json({ runs: data || [] }, 200, corsHeaders);
+});
+
+// ── POST /overtime/cycles — record one agent cycle ────────────────────
+app.post("/overtime/cycles", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const body = await c.req.json();
+  if (!body.run_id) return c.json({ error: "run_id is required" }, 400, corsHeaders);
+  if (!body.agent) return c.json({ error: "agent is required" }, 400, corsHeaders);
+  if (body.cycle_number === undefined) return c.json({ error: "cycle_number is required" }, 400, corsHeaders);
+
+  const sb = getSupabase();
+  const { data, error } = await sb.from("overtime_cycles").insert({
+    run_id: body.run_id,
+    agent: body.agent,
+    cycle_number: body.cycle_number,
+    started_at: body.started_at ?? new Date().toISOString(),
+    completed_at: body.completed_at ?? null,
+    exit_code: body.exit_code ?? null,
+    subtask_number: body.subtask_number ?? null,
+    action_taken: body.action_taken ?? null,
+    tokens_in: body.tokens_in ?? null,
+    tokens_out: body.tokens_out ?? null,
+    cost_usd: body.cost_usd ?? null,
+    model: body.model ?? null,
+    tool_calls_count: body.tool_calls_count ?? null,
+    turns_used: body.turns_used ?? null,
+    max_turns: body.max_turns ?? null,
+  }).select("id").single();
+
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+  return c.json({ ok: true, id: data!.id }, 200, corsHeaders);
+});
+
+// ── GET /overtime/runs/:id/cycles — list cycles for a run ─────────────
+app.get("/overtime/runs/:id/cycles", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const id = c.req.param("id");
+  const sb = getSupabase();
+  const { data, error } = await sb.from("overtime_cycles")
+    .select("*")
+    .eq("run_id", id)
+    .order("started_at", { ascending: true });
+
+  if (error) return c.json({ error: error.message }, 500, corsHeaders);
+  return c.json({ cycles: data || [] }, 200, corsHeaders);
+});
+
 // ── Health ─────────────────────────────────────────────────────────────
 app.get("/", (c) => c.json({ status: "ok", service: "skills-api" }, 200, corsHeaders));
 
