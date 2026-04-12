@@ -142,6 +142,33 @@ Running `astar overtime start` twice is safe — it checks for existing tasks an
 4. If happy, merge the branch or cherry-pick commits
 5. Clean up: `astar overtime stop --clean`
 
+## Telemetry
+
+Each overnight run writes a persistent record to `overtime_runs` on astar.sh. The record is created when `astar overtime start` launches agents and updated when the session finishes (stop/done/failed).
+
+### `overtime_runs` table
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | uuid | Primary key |
+| `slug` | text | Spec slug (e.g. `auth-hardening`) |
+| `spec_title` | text | Title from the spec file |
+| `type` | text | `dev` / `ops` / `docs` / `test` |
+| `parent_task_number` | integer | astar.sh task number |
+| `started_at` | timestamptz | Session start time |
+| `completed_at` | timestamptz | Session end time (null while running) |
+| `status` | text | `running` / `done` / `failed` / `stopped` |
+| `total_cycles_u` | integer | Total U-Agent cycles run |
+| `total_cycles_e` | integer | Total E-Agent cycles run |
+| `total_rejections` | integer | Subtasks sent back to open by E-Agent |
+| `total_cost_usd` | numeric | Total USD spent across all cycles |
+| `model` | text | Claude model used (from last cycle) |
+| `worktree_path` | text | Absolute path to the git worktree |
+| `branch_name` | text | Git branch name |
+| `git_commits` | text[] | All commit hashes made during the run |
+
+See also: [`overtime_cycles`](./README.md) (subtask #85) for per-cycle records.
+
 ## Limitations (v1)
 
 - Runs on the machine that starts it — laptop must stay on
