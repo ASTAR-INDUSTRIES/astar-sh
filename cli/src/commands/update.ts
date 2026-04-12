@@ -48,7 +48,8 @@ export function registerUpdateCommand(program: Command) {
         }
 
         console.log(`  ${c.dim}Pulling latest...${c.reset}`);
-        execSync("git pull --quiet", { cwd: INSTALL_DIR, stdio: "pipe" });
+        execSync("git fetch --quiet", { cwd: INSTALL_DIR, stdio: "pipe" });
+        execSync("git reset --hard origin/main", { cwd: INSTALL_DIR, stdio: "pipe" });
 
         console.log(`  ${c.dim}Installing dependencies...${c.reset}`);
         execSync("bun install --silent", { cwd: join(INSTALL_DIR, "cli"), stdio: "pipe" });
