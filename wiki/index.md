@@ -21,6 +21,7 @@ System documentation for the astar.sh platform. Each section covers one subsyste
 | [MCP](mcp/) | All MCP tools, request flow, agent scope enforcement | `supabase/functions/mcp-server/index.ts` |
 | [CLI](cli/) | Command structure, API client, auth flow | `cli/src/index.ts`, `cli/src/lib/api.ts` |
 | [ETF](etf/) | Simulated portfolios, Yahoo Finance prices, NAV, benchmark | `cli/src/commands/etf.ts`, `supabase/functions/skills-api/index.ts` |
+| [Overtime](overtime/) | Overnight U-Agent/E-Agent system, spec format, done detection | `cli/src/commands/overtime.ts` |
 
 ## How to maintain
 

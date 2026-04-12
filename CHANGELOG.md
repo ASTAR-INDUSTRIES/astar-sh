@@ -5,6 +5,17 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+### Added
+- `astar overtime` — overnight agent system: drop a markdown spec, two agents implement and review while you sleep
+- `astar overtime start [--file slug]` — parse specs, create tasks, spawn U-Agent (implements) and E-Agent (reviews) in a git worktree
+- `astar overtime status` — check running sessions and subtask progress
+- `astar overtime recap` — morning summary with activity log and branch info
+- `astar overtime stop [--clean]` — kill agents and optionally remove worktrees
+- `astar overtime guide` — best practices for writing effective overnight specs
+- Comprehensive E-Agent final sign-off: full branch diff, test suite, per-requirement verification, security and regression checks before marking done
+- Done-file detection: both agents exit cleanly when E-Agent signs off — no wasted API calls
+- Wiki page for overtime subsystem
+
 ## [0.0.75] - 2026-04-10
 
 ### Fixed

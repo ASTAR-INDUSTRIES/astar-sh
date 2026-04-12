@@ -18,6 +18,7 @@ import { registerChangelogCommand } from "./commands/changelog";
 import { registerUpdateCommand, checkForUpdates } from "./commands/update";
 import { registerEtfCommands } from "./commands/etf";
 import { registerRecordCommands } from "./commands/record";
+import { registerOvertimeCommands } from "./commands/overtime";
 import { getAuthStatus } from "./lib/auth";
 import { AstarAPI } from "./lib/api";
 import { c } from "./lib/ui";
@@ -108,6 +109,7 @@ registerStatusCommand(program);
 registerChangelogCommand(program);
 registerEtfCommands(program);
 registerRecordCommands(program);
+registerOvertimeCommands(program);
 registerUpdateCommand(program);
 
 await checkForUpdates();
