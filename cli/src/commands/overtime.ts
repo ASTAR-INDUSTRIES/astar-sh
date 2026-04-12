@@ -323,7 +323,12 @@ RULES:
 - Be specific in rejection feedback — say exactly what to fix.
 - Do not nitpick style. Focus on logic, correctness, edge cases.
 - You cannot edit code. You can only review and comment.
-- The done file (touch command) is critical — it signals the overnight session to stop.`;
+- The done file (touch command) is critical — it signals the overnight session to stop.
+- Explicitly reject any of the following — reopen the subtask with the message "This routes around the problem instead of fixing it":
+  - Placeholder or stub returns (e.g. \`return null\`, \`return []\`, \`return "TODO"\`, \`pass\`, \`throw new Error("not implemented")\`)
+  - Workaround code that avoids the actual failure path instead of fixing it
+  - Import hacks (re-exporting the wrong type, casting \`as any\`, \`@ts-ignore\`, \`// eslint-disable\`)
+  - Mock-heavy test patches that suppress real failures instead of exposing them (e.g. mocking a function to always return success in a test that should validate real behavior)`;
 }
 
 const U_TOOLS = [

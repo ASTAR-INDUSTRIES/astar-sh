@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 ## [Unreleased]
 
 ### Added
+- `overtime` E-Agent now explicitly rejects placeholder/stub returns, workaround code, import hacks, and mock-heavy test patches that mask real failures — reopens the subtask with "This routes around the problem instead of fixing it"
 - `overtime` U-Agent now runs the full project test suite before each commit — checks ENVIRONMENT CONTEXT for an explicit test command, falls back to common runners (pytest, npm test, bun test, cargo test, go test ./...), and reports results in the task comment
 - `overtime` U-Agent now traces the call graph of any existing function before using it when the subtask is described as "cheap", "lightweight", "no fresh measurements", or "negligible cost", and reports findings as a task comment before writing code
 - `overtime` U-Agent now refuses to route around problems — workarounds, stubs, placeholder returns, and test hacks are forbidden; if a root cause cannot be fixed, the agent comments on the subtask and moves on
