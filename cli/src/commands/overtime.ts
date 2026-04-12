@@ -324,6 +324,37 @@ function makeAgentScript(
 ): string {
   const escaped = prompt.replace(/'/g, "'\\''");
 
+  // Finalization block: runs after the while loop exits (E-Agent only).
+  // Queries the cycle records from the API, aggregates totals, and PATCHes
+  // the run record to status=done. Gracefully degrades if jq/curl is absent.
+  const finalizationBlock = (agentChar === "e" && runId) ? `
+if command -v jq &>/dev/null && command -v curl &>/dev/null; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] Finalizing run record..."
+  FINAL_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  GIT_COMMITS=$(git -C "${worktree}" log --format="%H" main..HEAD 2>/dev/null | jq -R . | jq -sc . 2>/dev/null)
+  [ -z "$GIT_COMMITS" ] && GIT_COMMITS="[]"
+  CYCLES_RESP=$(curl -sf "${apiUrl}/overtime/runs/${runId}/cycles" \\
+    -H "Authorization: Bearer ${token}" 2>/dev/null)
+  TOTAL_U=$(echo "$CYCLES_RESP" | jq '[.cycles[] | select(.agent=="u")] | length' 2>/dev/null || echo "0")
+  TOTAL_E=$(echo "$CYCLES_RESP" | jq '[.cycles[] | select(.agent=="e")] | length' 2>/dev/null || echo "0")
+  TOTAL_COST=$(echo "$CYCLES_RESP" | jq '[.cycles[].cost_usd // 0] | add // null' 2>/dev/null || echo "null")
+  FINALIZE_JSON=$(jq -nc \\
+    --arg status "done" \\
+    --arg completed_at "$FINAL_TS" \\
+    --argjson git_commits "$GIT_COMMITS" \\
+    --argjson total_cycles_u "\${TOTAL_U:-0}" \\
+    --argjson total_cycles_e "\${TOTAL_E:-0}" \\
+    --argjson total_cost_usd "\${TOTAL_COST:-null}" \\
+    '{status: $status, completed_at: $completed_at, git_commits: $git_commits, total_cycles_u: $total_cycles_u, total_cycles_e: $total_cycles_e, total_cost_usd: $total_cost_usd}' 2>/dev/null)
+  if [ -n "$FINALIZE_JSON" ]; then
+    curl -sf -X PATCH "${apiUrl}/overtime/runs/${runId}" \\
+      -H "Authorization: Bearer ${token}" \\
+      -H "Content-Type: application/json" \\
+      -d "$FINALIZE_JSON" >/dev/null 2>&1 || true
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] Run finalized (done, U=$TOTAL_U E=$TOTAL_E cycles)."
+  fi
+fi` : "";
+
   // Telemetry block: parse JSON output and POST a cycle record to astar.sh.
   // Only included when a runId is available. Uses jq + curl; gracefully degrades
   // if either is missing. All --arg values are strings; jq converts to numbers.
@@ -409,6 +440,7 @@ while true; do
   fi
   sleep ${cooldown}
 done
+${finalizationBlock}
 echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] Exited."
 `;
 }
