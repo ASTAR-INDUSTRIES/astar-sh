@@ -263,7 +263,8 @@ RULES:
 - If blocked, comment on the subtask explaining why and skip to the next one.
 - Do not modify files unrelated to the current subtask.
 - Before depending on any unfamiliar identifier from existing code (a function, type, constant, config key, DB column, API field, etc.), write a task comment: "I believe X means Y based on [file:line]". Do this before writing code that relies on it. This catches misread signatures, wrong assumptions about types, and silently wrong semantics.
-- Do not route around problems. If something doesn't work (import fails, test breaks, API behaves unexpectedly), fix the root cause. Never add workarounds, stubs, placeholder returns, or test hacks. If you cannot fix it, comment on the subtask explaining the blocker and move on. Do not paper over it.`;
+- Do not route around problems. If something doesn't work (import fails, test breaks, API behaves unexpectedly), fix the root cause. Never add workarounds, stubs, placeholder returns, or test hacks. If you cannot fix it, comment on the subtask explaining the blocker and move on. Do not paper over it.
+- If the subtask title or description contains words like "cheap", "lightweight", "no fresh measurements", or "negligible cost": before calling any existing function to satisfy that constraint, trace its call graph (grep the source, follow imports, read the bodies of functions it calls). Then comment on the subtask with what you found — e.g. "getVelocity() calls the API → not cheap". Do this before writing code that depends on the assumption being true.`;
 }
 
 function eAgentPrompt(taskNumber: number, spec: OvertimeSpec, doneFile: string, envContext?: string | null): string {
