@@ -3,6 +3,7 @@ import { spawn, execSync, type ChildProcess } from "child_process";
 import { join, basename } from "path";
 import { unlinkSync, existsSync } from "fs";
 import { getToken } from "../lib/auth";
+import { getConfig } from "../lib/config";
 import { AstarAPI, type Task, type TaskActivity } from "../lib/api";
 import { c, table } from "../lib/ui";
 
@@ -23,6 +24,7 @@ interface OvertimeSession {
   taskNumber: number;
   worktree: string;
   startedAt: string;
+  runId?: string;
 }
 
 type PidFile = Record<string, OvertimeSession>;
@@ -307,22 +309,97 @@ const E_TOOLS = [
 
 // ── Agent spawning ──────────────────────────────────────────────────
 
-function makeAgentScript(name: string, prompt: string, tools: string, maxTurns: number, worktree: string, cooldown: number, doneFile: string): string {
+function makeAgentScript(
+  name: string,
+  prompt: string,
+  tools: string,
+  maxTurns: number,
+  worktree: string,
+  cooldown: number,
+  doneFile: string,
+  agentChar: "u" | "e" = "u",
+  runId: string = "",
+  apiUrl: string = "",
+  token: string = "",
+): string {
   const escaped = prompt.replace(/'/g, "'\\''");
+
+  // Telemetry block: parse JSON output and POST a cycle record to astar.sh.
+  // Only included when a runId is available. Uses jq + curl; gracefully degrades
+  // if either is missing. All --arg values are strings; jq converts to numbers.
+  const telemetryBlock = runId ? `
+  if command -v jq &>/dev/null; then
+    RESULT_TEXT=$(jq -r '.result // ""' "$TMPOUT" 2>/dev/null)
+    TOKENS_IN=$(jq -r 'if .total_input_tokens then (.total_input_tokens | tostring) else "" end' "$TMPOUT" 2>/dev/null)
+    TOKENS_OUT=$(jq -r 'if .total_output_tokens then (.total_output_tokens | tostring) else "" end' "$TMPOUT" 2>/dev/null)
+    COST_USD=$(jq -r 'if .total_cost_usd then (.total_cost_usd | tostring) else "" end' "$TMPOUT" 2>/dev/null)
+    MODEL=$(jq -r '.model // ""' "$TMPOUT" 2>/dev/null)
+    TURNS_USED=$(jq -r 'if .num_turns then (.num_turns | tostring) else "" end' "$TMPOUT" 2>/dev/null)
+    if [ -n "$RESULT_TEXT" ]; then
+      echo "$RESULT_TEXT"
+    else
+      cat "$TMPOUT"
+    fi
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] tokens: in=$TOKENS_IN out=$TOKENS_OUT cost=$COST_USD turns=$TURNS_USED model=$MODEL"
+    CYCLE_JSON=$(jq -nc \\
+      --arg run_id "${runId}" \\
+      --arg agent "${agentChar}" \\
+      --arg cycle_number "$CYCLE_NUM" \\
+      --arg started_at "$CYCLE_STARTED" \\
+      --arg completed_at "$CYCLE_ENDED" \\
+      --arg exit_code "$EXIT_CODE" \\
+      --arg model "$MODEL" \\
+      --arg max_turns "${maxTurns}" \\
+      --arg tokens_in "$TOKENS_IN" \\
+      --arg tokens_out "$TOKENS_OUT" \\
+      --arg cost_usd "$COST_USD" \\
+      --arg turns_used "$TURNS_USED" \\
+      '{
+        run_id: $run_id,
+        agent: $agent,
+        cycle_number: ($cycle_number | tonumber),
+        started_at: $started_at,
+        completed_at: $completed_at,
+        exit_code: ($exit_code | tonumber),
+        model: (if $model == "" then null else $model end),
+        max_turns: ($max_turns | tonumber),
+        tokens_in: (if $tokens_in == "" then null else ($tokens_in | tonumber) end),
+        tokens_out: (if $tokens_out == "" then null else ($tokens_out | tonumber) end),
+        cost_usd: (if $cost_usd == "" then null else ($cost_usd | tonumber) end),
+        turns_used: (if $turns_used == "" then null else ($turns_used | tonumber) end)
+      }' 2>/dev/null)
+    if [ -n "$CYCLE_JSON" ]; then
+      curl -sf -X POST "${apiUrl}/overtime/cycles" \\
+        -H "Authorization: Bearer ${token}" \\
+        -H "Content-Type: application/json" \\
+        -d "$CYCLE_JSON" >/dev/null 2>&1 || true
+    fi
+  else
+    cat "$TMPOUT"
+  fi` : `
+  cat "$TMPOUT"`;
+
   return `
 cd "${worktree}"
+CYCLE_NUM=0
 while true; do
   if [ -f "${doneFile}" ]; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] Done file found. Shutting down."
     break
   fi
-  echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] Starting cycle..."
+  CYCLE_NUM=$((CYCLE_NUM + 1))
+  CYCLE_STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  TMPOUT=$(mktemp /tmp/claude-cycle-XXXXXX.json)
+  echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] Starting cycle $CYCLE_NUM..."
   claude -p '${escaped}' \\
     --allowedTools "${tools}" \\
     --max-turns ${maxTurns} \\
-    --dangerously-skip-permissions 2>&1
+    --output-format json \\
+    --dangerously-skip-permissions > "$TMPOUT" 2>&1
   EXIT_CODE=$?
-  echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] Cycle done (exit: $EXIT_CODE)"
+  CYCLE_ENDED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] Cycle $CYCLE_NUM done (exit: $EXIT_CODE)"${telemetryBlock}
+  rm -f "$TMPOUT"
   if [ -f "${doneFile}" ]; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] Done file found. Shutting down."
     break
@@ -355,6 +432,7 @@ function spawnAgent(script: string, logPath: string): ChildProcess {
 async function startOvertime(fileFilter?: string) {
   const token = await requireAuth();
   const api = new AstarAPI(token);
+  const config = await getConfig();
   ensureClaudeInstalled();
 
   // Find spec files
@@ -418,8 +496,11 @@ async function startOvertime(fileFilter?: string) {
 
     // Spawn agents
     const doneFile = join(OVERTIME_DIR, `.done-${spec.slug}`);
-    const uScript = makeAgentScript("U-Agent", uAgentPrompt(parentTaskNumber, spec), U_TOOLS, 30, worktree, 180, doneFile);
-    const eScript = makeAgentScript("E-Agent", eAgentPrompt(parentTaskNumber, spec, doneFile), E_TOOLS, 30, worktree, 180, doneFile);
+    // runId is populated by #87 (createOvertimeRun) before this point.
+    // Empty string disables cycle telemetry gracefully until the run record exists.
+    const runId = "";
+    const uScript = makeAgentScript("U-Agent", uAgentPrompt(parentTaskNumber, spec), U_TOOLS, 30, worktree, 180, doneFile, "u", runId, config.apiUrl, token);
+    const eScript = makeAgentScript("E-Agent", eAgentPrompt(parentTaskNumber, spec, doneFile), E_TOOLS, 30, worktree, 180, doneFile, "e", runId, config.apiUrl, token);
 
     // E-Agent starts with a 5-minute delay baked in
     const eScriptWithDelay = `echo "$(date '+%Y-%m-%d %H:%M:%S') [E-Agent] Waiting 5m for U-Agent to start..."\nsleep 300\n${eScript}`;

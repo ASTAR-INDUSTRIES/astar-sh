@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 ## [Unreleased]
 
 ### Added
+- `overtime` agent loops now capture per-cycle telemetry (tokens, cost, model, turns) from `claude --output-format json` and write cycle records to astar.sh after each invocation
 - `overtime_cycles` DB table — per-cycle telemetry: agent, cycle number, timing, exit code, subtask, action taken, token counts, cost, model, tool calls, and turns
 - `overtime_runs` DB table — persistent record for each overnight session tracking status, cycles, rejections, cost, model, worktree path, branch, and git commits
 - `astar overtime` — overnight agent system: drop a markdown spec, two agents implement and review while you sleep
