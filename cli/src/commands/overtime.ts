@@ -496,9 +496,24 @@ async function startOvertime(fileFilter?: string) {
 
     // Spawn agents
     const doneFile = join(OVERTIME_DIR, `.done-${spec.slug}`);
-    // runId is populated by #87 (createOvertimeRun) before this point.
-    // Empty string disables cycle telemetry gracefully until the run record exists.
-    const runId = "";
+    const branchName = `overtime/${spec.slug}`;
+
+    // Create the run record so cycle telemetry has a run_id to reference.
+    let runId = "";
+    try {
+      const runResult = await api.createOvertimeRun({
+        slug: spec.slug,
+        spec_title: spec.title,
+        type: spec.type,
+        parent_task_number: parentTaskNumber,
+        worktree_path: worktree,
+        branch_name: branchName,
+      });
+      runId = runResult.id;
+    } catch (e: any) {
+      console.log(`    ${c.dim}(telemetry run record unavailable: ${e.message})${c.reset}`);
+    }
+
     const uScript = makeAgentScript("U-Agent", uAgentPrompt(parentTaskNumber, spec), U_TOOLS, 30, worktree, 180, doneFile, "u", runId, config.apiUrl, token);
     const eScript = makeAgentScript("E-Agent", eAgentPrompt(parentTaskNumber, spec, doneFile), E_TOOLS, 30, worktree, 180, doneFile, "e", runId, config.apiUrl, token);
 
@@ -515,6 +530,7 @@ async function startOvertime(fileFilter?: string) {
       taskNumber: parentTaskNumber,
       worktree,
       startedAt: new Date().toISOString(),
+      runId: runId || undefined,
     };
 
     console.log(`  ${c.green}✓${c.reset} ${c.white}${spec.title}${c.reset}`);
@@ -654,6 +670,13 @@ async function stopOvertime(opts: { clean?: boolean }) {
     return;
   }
 
+  let token: string | undefined;
+  let api: AstarAPI | undefined;
+  try {
+    token = await getToken();
+    api = new AstarAPI(token);
+  } catch {}
+
   console.log("");
 
   for (const slug of slugs) {
@@ -680,6 +703,51 @@ async function stopOvertime(opts: { clean?: boolean }) {
     }
 
     console.log(`  ${c.green}✓${c.reset} Stopped ${c.white}${slug}${c.reset} (task #${s.taskNumber})`);
+
+    // Finalize the run record in telemetry
+    if (s.runId && api) {
+      try {
+        const isDone = existsSync(join(OVERTIME_DIR, `.done-${slug}`));
+        const finalStatus = isDone ? "done" : "stopped";
+
+        // Collect commits on the branch since main
+        let gitCommits: string[] = [];
+        try {
+          const worktreeDir = s.worktree || process.cwd();
+          const log = execSync(
+            `git -C "${worktreeDir}" log --format="%H" main..HEAD 2>/dev/null`,
+            { stdio: "pipe" }
+          ).toString().trim();
+          if (log) gitCommits = log.split("\n").filter(Boolean);
+        } catch {}
+
+        // Aggregate cycle stats from stored cycle records
+        let totalCyclesU = 0;
+        let totalCyclesE = 0;
+        let totalCostUsd: number | null = null;
+        try {
+          const cycles = await api.listOvertimeCycles(s.runId);
+          totalCyclesU = cycles.filter((cyc) => cyc.agent === "u").length;
+          totalCyclesE = cycles.filter((cyc) => cyc.agent === "e").length;
+          const costs = cycles
+            .map((cyc) => cyc.cost_usd)
+            .filter((v): v is number => v !== null && v !== undefined);
+          if (costs.length) totalCostUsd = costs.reduce((a, b) => a + b, 0);
+        } catch {}
+
+        await api.updateOvertimeRun(s.runId, {
+          status: finalStatus,
+          completed_at: new Date().toISOString(),
+          total_cycles_u: totalCyclesU,
+          total_cycles_e: totalCyclesE,
+          total_cost_usd: totalCostUsd,
+          git_commits: gitCommits,
+        });
+        console.log(`    ${c.dim}Run record finalized (${finalStatus}, ${totalCyclesU + totalCyclesE} cycles)${c.reset}`);
+      } catch (e: any) {
+        console.log(`    ${c.dim}(telemetry update skipped: ${e.message})${c.reset}`);
+      }
+    }
 
     if (opts.clean && s.worktree) {
       try {
