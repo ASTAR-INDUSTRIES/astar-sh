@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 ## [Unreleased]
 
 ### Added
+- `astar overtime` context files: create `.astar/overtime/context.md` (shared) or `.astar/overtime/<slug>-context.md` (spec-specific) to inject environment facts (service user, deployment topology, test command, file paths) into both agent prompts as an ENVIRONMENT CONTEXT block
 - `astar overtime stats` — list all runs (duration, cycles, rejections, cost); pass a run ID for per-cycle breakdown with token counts, turns used, avg cycle time, and cost-per-subtask
 - `astar overtime start` creates an `overtime_runs` record at session start; `astar overtime stop` finalizes it with status, completion time, aggregated cycle counts, total cost, and git commits from the branch
 - `overtime` agent loops now capture per-cycle telemetry (tokens, cost, model, turns) from `claude --output-format json` and write cycle records to astar.sh after each invocation
