@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 ## [Unreleased]
 
 ### Added
+- `overtime` U-Agent now runs the full project test suite before each commit — checks ENVIRONMENT CONTEXT for an explicit test command, falls back to common runners (pytest, npm test, bun test, cargo test, go test ./...), and reports results in the task comment
 - `overtime` U-Agent now traces the call graph of any existing function before using it when the subtask is described as "cheap", "lightweight", "no fresh measurements", or "negligible cost", and reports findings as a task comment before writing code
 - `overtime` U-Agent now refuses to route around problems — workarounds, stubs, placeholder returns, and test hacks are forbidden; if a root cause cannot be fixed, the agent comments on the subtask and moves on
 - `astar overtime` context files: create `.astar/overtime/context.md` (shared) or `.astar/overtime/<slug>-context.md` (spec-specific) to inject environment facts (service user, deployment topology, test command, file paths) into both agent prompts as an ENVIRONMENT CONTEXT block

@@ -251,7 +251,11 @@ CYCLE:
 3. Call update_task to set that subtask to "in_progress".
 4. Read the subtask title carefully — it is your requirement.
 5. Implement the requirement. Edit files, write code, add tests if appropriate.
-6. Run any existing tests to make sure you haven't broken anything.
+6. Run the full test suite for the project (not just the file you changed):
+   - First check ENVIRONMENT CONTEXT (above) for a "test command" or equivalent — use that if present.
+   - Otherwise try common runners in order: pytest, npm test, bun test, cargo test, go test ./...
+   - If no test runner is found, note it in your task comment and continue.
+   - Include the full suite results in the task comment (step 8).
 7. Git add and commit your changes with a clear message referencing the subtask.
 8. Call comment_task on the subtask describing what you did, which files you changed, and the commit hash.
 9. Call update_task to set the subtask to "completed".
