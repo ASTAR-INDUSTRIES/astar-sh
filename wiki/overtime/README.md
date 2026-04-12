@@ -66,6 +66,31 @@ The agents will follow instructions in Notes strictly. Use this to:
 - Too big (multi-hour each): harder to review, higher chance of rejection loops
 - Sweet spot: 30-90 minutes of focused work per requirement
 
+## Context files
+
+Some facts can't be inferred from the code: which service user runs the process, how to trigger a rolling restart, the test command that hits a real database, file paths that differ per environment. Put these in a context file alongside your spec.
+
+**Two locations are checked (slug-specific takes precedence):**
+
+```
+.astar/overtime/context.md               # shared by all specs in this repo
+.astar/overtime/<slug>-context.md        # specific to one spec
+```
+
+When either file exists, its content is injected verbatim into both U-Agent and E-Agent prompts as an `ENVIRONMENT CONTEXT` block before the task description.
+
+**Example `.astar/overtime/auth-hardening-context.md`:**
+
+```
+Service user: www-data (no sudo).
+Deployment: Kubernetes — restart via `kubectl rollout restart deploy/auth-svc`.
+Config lives at /etc/myapp/config.yaml (read-only at runtime).
+Test command: make test-integration (requires DB_URL env var).
+Do not modify the migration files — a separate DBA process owns those.
+```
+
+Context files are freetext — write them like a handoff note. The agents read them as given facts, not instructions.
+
 ## The overtime type field
 
 The `overtime:` line sets the work type. Currently just metadata, but useful for filtering and understanding what kind of work the agents are doing:

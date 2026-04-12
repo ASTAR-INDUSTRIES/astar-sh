@@ -216,11 +216,31 @@ function setupWorktree(slug: string): string {
   return worktreePath;
 }
 
+// ── Context file ─────────────────────────────────────────────────────
+
+async function loadContextFile(slug: string): Promise<string | null> {
+  // Check slug-specific context first, then fall back to shared context.md
+  const candidates = [
+    join(OVERTIME_DIR, `${slug}-context.md`),
+    join(OVERTIME_DIR, "context.md"),
+  ];
+  for (const path of candidates) {
+    const f = Bun.file(path);
+    if (await f.exists()) {
+      return (await f.text()).trim();
+    }
+  }
+  return null;
+}
+
 // ── Agent prompts ───────────────────────────────────────────────────
 
-function uAgentPrompt(taskNumber: number, spec: OvertimeSpec): string {
+function uAgentPrompt(taskNumber: number, spec: OvertimeSpec, envContext?: string | null): string {
+  const envBlock = envContext
+    ? `\nENVIRONMENT CONTEXT:\n${envContext}\n`
+    : "";
   return `You are U-Agent, an implementation engineer working overnight on behalf of a human developer.
-
+${envBlock}
 TASK: #${taskNumber} — ${spec.title}
 CONTEXT: ${spec.context}
 ${spec.notes ? `NOTES: ${spec.notes}` : ""}
@@ -244,9 +264,12 @@ RULES:
 - Do not modify files unrelated to the current subtask.`;
 }
 
-function eAgentPrompt(taskNumber: number, spec: OvertimeSpec, doneFile: string): string {
+function eAgentPrompt(taskNumber: number, spec: OvertimeSpec, doneFile: string, envContext?: string | null): string {
+  const envBlock = envContext
+    ? `\nENVIRONMENT CONTEXT:\n${envContext}\n`
+    : "";
   return `You are E-Agent, a code reviewer working overnight. You review the work of U-Agent.
-
+${envBlock}
 TASK: #${taskNumber} — ${spec.title}
 CONTEXT: ${spec.context}
 ${spec.notes ? `NOTES: ${spec.notes}` : ""}
@@ -539,6 +562,9 @@ async function startOvertime(fileFilter?: string) {
     // Setup worktree
     const worktree = setupWorktree(spec.slug);
 
+    // Load optional context file (.astar/overtime/<slug>-context.md or context.md)
+    const envContext = await loadContextFile(spec.slug);
+
     // Spawn agents
     const doneFile = join(OVERTIME_DIR, `.done-${spec.slug}`);
     const branchName = `overtime/${spec.slug}`;
@@ -559,8 +585,8 @@ async function startOvertime(fileFilter?: string) {
       console.log(`    ${c.dim}(telemetry run record unavailable: ${e.message})${c.reset}`);
     }
 
-    const uScript = makeAgentScript("U-Agent", uAgentPrompt(parentTaskNumber, spec), U_TOOLS, 100, worktree, 180, doneFile, "u", runId, config.apiUrl, token);
-    const eScript = makeAgentScript("E-Agent", eAgentPrompt(parentTaskNumber, spec, doneFile), E_TOOLS, 100, worktree, 180, doneFile, "e", runId, config.apiUrl, token);
+    const uScript = makeAgentScript("U-Agent", uAgentPrompt(parentTaskNumber, spec, envContext), U_TOOLS, 100, worktree, 180, doneFile, "u", runId, config.apiUrl, token);
+    const eScript = makeAgentScript("E-Agent", eAgentPrompt(parentTaskNumber, spec, doneFile, envContext), E_TOOLS, 100, worktree, 180, doneFile, "e", runId, config.apiUrl, token);
 
     // E-Agent starts with a 5-minute delay baked in
     const eScriptWithDelay = `echo "$(date '+%Y-%m-%d %H:%M:%S') [E-Agent] Waiting 5m for U-Agent to start..."\nsleep 300\n${eScript}`;
@@ -580,6 +606,7 @@ async function startOvertime(fileFilter?: string) {
 
     console.log(`  ${c.green}✓${c.reset} ${c.white}${spec.title}${c.reset}`);
     console.log(`    Task #${c.cyan}${parentTaskNumber}${c.reset} (${taskLabel}) · ${subtaskCount} subtasks · ${c.dim}${spec.type}${c.reset}`);
+    if (envContext) console.log(`    ${c.dim}Context file loaded${c.reset}`);
     console.log(`    U-Agent PID ${c.dim}${uProc.pid}${c.reset}  E-Agent PID ${c.dim}${eProc.pid}${c.reset}`);
     console.log(`    Branch ${c.dim}overtime/${spec.slug}${c.reset}`);
     console.log("");
@@ -1120,6 +1147,23 @@ function showGuide() {
     ${d}${r}
     ${d}## Notes${r}
     ${d}Constraints. What NOT to touch. Boundaries.${r}
+
+  ${c.bold}${w}CONTEXT FILES${r}
+
+    For facts the agents can't infer from the code — deployment topology,
+    service users, reboot policies, file paths, runtime constraints — create
+    a context file alongside your spec:
+
+    ${d}.astar/overtime/context.md${r}         ${d}# shared by all specs${r}
+    ${d}.astar/overtime/<slug>-context.md${r}  ${d}# specific to one spec${r}
+
+    The slug-specific file takes precedence. Contents are injected verbatim
+    into both agent prompts as an ENVIRONMENT CONTEXT block.
+
+    Example ${d}.astar/overtime/auth-context.md${r}:
+    ${d}Service user: www-data (no sudo). Deployment: Kubernetes, restart via${r}
+    ${d}kubectl rollout restart. Config lives in /etc/myapp/config.yaml.${r}
+    ${d}Test command: make test-integration (requires $DB_URL set).${r}
 
   ${c.bold}${w}WRITING GOOD REQUIREMENTS${r}
 
