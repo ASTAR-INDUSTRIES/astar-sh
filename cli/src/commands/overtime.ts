@@ -4,7 +4,7 @@ import { join, basename } from "path";
 import { unlinkSync, existsSync } from "fs";
 import { getToken } from "../lib/auth";
 import { getConfig } from "../lib/config";
-import { AstarAPI, type Task, type TaskActivity } from "../lib/api";
+import { AstarAPI, type Task, type TaskActivity, type OvertimeRun } from "../lib/api";
 import { c, table } from "../lib/ui";
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -609,7 +609,11 @@ async function showRecap() {
   const token = await requireAuth();
   const api = new AstarAPI(token);
 
-  const tasks = await api.listTasks({ search: "[overtime]", include_subtasks: true });
+  const [tasks, allRuns, pids] = await Promise.all([
+    api.listTasks({ search: "[overtime]", include_subtasks: true }),
+    api.listOvertimeRuns().catch(() => [] as OvertimeRun[]),
+    readPidFile(),
+  ]);
   const parents = tasks.filter((t) => t.title.startsWith("[overtime]"));
 
   if (!parents.length) {
@@ -623,10 +627,11 @@ async function showRecap() {
   for (const parent of parents) {
     const { subtasks, activity } = await api.getTask(parent.task_number);
     const done = subtasks.filter((t) => t.status === "completed").length;
-    const statusColor = done === subtasks.length ? c.green : c.yellow;
+    const allDone = done === subtasks.length;
+    const taskStatusColor = allDone ? c.green : c.yellow;
 
     console.log("");
-    console.log(`  ${c.white}${parent.title.replace("[overtime] ", "")}${c.reset}  #${c.cyan}${parent.task_number}${c.reset}  ${statusColor}${done}/${subtasks.length}${c.reset}`);
+    console.log(`  ${c.white}${parent.title.replace("[overtime] ", "")}${c.reset}  #${c.cyan}${parent.task_number}${c.reset}  ${taskStatusColor}${done}/${subtasks.length}${c.reset}`);
     console.log("");
 
     for (const sub of subtasks) {
@@ -634,7 +639,87 @@ async function showRecap() {
       console.log(`    ${icon}  #${c.dim}${sub.task_number}${c.reset}  ${sub.title}`);
     }
 
-    // Show recent activity
+    // ── Telemetry block ──────────────────────────────────────────────
+    // Find the most recent run for this task (by parent_task_number)
+    const run = allRuns.find((r) => r.parent_task_number === parent.task_number);
+    if (run) {
+      const startMs = new Date(run.started_at).getTime();
+      const endMs = run.completed_at ? new Date(run.completed_at).getTime() : Date.now();
+      const durationMs = endMs - startMs;
+      const running = run.status === "running";
+
+      console.log("");
+      console.log(
+        `  ${c.dim}Run:${c.reset} ${c.white}${run.slug}${c.reset}` +
+        `  ${statusColor(run.status)}` +
+        `  ${c.dim}${fmtDuration(durationMs)}${running ? "…" : ""}${c.reset}`
+      );
+
+      // Cost + cycle summary on one line
+      const parts: string[] = [];
+      if (run.total_cost_usd != null) parts.push(`${c.dim}Cost:${c.reset} ${fmtCost(run.total_cost_usd)}`);
+      const totalCycles = (run.total_cycles_u ?? 0) + (run.total_cycles_e ?? 0);
+      if (totalCycles > 0) {
+        parts.push(
+          `${c.dim}Cycles:${c.reset} ${c.cyan}${run.total_cycles_u}U${c.reset} ${c.magenta}${run.total_cycles_e}E${c.reset}`
+        );
+      }
+      if ((run.total_rejections ?? 0) > 0) {
+        parts.push(`${c.dim}Rejections:${c.reset} ${c.red}${run.total_rejections}${c.reset}`);
+      }
+      if (parts.length) console.log(`  ${parts.join("  ")}`);
+
+      // Fetch cycles for rejection history and timeline
+      try {
+        const cycles = await api.listOvertimeCycles(run.id);
+
+        // Rejection history — show which subtasks were rejected and by which e-cycle
+        const rejections = cycles.filter((cy) => cy.action_taken === "rejected");
+        if (rejections.length) {
+          console.log("");
+          console.log(`  ${c.dim}Rejection history:${c.reset}`);
+          for (const rej of rejections) {
+            const taskRef = rej.subtask_number != null ? `#${rej.subtask_number}` : "—";
+            const ts = rej.completed_at
+              ? new Date(rej.completed_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
+              : "?";
+            console.log(
+              `    ${c.dim}${ts}${c.reset}  ${c.magenta}E${c.reset}${c.dim}#${rej.cycle_number}${c.reset}  ${c.dim}rejected${c.reset} ${taskRef}`
+            );
+          }
+        }
+
+        // Compact cycle timeline — show per-subtask cost/token summary
+        const subtaskNumbers = [...new Set(cycles.filter((cy) => cy.subtask_number != null).map((cy) => cy.subtask_number!))];
+        if (subtaskNumbers.length > 0) {
+          const totalTokensIn = cycles.reduce((a, cy) => a + (cy.tokens_in ?? 0), 0);
+          const totalTokensOut = cycles.reduce((a, cy) => a + (cy.tokens_out ?? 0), 0);
+          if (totalTokensIn > 0 || totalTokensOut > 0) {
+            console.log("");
+            console.log(
+              `  ${c.dim}Tokens:${c.reset} ${c.dim}${totalTokensIn.toLocaleString()} in / ${totalTokensOut.toLocaleString()} out${c.reset}`
+              + (run.total_cost_usd != null && subtaskNumbers.length > 0
+                ? `  ${c.dim}(≈${fmtCost(run.total_cost_usd / subtaskNumbers.length)}/subtask)${c.reset}`
+                : "")
+            );
+          }
+        }
+
+        // Branch / commit count
+        if (run.git_commits?.length) {
+          console.log(
+            `  ${c.dim}Commits: ${run.git_commits.length}  Branch: ${run.branch_name || "—"}${c.reset}`
+          );
+        }
+      } catch {
+        // Cycles unavailable — show branch from run record
+        if (run.branch_name) {
+          console.log(`  ${c.dim}Branch: ${run.branch_name}${c.reset}`);
+        }
+      }
+    }
+
+    // ── Recent activity ──────────────────────────────────────────────
     const comments = activity.filter((a: any) => a.action === "commented").slice(-8);
     if (comments.length) {
       console.log("");
@@ -648,16 +733,19 @@ async function showRecap() {
       }
     }
 
-    // Show branch info
-    const pids = await readPidFile();
-    const slug = Object.keys(pids).find((k) => pids[k].taskNumber === parent.task_number);
-    if (slug) {
-      console.log("");
-      console.log(`  ${c.dim}Branch: overtime/${slug}${c.reset}`);
-      console.log(`  ${c.dim}Worktree: ${pids[slug].worktree}${c.reset}`);
+    // ── Branch info from pid file (for live sessions) ─────────────────
+    if (!run) {
+      const slug = Object.keys(pids).find((k) => pids[k].taskNumber === parent.task_number);
+      if (slug) {
+        console.log("");
+        console.log(`  ${c.dim}Branch: overtime/${slug}${c.reset}`);
+        console.log(`  ${c.dim}Worktree: ${pids[slug].worktree}${c.reset}`);
+      }
     }
   }
 
+  console.log("");
+  console.log(`  ${c.dim}For full telemetry: astar overtime stats${c.reset}`);
   console.log("");
 }
 
