@@ -261,7 +261,8 @@ RULES:
 - Always commit before marking complete.
 - Keep commits atomic. Reference the subtask number in the commit message.
 - If blocked, comment on the subtask explaining why and skip to the next one.
-- Do not modify files unrelated to the current subtask.`;
+- Do not modify files unrelated to the current subtask.
+- Before depending on any unfamiliar identifier from existing code (a function, type, constant, config key, DB column, API field, etc.), write a task comment: "I believe X means Y based on [file:line]". Do this before writing code that relies on it. This catches misread signatures, wrong assumptions about types, and silently wrong semantics.`;
 }
 
 function eAgentPrompt(taskNumber: number, spec: OvertimeSpec, doneFile: string, envContext?: string | null): string {
