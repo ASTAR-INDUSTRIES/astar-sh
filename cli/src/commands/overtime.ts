@@ -330,17 +330,18 @@ function makeAgentScript(
   const telemetryBlock = runId ? `
   if command -v jq &>/dev/null; then
     RESULT_TEXT=$(jq -r '.result // ""' "$TMPOUT" 2>/dev/null)
-    TOKENS_IN=$(jq -r 'if .total_input_tokens then (.total_input_tokens | tostring) else "" end' "$TMPOUT" 2>/dev/null)
-    TOKENS_OUT=$(jq -r 'if .total_output_tokens then (.total_output_tokens | tostring) else "" end' "$TMPOUT" 2>/dev/null)
+    TOKENS_IN=$(jq -r 'if .usage then ((.usage.input_tokens // 0) + (.usage.cache_creation_input_tokens // 0) + (.usage.cache_read_input_tokens // 0) | tostring) else "" end' "$TMPOUT" 2>/dev/null)
+    TOKENS_OUT=$(jq -r 'if .usage.output_tokens then (.usage.output_tokens | tostring) else "" end' "$TMPOUT" 2>/dev/null)
     COST_USD=$(jq -r 'if .total_cost_usd then (.total_cost_usd | tostring) else "" end' "$TMPOUT" 2>/dev/null)
-    MODEL=$(jq -r '.model // ""' "$TMPOUT" 2>/dev/null)
+    MODEL=$(jq -r '(.modelUsage // {}) | keys[0] // ""' "$TMPOUT" 2>/dev/null)
     TURNS_USED=$(jq -r 'if .num_turns then (.num_turns | tostring) else "" end' "$TMPOUT" 2>/dev/null)
+    TOOL_CALLS=$(jq -r 'if .usage.iterations then (.usage.iterations | length | tostring) else "" end' "$TMPOUT" 2>/dev/null)
     if [ -n "$RESULT_TEXT" ]; then
       echo "$RESULT_TEXT"
     else
       cat "$TMPOUT"
     fi
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] tokens: in=$TOKENS_IN out=$TOKENS_OUT cost=$COST_USD turns=$TURNS_USED model=$MODEL"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] tokens: in=$TOKENS_IN out=$TOKENS_OUT cost=$COST_USD turns=$TURNS_USED tool_calls=$TOOL_CALLS model=$MODEL"
     CYCLE_JSON=$(jq -nc \\
       --arg run_id "${runId}" \\
       --arg agent "${agentChar}" \\
@@ -354,6 +355,7 @@ function makeAgentScript(
       --arg tokens_out "$TOKENS_OUT" \\
       --arg cost_usd "$COST_USD" \\
       --arg turns_used "$TURNS_USED" \\
+      --arg tool_calls "$TOOL_CALLS" \\
       '{
         run_id: $run_id,
         agent: $agent,
@@ -366,7 +368,8 @@ function makeAgentScript(
         tokens_in: (if $tokens_in == "" then null else ($tokens_in | tonumber) end),
         tokens_out: (if $tokens_out == "" then null else ($tokens_out | tonumber) end),
         cost_usd: (if $cost_usd == "" then null else ($cost_usd | tonumber) end),
-        turns_used: (if $turns_used == "" then null else ($turns_used | tonumber) end)
+        turns_used: (if $turns_used == "" then null else ($turns_used | tonumber) end),
+        tool_calls_count: (if $tool_calls == "" then null else ($tool_calls | tonumber) end)
       }' 2>/dev/null)
     if [ -n "$CYCLE_JSON" ]; then
       curl -sf -X POST "${apiUrl}/overtime/cycles" \\
@@ -395,7 +398,7 @@ while true; do
     --allowedTools "${tools}" \\
     --max-turns ${maxTurns} \\
     --output-format json \\
-    --dangerously-skip-permissions > "$TMPOUT" 2>&1
+    --dangerously-skip-permissions > "$TMPOUT"
   EXIT_CODE=$?
   CYCLE_ENDED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] Cycle $CYCLE_NUM done (exit: $EXIT_CODE)"${telemetryBlock}
