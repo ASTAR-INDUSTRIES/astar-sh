@@ -14,7 +14,8 @@ create table overtime_runs (
   model text,
   worktree_path text,
   branch_name text,
-  git_commits text[] not null default '{}'
+  git_commits text[] not null default '{}',
+  created_by text
 );
 
 alter table overtime_runs enable row level security;

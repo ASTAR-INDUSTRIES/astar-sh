@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 import { spawn, execSync, type ChildProcess } from "child_process";
 import { join, basename } from "path";
+import { homedir } from "os";
 import { unlinkSync, existsSync } from "fs";
 import { getToken } from "../lib/auth";
 import { getConfig } from "../lib/config";
@@ -334,7 +335,7 @@ if command -v jq &>/dev/null && command -v curl &>/dev/null; then
   GIT_COMMITS=$(git -C "${worktree}" log --format="%H" main..HEAD 2>/dev/null | jq -R . | jq -sc . 2>/dev/null)
   [ -z "$GIT_COMMITS" ] && GIT_COMMITS="[]"
   CYCLES_RESP=$(curl -sf "${apiUrl}/overtime/runs/${runId}/cycles" \\
-    -H "Authorization: Bearer ${token}" 2>/dev/null)
+    -H "Authorization: Bearer $AUTH_TOKEN" 2>/dev/null)
   TOTAL_U=$(echo "$CYCLES_RESP" | jq '[.cycles[] | select(.agent=="u")] | length' 2>/dev/null || echo "0")
   TOTAL_E=$(echo "$CYCLES_RESP" | jq '[.cycles[] | select(.agent=="e")] | length' 2>/dev/null || echo "0")
   TOTAL_COST=$(echo "$CYCLES_RESP" | jq '[.cycles[].cost_usd // 0] | add // null' 2>/dev/null || echo "null")
@@ -348,7 +349,7 @@ if command -v jq &>/dev/null && command -v curl &>/dev/null; then
     '{status: $status, completed_at: $completed_at, git_commits: $git_commits, total_cycles_u: $total_cycles_u, total_cycles_e: $total_cycles_e, total_cost_usd: $total_cost_usd}' 2>/dev/null)
   if [ -n "$FINALIZE_JSON" ]; then
     curl -sf -X PATCH "${apiUrl}/overtime/runs/${runId}" \\
-      -H "Authorization: Bearer ${token}" \\
+      -H "Authorization: Bearer $AUTH_TOKEN" \\
       -H "Content-Type: application/json" \\
       -d "$FINALIZE_JSON" >/dev/null 2>&1 || true
     echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] Run finalized (done, U=$TOTAL_U E=$TOTAL_E cycles)."
@@ -404,7 +405,7 @@ fi` : "";
       }' 2>/dev/null)
     if [ -n "$CYCLE_JSON" ]; then
       curl -sf -X POST "${apiUrl}/overtime/cycles" \\
-        -H "Authorization: Bearer ${token}" \\
+        -H "Authorization: Bearer $AUTH_TOKEN" \\
         -H "Content-Type: application/json" \\
         -d "$CYCLE_JSON" >/dev/null 2>&1 || true
     fi
@@ -413,13 +414,22 @@ fi` : "";
   fi` : `
   cat "$TMPOUT"`;
 
+  const authFile = join(homedir(), ".astar", "auth.json");
   return `
 cd "${worktree}"
+AUTH_TOKEN="${token}"
 CYCLE_NUM=0
 while true; do
   if [ -f "${doneFile}" ]; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] Done file found. Shutting down."
     break
+  fi
+  # Refresh token from auth cache each cycle (survives token expiry + re-auth)
+  if [ -f "${authFile}" ] && command -v jq &>/dev/null; then
+    FRESH_TOKEN=$(jq -r '.accessToken // empty' "${authFile}" 2>/dev/null)
+    if [ -n "$FRESH_TOKEN" ]; then
+      AUTH_TOKEN="$FRESH_TOKEN"
+    fi
   fi
   CYCLE_NUM=$((CYCLE_NUM + 1))
   CYCLE_STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -549,8 +559,8 @@ async function startOvertime(fileFilter?: string) {
       console.log(`    ${c.dim}(telemetry run record unavailable: ${e.message})${c.reset}`);
     }
 
-    const uScript = makeAgentScript("U-Agent", uAgentPrompt(parentTaskNumber, spec), U_TOOLS, 30, worktree, 180, doneFile, "u", runId, config.apiUrl, token);
-    const eScript = makeAgentScript("E-Agent", eAgentPrompt(parentTaskNumber, spec, doneFile), E_TOOLS, 30, worktree, 180, doneFile, "e", runId, config.apiUrl, token);
+    const uScript = makeAgentScript("U-Agent", uAgentPrompt(parentTaskNumber, spec), U_TOOLS, 100, worktree, 180, doneFile, "u", runId, config.apiUrl, token);
+    const eScript = makeAgentScript("E-Agent", eAgentPrompt(parentTaskNumber, spec, doneFile), E_TOOLS, 100, worktree, 180, doneFile, "e", runId, config.apiUrl, token);
 
     // E-Agent starts with a 5-minute delay baked in
     const eScriptWithDelay = `echo "$(date '+%Y-%m-%d %H:%M:%S') [E-Agent] Waiting 5m for U-Agent to start..."\nsleep 300\n${eScript}`;

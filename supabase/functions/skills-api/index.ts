@@ -2835,6 +2835,7 @@ app.post("/overtime/runs", async (c) => {
     model: body.model ?? null,
     worktree_path: body.worktree_path ?? null,
     branch_name: body.branch_name ?? null,
+    created_by: user.email,
   }).select("id").single();
 
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
