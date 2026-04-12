@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 ## [Unreleased]
 
 ### Added
+- `overtime_cycles` DB table — per-cycle telemetry: agent, cycle number, timing, exit code, subtask, action taken, token counts, cost, model, tool calls, and turns
 - `overtime_runs` DB table — persistent record for each overnight session tracking status, cycles, rejections, cost, model, worktree path, branch, and git commits
 - `astar overtime` — overnight agent system: drop a markdown spec, two agents implement and review while you sleep
 - `astar overtime start [--file slug]` — parse specs, create tasks, spawn U-Agent (implements) and E-Agent (reviews) in a git worktree

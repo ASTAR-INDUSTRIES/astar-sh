@@ -167,7 +167,28 @@ Each overnight run writes a persistent record to `overtime_runs` on astar.sh. Th
 | `branch_name` | text | Git branch name |
 | `git_commits` | text[] | All commit hashes made during the run |
 
-See also: [`overtime_cycles`](./README.md) (subtask #85) for per-cycle records.
+### `overtime_cycles` table
+
+Each individual agent invocation writes one row here. Together with `overtime_runs` this gives full per-cycle visibility.
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | uuid | Primary key |
+| `run_id` | uuid | FK → `overtime_runs.id` (cascade delete) |
+| `agent` | text | `u` (U-Agent) or `e` (E-Agent) |
+| `cycle_number` | integer | 1-based cycle counter per run per agent |
+| `started_at` | timestamptz | Cycle start time |
+| `completed_at` | timestamptz | Cycle end time (null if still running) |
+| `exit_code` | integer | claude CLI exit code |
+| `subtask_number` | integer | Task number worked on this cycle (null if idle) |
+| `action_taken` | text | `implemented` / `reviewed` / `approved` / `rejected` / `idle` |
+| `tokens_in` | integer | Input tokens consumed |
+| `tokens_out` | integer | Output tokens generated |
+| `cost_usd` | numeric | Estimated USD cost for this cycle |
+| `model` | text | Claude model used (e.g. `claude-sonnet-4-6`) |
+| `tool_calls_count` | integer | Number of tool calls made |
+| `turns_used` | integer | Turns consumed out of max |
+| `max_turns` | integer | Max turns configured for this cycle |
 
 ## Limitations (v1)
 
