@@ -338,3 +338,50 @@ describe("review command — registration and help", () => {
     expect(help).toContain("review");
   });
 });
+
+// ── eAgentPrompt: full test suite sign-off instructions ──────────────
+
+describe("eAgentPrompt — full test suite sign-off", () => {
+  const spec = parseSpec(`# Simple Task
+overtime: dev
+
+Some context.
+
+## Requirements
+- [ ] Do a thing
+`, "simple.md");
+
+  const doneFile = "/tmp/.done-simple";
+
+  it("sign-off step instructs to run the FULL project test suite", () => {
+    const prompt = eAgentPrompt(10, spec, doneFile);
+    expect(prompt).toContain("FULL project test suite");
+  });
+
+  it("sign-off step says not just tests for touched files", () => {
+    const prompt = eAgentPrompt(10, spec, doneFile);
+    expect(prompt).toContain("not just tests for touched files");
+  });
+
+  it("sign-off step includes auto-detection guidance (check ENVIRONMENT CONTEXT)", () => {
+    const prompt = eAgentPrompt(10, spec, doneFile);
+    expect(prompt).toContain("ENVIRONMENT CONTEXT");
+  });
+
+  it("sign-off step lists common test runners for auto-detection", () => {
+    const prompt = eAgentPrompt(10, spec, doneFile);
+    expect(prompt).toContain("bun test");
+    expect(prompt).toContain("npm test");
+  });
+
+  it("sign-off step states touched-file passing does not allow sign-off if full suite fails", () => {
+    const prompt = eAgentPrompt(10, spec, doneFile);
+    expect(prompt).toContain("touched-file tests pass");
+    expect(prompt).toContain("failing test elsewhere blocks sign-off");
+  });
+
+  it("RULES section contains full test suite instruction", () => {
+    const prompt = eAgentPrompt(10, spec, doneFile);
+    expect(prompt).toContain("FULL project test suite before sign-off");
+  });
+});

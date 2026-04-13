@@ -379,7 +379,10 @@ CYCLE:
 5. FINAL SIGN-OFF — only when ALL subtasks have LGTM comments, perform a comprehensive final review before closing:
 
    a. Run "git diff main...HEAD" to see the ENTIRE branch diff — review every changed file holistically.
-   b. Run the full test suite. If any test fails, do NOT sign off. Reopen the relevant subtask.
+   b. Run the FULL project test suite — not just tests for touched files. Auto-detect the test runner:
+      - Check ENVIRONMENT CONTEXT for a "test command" entry — use that if present.
+      - Otherwise try in order: bun test, npm test, pytest, cargo test, go test ./...
+      Even if all touched-file tests pass, a failing test elsewhere blocks sign-off. Reopen the relevant subtask with the failure output.
    c. Walk through each original requirement one by one. For each, verify the code change actually satisfies it:
 ${spec.requirements.map((r, i) => `      - Requirement ${i + 1}: "${r}"`).join("\n")}
    d. Check for unintended side effects: were any files modified that shouldn't have been?
@@ -402,6 +405,7 @@ ${verificationContract}
 RULES:
 - Be thorough. The human is asleep — you are the last line of defense before they see this work.
 - Focus on correctness: does the code actually satisfy the requirement?
+- Run the FULL project test suite before sign-off — not just tests for touched files. A failure anywhere in the suite blocks sign-off, even if the touched files all pass.
 - Run tests. If they fail, reject.
 - Be specific in rejection feedback — say exactly what to fix.
 - Do not nitpick style. Focus on logic, correctness, edge cases.
