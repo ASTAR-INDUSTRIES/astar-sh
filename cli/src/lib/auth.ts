@@ -6,6 +6,12 @@ import { c } from "./ui";
 
 const SCOPES = ["openid", "profile", "email"];
 
+function debugLog(msg: string) {
+  if (process.env.ASTAR_DEBUG === "1") {
+    console.error(`[auth:debug] ${msg}`);
+  }
+}
+
 function getIdTokenExpiry(idToken: string): number | null {
   try {
     const payload = JSON.parse(Buffer.from(idToken.split(".")[1], "base64url").toString());
@@ -13,6 +19,20 @@ function getIdTokenExpiry(idToken: string): number | null {
   } catch {
     return null;
   }
+}
+
+// Resolve the cache expiry from the ID token's JWT exp claim.
+// result.expiresOn from MSAL is the *access token* expiry (Graph API), not the
+// ID token expiry — using it here would cause spurious re-auth when the access
+// token expires before the ID token, or mask the true ID token lifetime.
+function resolveExpiresAt(idToken: string | null | undefined, msalExpiresOn: Date | null | undefined): number {
+  const idTokenExpiry = idToken ? getIdTokenExpiry(idToken) : null;
+  debugLog(
+    `resolveExpiresAt: idToken JWT exp=${idTokenExpiry ? new Date(idTokenExpiry).toISOString() : "null"}` +
+    ` msalExpiresOn=${msalExpiresOn ? msalExpiresOn.toISOString() : "null"}`
+  );
+  // Never fall back to msalExpiresOn — use 1 hr as the safe default instead.
+  return idTokenExpiry ?? Date.now() + 3600_000;
 }
 
 async function getMsalClient() {
@@ -89,7 +109,7 @@ export async function login(): Promise<AuthCache> {
   const token = result.idToken || result.accessToken;
   const cache: AuthCache = {
     accessToken: token,
-    expiresAt: getIdTokenExpiry(token) ?? result.expiresOn?.getTime() ?? Date.now() + 3600_000,
+    expiresAt: resolveExpiresAt(result.idToken, result.expiresOn),
     homeAccountId: result.account?.homeAccountId,
     account: {
       name: result.account?.name ?? "Unknown",
@@ -147,7 +167,7 @@ export async function loginForAgent(slug: string): Promise<AuthCache> {
   const agentToken = result.idToken || result.accessToken;
   const cache: AuthCache = {
     accessToken: agentToken,
-    expiresAt: getIdTokenExpiry(agentToken) ?? result.expiresOn?.getTime() ?? Date.now() + 3600_000,
+    expiresAt: resolveExpiresAt(result.idToken, result.expiresOn),
     homeAccountId: result.account?.homeAccountId,
     account: {
       name: result.account?.name ?? "Unknown",
@@ -194,12 +214,6 @@ export async function getToken(opts?: { interactive?: boolean }): Promise<string
   }
 
   throw new Error("Session expired. Run 'astar login' to sign in again.");
-}
-
-function debugLog(msg: string) {
-  if (process.env.ASTAR_DEBUG === "1") {
-    console.error(`[auth:debug] ${msg}`);
-  }
 }
 
 async function silentRefresh(cache: AuthCache): Promise<AuthCache | null> {
@@ -264,7 +278,7 @@ async function silentRefresh(cache: AuthCache): Promise<AuthCache | null> {
     const refreshToken = result.idToken || result.accessToken;
     const refreshed: AuthCache = {
       accessToken: refreshToken,
-      expiresAt: getIdTokenExpiry(refreshToken) ?? result.expiresOn?.getTime() ?? Date.now() + 3600_000,
+      expiresAt: resolveExpiresAt(result.idToken, result.expiresOn),
       homeAccountId: result.account?.homeAccountId,
       account: {
         name: result.account?.name ?? cache.account.name,
