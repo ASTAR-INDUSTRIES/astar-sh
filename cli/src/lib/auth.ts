@@ -196,17 +196,44 @@ export async function getToken(opts?: { interactive?: boolean }): Promise<string
   throw new Error("Session expired. Run 'astar login' to sign in again.");
 }
 
+function debugLog(msg: string) {
+  if (process.env.ASTAR_DEBUG === "1") {
+    console.error(`[auth:debug] ${msg}`);
+  }
+}
+
 async function silentRefresh(cache: AuthCache): Promise<AuthCache | null> {
-  if (!cache.homeAccountId) return null;
+  if (!cache.homeAccountId) {
+    debugLog("silentRefresh: no homeAccountId in cache, skipping");
+    return null;
+  }
 
   try {
+    const cacheFile = Bun.file(paths.msalCache);
+    const cacheExists = await cacheFile.exists();
+    debugLog(`silentRefresh: MSAL cache file exists=${cacheExists} path=${paths.msalCache}`);
+
     const client = await getMsalClient();
     const accounts = await client.getTokenCache().getAllAccounts();
+    debugLog(`silentRefresh: accounts in MSAL cache=${accounts.length}`);
+
     const account = accounts.find((a) => a.homeAccountId === cache.homeAccountId);
+    debugLog(`silentRefresh: account matched=${!!account} (homeAccountId=${cache.homeAccountId})`);
     if (!account) return null;
 
-    const result = await client.acquireTokenSilent({ scopes: SCOPES, account });
-    if (!result) return null;
+    let result;
+    try {
+      result = await client.acquireTokenSilent({ scopes: SCOPES, account });
+      debugLog(`silentRefresh: acquireTokenSilent succeeded idToken=${!!result?.idToken} accessToken=${!!result?.accessToken}`);
+    } catch (err) {
+      debugLog(`silentRefresh: acquireTokenSilent threw: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
+
+    if (!result) {
+      debugLog("silentRefresh: acquireTokenSilent returned null");
+      return null;
+    }
 
     await persistMsalCache(client);
 
@@ -222,7 +249,8 @@ async function silentRefresh(cache: AuthCache): Promise<AuthCache | null> {
     };
     await saveAuthCache(refreshed);
     return refreshed;
-  } catch {
+  } catch (err) {
+    debugLog(`silentRefresh: unexpected error: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
