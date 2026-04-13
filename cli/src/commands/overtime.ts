@@ -1134,6 +1134,68 @@ async function showStats(runId?: string) {
   console.log("");
 }
 
+// ── Dashboard ───────────────────────────────────────────────────────
+
+function sparkline(values: number[]): string {
+  const bars = "▁▂▃▄▅▆▇█";
+  const max = Math.max(...values, 0);
+  if (max === 0) return Array(values.length).fill("▁").join("");
+  return values.map((v) => bars[Math.min(7, Math.floor((v / max) * 7.99))]).join("");
+}
+
+async function showDashboard() {
+  const token = await requireAuth();
+  const api = new AstarAPI(token);
+
+  let data;
+  try {
+    data = await api.getOvertimeDashboard();
+  } catch (e: any) {
+    console.error(`${c.red}✗${c.reset} ${e.message}`);
+    process.exit(1);
+  }
+
+  const { summary, daily } = data;
+
+  console.log("");
+  console.log(`  ${c.bold}${c.white}OVERTIME DASHBOARD${c.reset}`);
+  console.log("");
+
+  // Cost per subtask is the most important metric — put it first and prominent
+  const costPerSubtask = summary.avg_cost_per_subtask;
+  if (costPerSubtask > 0) {
+    console.log(`  ${c.bold}${c.white}$${costPerSubtask.toFixed(4)}${c.reset}  avg cost per subtask`);
+  } else {
+    console.log(`  ${c.dim}avg cost per subtask:${c.reset} —`);
+  }
+  console.log("");
+
+  console.log(`  ${c.dim}Total spend:${c.reset}        ${summary.total_cost_usd > 0 ? `$${summary.total_cost_usd.toFixed(4)}` : "—"}`);
+  console.log(`  ${c.dim}Runs completed:${c.reset}     ${summary.total_runs}`);
+  console.log(`  ${c.dim}Subtasks delivered:${c.reset} ${summary.total_subtasks_delivered}`);
+  console.log(`  ${c.dim}Avg cost/run:${c.reset}       ${summary.avg_cost_per_run > 0 ? `$${summary.avg_cost_per_run.toFixed(4)}` : "—"}`);
+  console.log(`  ${c.dim}Avg cycles/run:${c.reset}     ${summary.avg_cycles_per_run > 0 ? summary.avg_cycles_per_run.toFixed(1) : "—"}`);
+  console.log(`  ${c.dim}Total cycles:${c.reset}       ${summary.total_cycles}`);
+  console.log(`  ${c.dim}Rejection rate:${c.reset}     ${summary.total_rejections > 0 ? `${(summary.avg_rejection_rate * 100).toFixed(1)}% (${summary.total_rejections} total)` : "0%"}`);
+  console.log(`  ${c.dim}Tokens in:${c.reset}          ${summary.total_tokens_in > 0 ? summary.total_tokens_in.toLocaleString() : "—"}`);
+  console.log(`  ${c.dim}Tokens out:${c.reset}         ${summary.total_tokens_out > 0 ? summary.total_tokens_out.toLocaleString() : "—"}`);
+
+  // 7-day cost trend sparkline
+  if (daily.length > 0) {
+    const sorted = [...daily].sort((a, b) => a.date.localeCompare(b.date)).slice(-7);
+    const costs = sorted.map((d) => d.cost_usd);
+    const spark = sparkline(costs);
+    const firstDate = sorted[0]?.date?.slice(5) ?? "";
+    const lastDate = sorted[sorted.length - 1]?.date?.slice(5) ?? "";
+    console.log("");
+    console.log(`  ${c.dim}7-day cost trend (${firstDate} → ${lastDate}):${c.reset}`);
+    console.log(`  ${c.cyan}${spark}${c.reset}`);
+    console.log(`  ${c.dim}${sorted.map((d) => `$${d.cost_usd.toFixed(2)}`).join("  ")}${c.reset}`);
+  }
+
+  console.log("");
+}
+
 // ── Guide ───────────────────────────────────────────────────────────
 
 function showGuide() {
@@ -1249,6 +1311,7 @@ function showGuide() {
     ${cy}astar overtime stop --clean${r}        kill + remove worktrees
     ${cy}astar overtime stats${r}                cost, cycles, tokens across all runs
     ${cy}astar overtime stats <id>${r}           per-cycle breakdown for a specific run
+    ${cy}astar overtime dashboard${r}            aggregate spend, efficiency, 7-day trend
     ${cy}astar overtime guide${r}               this guide
 
   ${c.bold}${w}EXAMPLE USE CASES${r}
@@ -1319,6 +1382,11 @@ export function registerOvertimeCommands(program: Command) {
     .action(async (runId?: string) => {
       await showStats(runId);
     });
+
+  overtime
+    .command("dashboard")
+    .description("Aggregate view of all overtime runs: spend, efficiency, and 7-day trend")
+    .action(showDashboard);
 
   overtime
     .command("guide")
