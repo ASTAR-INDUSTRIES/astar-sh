@@ -1255,7 +1255,7 @@ async function renderOvertimeMonitor(api: AstarAPI): Promise<void> {
     process.stdout.write("\n");
   }
 
-  process.stdout.write(`  ${c.dim}ctrl+c quit · refreshing every 5s${c.reset}\n`);
+  process.stdout.write(`  ${c.dim}[q] quit · refreshing every 5s${c.reset}\n`);
 }
 
 async function monitorOvertime(): Promise<void> {
@@ -1272,8 +1272,13 @@ async function monitorOvertime(): Promise<void> {
 
   process.stdout.write("\x1b[?25l"); // hide cursor
 
+  let interval: ReturnType<typeof setInterval>;
+
   const cleanup = () => {
     clearInterval(interval);
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(false);
+    }
     process.stdout.write("\x1b[?25h"); // show cursor
     process.stdout.write("\n");
     process.exit(0);
@@ -1291,9 +1296,19 @@ async function monitorOvertime(): Promise<void> {
   };
 
   await tick();
-  const interval = setInterval(tick, 5000);
+  interval = setInterval(tick, 5000);
 
-  process.on("SIGINT", cleanup);
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on("data", (key: Buffer) => {
+      if (key[0] === 0x03 || key[0] === 0x71) { // ctrl+c or q
+        cleanup();
+      }
+    });
+  } else {
+    process.on("SIGINT", cleanup);
+  }
 
   // Keep alive
   await new Promise(() => {});
