@@ -320,6 +320,29 @@ export interface OvertimeCycle {
   max_turns?: number | null;
 }
 
+export interface OvertimeDashboard {
+  summary: {
+    total_runs: number;
+    total_cost_usd: number;
+    total_tokens_in: number;
+    total_tokens_out: number;
+    total_cycles: number;
+    total_rejections: number;
+    total_subtasks_delivered: number;
+    avg_cost_per_run: number;
+    avg_cost_per_subtask: number;
+    avg_cycles_per_run: number;
+    avg_rejection_rate: number;
+  };
+  daily: Array<{
+    date: string;
+    cost_usd: number;
+    runs: number;
+    cycles: number;
+    subtasks_delivered: number;
+  }>;
+}
+
 export class AstarAPI {
   constructor(private token?: string) {}
 
@@ -873,5 +896,9 @@ export class AstarAPI {
   async listOvertimeCycles(runId: string): Promise<OvertimeCycle[]> {
     const data = await this.fetch<{ cycles: OvertimeCycle[] }>(`/overtime/runs/${runId}/cycles`);
     return data.cycles;
+  }
+
+  async getOvertimeDashboard(): Promise<OvertimeDashboard> {
+    return this.fetch<OvertimeDashboard>("/overtime/dashboard");
   }
 }
