@@ -172,11 +172,14 @@ async function createOvertimeTasks(
     spec.notes ? `\n---\n**Notes:** ${spec.notes}` : "",
   ].filter(Boolean).join("\n");
 
+  const uAgentId = `u-agent:${spec.slug}`;
+
   const parent = await api.createTask({
     title: `[overtime] ${spec.title}`,
     description,
     priority: "medium",
     tags: ["overtime", spec.type],
+    assigned_to: uAgentId,
   });
 
   for (const req of spec.requirements) {
@@ -185,6 +188,7 @@ async function createOvertimeTasks(
       parent_task_number: parent.task_number,
       tags: ["overtime"],
       priority: "medium",
+      assigned_to: uAgentId,
     });
   }
 
