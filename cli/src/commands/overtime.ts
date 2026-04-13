@@ -856,14 +856,22 @@ async function showRecap() {
   console.log("");
 }
 
-async function stopOvertime(opts: { clean?: boolean }) {
+async function stopOvertime(targetSlug: string | undefined, opts: { clean?: boolean }) {
   const pids = await readPidFile();
-  const slugs = Object.keys(pids);
+  const allSlugs = Object.keys(pids);
 
-  if (!slugs.length) {
+  if (!allSlugs.length) {
     console.log(`\n  ${c.dim}No overtime sessions to stop.${c.reset}\n`);
     return;
   }
+
+  if (targetSlug !== undefined && !pids[targetSlug]) {
+    console.log(`\n  ${c.red}✗${c.reset} No session found for slug ${c.white}${targetSlug}${c.reset}\n`);
+    console.log(`  ${c.dim}Running sessions: ${allSlugs.join(", ") || "none"}${c.reset}\n`);
+    return;
+  }
+
+  const slugs = targetSlug !== undefined ? [targetSlug] : allSlugs;
 
   let token: string | undefined;
   let api: AstarAPI | undefined;
@@ -1402,7 +1410,8 @@ function showGuide() {
     ${cy}astar overtime status${r}              what's running + progress
     ${cy}astar overtime status --verbose${r}    + last cycle cost/turns/model
     ${cy}astar overtime recap${r}               morning summary
-    ${cy}astar overtime stop${r}                kill agents
+    ${cy}astar overtime stop${r}                kill all agents
+    ${cy}astar overtime stop <slug>${r}         kill a single agent
     ${cy}astar overtime stop --clean${r}        kill + remove worktrees
     ${cy}astar overtime monitor${r}              live full-screen dashboard (5s refresh)
     ${cy}astar overtime stats${r}                cost, cycles, tokens across all runs
@@ -1489,8 +1498,8 @@ export function registerOvertimeCommands(program: Command) {
     .action(monitorOvertime);
 
   overtime
-    .command("stop")
-    .description("Kill all running overtime agents")
+    .command("stop [slug]")
+    .description("Kill overtime agent(s). Provide a slug to stop a single session, or omit to stop all.")
     .option("--clean", "Also remove git worktrees")
     .action(stopOvertime);
 }
