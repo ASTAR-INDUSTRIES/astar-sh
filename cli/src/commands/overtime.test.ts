@@ -385,3 +385,57 @@ Some context.
     expect(prompt).toContain("FULL project test suite before sign-off");
   });
 });
+
+// ── eAgentPrompt: boundary check sign-off instructions ───────────────
+
+describe("eAgentPrompt — boundary check sign-off", () => {
+  const specNoNotes = parseSpec(`# Simple Task
+overtime: dev
+
+Some context.
+
+## Requirements
+- [ ] Do a thing
+`, "simple.md");
+
+  const specWithNotes = parseSpec(`# Auth Hardening
+overtime: dev
+
+Improve auth security.
+
+## Requirements
+- [ ] JWT refresh handles concurrent requests safely
+
+## Notes
+Do not touch the OAuth flow.
+`, "auth-hardening.md");
+
+  const doneFile = "/tmp/.done-boundary";
+
+  it("sign-off step instructs to run git diff main..HEAD --stat", () => {
+    const prompt = eAgentPrompt(10, specNoNotes, doneFile);
+    expect(prompt).toContain("git diff main..HEAD --stat");
+  });
+
+  it("sign-off step labels the step as a boundary check", () => {
+    const prompt = eAgentPrompt(10, specNoNotes, doneFile);
+    expect(prompt).toContain("Boundary check");
+  });
+
+  it("sign-off step says to reject if unexpected files appear in stat output", () => {
+    const prompt = eAgentPrompt(10, specNoNotes, doneFile);
+    expect(prompt).toContain("unexpected files");
+  });
+
+  it("includes notes-based path check when spec has notes", () => {
+    const prompt = eAgentPrompt(10, specWithNotes, doneFile);
+    expect(prompt).toContain("Do not touch the OAuth flow.");
+    expect(prompt).toContain("grep the diff stat output for those paths");
+    expect(prompt).toContain("reject sign-off if any are present");
+  });
+
+  it("does NOT include notes path check when spec has no notes", () => {
+    const prompt = eAgentPrompt(10, specNoNotes, doneFile);
+    expect(prompt).not.toContain("grep the diff stat output for those paths");
+  });
+});

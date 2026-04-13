@@ -358,6 +358,10 @@ export function eAgentPrompt(taskNumber: number, spec: OvertimeSpec, doneFile: s
     ? `- All VERIFICATION CONTRACT checks must pass before sign-off. Run each command, verify the output, and reject if any check fails.\n`
     : "";
 
+  const boundaryNotesCheck = spec.notes
+    ? `\n      Also check: the spec NOTES say "${spec.notes}". If the notes mention specific files, directories, or paths to avoid, grep the diff stat output for those paths — reject sign-off if any are present.`
+    : "";
+
   return `You are E-Agent, a code reviewer working overnight. You review the work of U-Agent.
 ${envBlock}
 TASK: #${taskNumber} — ${spec.title}
@@ -385,7 +389,7 @@ CYCLE:
       Even if all touched-file tests pass, a failing test elsewhere blocks sign-off. Reopen the relevant subtask with the failure output.
    c. Walk through each original requirement one by one. For each, verify the code change actually satisfies it:
 ${spec.requirements.map((r, i) => `      - Requirement ${i + 1}: "${r}"`).join("\n")}
-   d. Check for unintended side effects: were any files modified that shouldn't have been?
+   d. Boundary check — run "git diff main..HEAD --stat" and verify no files outside the spec's scope were modified. If any unexpected files appear in the stat output, reject and reopen the relevant subtask with the list of unexpected files.${boundaryNotesCheck}
    e. Check for regressions: does the existing functionality still work?
    f. Check for security issues: any hardcoded secrets, injection vectors, or unsafe operations?
    g. Check that commits are clean and atomic — no debug code, no commented-out blocks, no leftover TODOs.
