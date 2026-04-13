@@ -227,7 +227,31 @@ async function silentRefresh(cache: AuthCache): Promise<AuthCache | null> {
       debugLog(`silentRefresh: acquireTokenSilent succeeded idToken=${!!result?.idToken} accessToken=${!!result?.accessToken}`);
     } catch (err) {
       debugLog(`silentRefresh: acquireTokenSilent threw: ${err instanceof Error ? err.message : String(err)}`);
-      return null;
+
+      // If the MSAL cache exists and contains a refresh token (90-day lifetime),
+      // try again with forceRefresh: true to bypass the stale in-memory cache
+      // and force a network refresh using the stored refresh token.
+      let hasRefreshToken = false;
+      if (cacheExists) {
+        try {
+          const cacheData = JSON.parse(await cacheFile.text());
+          hasRefreshToken =
+            typeof cacheData.RefreshToken === "object" &&
+            cacheData.RefreshToken !== null &&
+            Object.keys(cacheData.RefreshToken).length > 0;
+        } catch {}
+      }
+      debugLog(`silentRefresh: MSAL cache hasRefreshToken=${hasRefreshToken}`);
+
+      if (!hasRefreshToken) return null;
+
+      try {
+        result = await client.acquireTokenSilent({ scopes: SCOPES, account, forceRefresh: true });
+        debugLog(`silentRefresh: acquireTokenSilent(forceRefresh) succeeded idToken=${!!result?.idToken} accessToken=${!!result?.accessToken}`);
+      } catch (err2) {
+        debugLog(`silentRefresh: acquireTokenSilent(forceRefresh) threw: ${err2 instanceof Error ? err2.message : String(err2)}`);
+        return null;
+      }
     }
 
     if (!result) {
