@@ -22,6 +22,8 @@ interface OvertimeSpec {
 interface OvertimeSession {
   uPid: number;
   ePid: number;
+  uAgentId: string;
+  eAgentId: string;
   taskNumber: number;
   worktree: string;
   startedAt: string;
@@ -610,6 +612,8 @@ async function startOvertime(fileFilter?: string) {
     pids[spec.slug] = {
       uPid: uProc.pid!,
       ePid: eProc.pid!,
+      uAgentId: `u-agent:${spec.slug}`,
+      eAgentId: `e-agent:${spec.slug}`,
       taskNumber: parentTaskNumber,
       worktree,
       startedAt: new Date().toISOString(),
