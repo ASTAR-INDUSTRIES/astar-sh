@@ -106,9 +106,15 @@ The `overtime:` line sets the work type. Currently just metadata, but useful for
 astar overtime start              # start all specs in .astar/overtime/
 astar overtime start --file auth  # start only auth.md
 astar overtime status             # check what's running and progress
+astar overtime status --verbose   # + last cycle cost/turns/model
 astar overtime recap              # morning summary with full activity
 astar overtime stop               # kill running agents
 astar overtime stop --clean       # kill + remove git worktrees
+astar overtime stats              # compare all runs: cost, subtasks, rejections
+astar overtime stats <id>         # per-cycle breakdown for one run
+astar overtime stats <id> --cycles  # tokens in/out split per cycle
+astar overtime dashboard          # aggregate spend, efficiency, 7-day trend
+astar overtime guide              # best practices for writing specs
 ```
 
 ## How it works internally
