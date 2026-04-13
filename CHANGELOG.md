@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 ## [Unreleased]
 
 ### Added
+- `astar overtime monitor` — shows a one-line log tail per session below the progress bar: the last human-readable (non-JSON) line from `.astar/overtime/logs/<slug>.log`, truncated to terminal width
 - `astar overtime monitor` — live full-screen dashboard showing all active sessions with slug, task number, subtask progress bar (✓/▸/○), state, uptime, and cost parsed from log files; refreshes every 5 seconds
 - `astar overtime status --verbose` — shows last cycle's cost, turns used, and model for each running session alongside existing progress/state/uptime
 - `overtime` E-Agent now explicitly rejects placeholder/stub returns, workaround code, import hacks, and mock-heavy test patches that mask real failures — reopens the subtask with "This routes around the problem instead of fixing it"

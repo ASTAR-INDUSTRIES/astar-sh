@@ -1153,6 +1153,26 @@ async function extractCostFromLog(slug: string): Promise<number | null> {
   return null;
 }
 
+async function extractLogTail(slug: string): Promise<string | null> {
+  const logPath = join(LOGS_DIR, `${slug}.log`);
+  try {
+    const file = Bun.file(logPath);
+    if (!(await file.exists())) return null;
+    const text = await file.text();
+    const lines = text.split("\n").filter(Boolean).reverse();
+    for (const line of lines) {
+      // Skip JSON lines (agent telemetry)
+      try {
+        JSON.parse(line);
+        continue;
+      } catch {}
+      const trimmed = line.trim();
+      if (trimmed.length > 0) return trimmed;
+    }
+  } catch {}
+  return null;
+}
+
 async function renderOvertimeMonitor(api: AstarAPI): Promise<void> {
   const pids = await readPidFile();
   const slugs = Object.keys(pids);
@@ -1191,7 +1211,10 @@ async function renderOvertimeMonitor(api: AstarAPI): Promise<void> {
     const uptime =
       elapsed < 60 ? `${elapsed}m` : `${Math.floor(elapsed / 60)}h ${elapsed % 60}m`;
 
-    const cost = await extractCostFromLog(slug);
+    const [cost, logTail] = await Promise.all([
+      extractCostFromLog(slug),
+      extractLogTail(slug),
+    ]);
     const costStr = cost != null ? fmtCost(cost) : `${c.dim}—${c.reset}`;
 
     // Header line: slug, task, state, uptime, cost
@@ -1212,6 +1235,13 @@ async function renderOvertimeMonitor(api: AstarAPI): Promise<void> {
       process.stdout.write(`  ${bar}  ${c.dim}${done}/${subtasks.length}${c.reset}\n`);
     } catch {
       process.stdout.write(`  ${c.dim}subtasks unavailable${c.reset}\n`);
+    }
+
+    // Log tail
+    if (logTail) {
+      const maxLen = (process.stdout.columns || 80) - 4;
+      const truncated = logTail.length > maxLen ? logTail.slice(0, maxLen - 1) + "…" : logTail;
+      process.stdout.write(`  ${c.dim}${truncated}${c.reset}\n`);
     }
 
     process.stdout.write("\n");
