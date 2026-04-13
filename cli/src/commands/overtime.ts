@@ -981,7 +981,7 @@ function statusColor(status: string): string {
   return c.dim + status + c.reset;
 }
 
-async function showStats(runId?: string) {
+async function showStats(runId?: string, opts: { cycles?: boolean } = {}) {
   const token = await requireAuth();
   const api = new AstarAPI(token);
 
@@ -1095,30 +1095,54 @@ async function showStats(runId?: string) {
     console.log("");
     console.log(`  ${c.bold}${c.white}Cycles${c.reset}`);
     console.log("");
-    table(
-      ["#", "Agent", "Subtask", "Action", "Turns", "Tokens", "Cost", "Duration"],
-      cycles.map((cy) => {
-        const cyDur =
-          cy.completed_at
-            ? fmtDuration(new Date(cy.completed_at).getTime() - new Date(cy.started_at).getTime())
-            : "—";
-        const tokens =
-          cy.tokens_in != null || cy.tokens_out != null
-            ? `${(cy.tokens_in ?? 0) + (cy.tokens_out ?? 0)}`
-            : "—";
-        const agentColor = cy.agent === "u" ? c.cyan : c.magenta;
-        return [
-          `${c.dim}${cy.cycle_number}${c.reset}`,
-          `${agentColor}${cy.agent}${c.reset}`,
-          cy.subtask_number != null ? `#${cy.subtask_number}` : `${c.dim}—${c.reset}`,
-          cy.action_taken ? `${c.dim}${cy.action_taken}${c.reset}` : `${c.dim}—${c.reset}`,
-          cy.turns_used != null ? `${cy.turns_used}/${cy.max_turns ?? "?"}` : `${c.dim}—${c.reset}`,
-          `${c.dim}${tokens}${c.reset}`,
-          cy.cost_usd != null ? `$${cy.cost_usd.toFixed(4)}` : `${c.dim}—${c.reset}`,
-          `${c.dim}${cyDur}${c.reset}`,
-        ];
-      })
-    );
+    if (opts.cycles) {
+      // Full per-cycle breakdown: tokens in/out split
+      table(
+        ["#", "Agent", "Turns", "Tokens In", "Tokens Out", "Cost", "Action", "Duration"],
+        cycles.map((cy) => {
+          const cyDur =
+            cy.completed_at
+              ? fmtDuration(new Date(cy.completed_at).getTime() - new Date(cy.started_at).getTime())
+              : "—";
+          const agentColor = cy.agent === "u" ? c.cyan : c.magenta;
+          return [
+            `${c.dim}${cy.cycle_number}${c.reset}`,
+            `${agentColor}${cy.agent}${c.reset}`,
+            cy.turns_used != null ? `${cy.turns_used}/${cy.max_turns ?? "?"}` : `${c.dim}—${c.reset}`,
+            cy.tokens_in != null ? `${c.dim}${cy.tokens_in.toLocaleString()}${c.reset}` : `${c.dim}—${c.reset}`,
+            cy.tokens_out != null ? `${c.dim}${cy.tokens_out.toLocaleString()}${c.reset}` : `${c.dim}—${c.reset}`,
+            cy.cost_usd != null ? `${c.bold}$${cy.cost_usd.toFixed(4)}${c.reset}` : `${c.dim}—${c.reset}`,
+            cy.action_taken ? `${c.dim}${cy.action_taken}${c.reset}` : `${c.dim}—${c.reset}`,
+            `${c.dim}${cyDur}${c.reset}`,
+          ];
+        })
+      );
+    } else {
+      table(
+        ["#", "Agent", "Subtask", "Action", "Turns", "Tokens", "Cost", "Duration"],
+        cycles.map((cy) => {
+          const cyDur =
+            cy.completed_at
+              ? fmtDuration(new Date(cy.completed_at).getTime() - new Date(cy.started_at).getTime())
+              : "—";
+          const tokens =
+            cy.tokens_in != null || cy.tokens_out != null
+              ? `${(cy.tokens_in ?? 0) + (cy.tokens_out ?? 0)}`
+              : "—";
+          const agentColor = cy.agent === "u" ? c.cyan : c.magenta;
+          return [
+            `${c.dim}${cy.cycle_number}${c.reset}`,
+            `${agentColor}${cy.agent}${c.reset}`,
+            cy.subtask_number != null ? `#${cy.subtask_number}` : `${c.dim}—${c.reset}`,
+            cy.action_taken ? `${c.dim}${cy.action_taken}${c.reset}` : `${c.dim}—${c.reset}`,
+            cy.turns_used != null ? `${cy.turns_used}/${cy.max_turns ?? "?"}` : `${c.dim}—${c.reset}`,
+            `${c.dim}${tokens}${c.reset}`,
+            cy.cost_usd != null ? `$${cy.cost_usd.toFixed(4)}` : `${c.dim}—${c.reset}`,
+            `${c.dim}${cyDur}${c.reset}`,
+          ];
+        })
+      );
+    }
   }
 
   if (run.git_commits?.length) {
@@ -1132,6 +1156,9 @@ async function showStats(runId?: string) {
     }
   }
 
+  if (!opts.cycles && cycles.length) {
+    console.log(`  ${c.dim}Use --cycles for tokens in/out split: astar overtime stats ${runId} --cycles${c.reset}`);
+  }
   console.log("");
 }
 
@@ -1312,6 +1339,7 @@ function showGuide() {
     ${cy}astar overtime stop --clean${r}        kill + remove worktrees
     ${cy}astar overtime stats${r}                cost, cycles, tokens across all runs
     ${cy}astar overtime stats <id>${r}           per-cycle breakdown for a specific run
+    ${cy}astar overtime stats <id> --cycles${r}  full breakdown: tokens in/out split per cycle
     ${cy}astar overtime dashboard${r}            aggregate spend, efficiency, 7-day trend
     ${cy}astar overtime guide${r}               this guide
 
@@ -1380,8 +1408,9 @@ export function registerOvertimeCommands(program: Command) {
   overtime
     .command("stats [run-id]")
     .description("Show telemetry for overtime runs — list all or detail for a specific run")
-    .action(async (runId?: string) => {
-      await showStats(runId);
+    .option("--cycles", "Show full per-cycle breakdown with tokens in/out split (requires run-id)")
+    .action(async (runId: string | undefined, opts: { cycles?: boolean }) => {
+      await showStats(runId, opts);
     });
 
   overtime
