@@ -856,6 +856,80 @@ async function showRecap() {
   console.log("");
 }
 
+// Core stop logic shared by the CLI command and the monitor [s] keybinding.
+// Kills PIDs, finalizes telemetry, removes the slug from `pids`, and writes the
+// pid file.  Produces no console output — callers add their own UI.
+async function stopSingleSessionCore(
+  slug: string,
+  pids: PidFile,
+  api?: AstarAPI
+): Promise<void> {
+  const s = pids[slug];
+  if (!s) return;
+
+  let killed = false;
+  for (const pid of [s.uPid, s.ePid]) {
+    if (isAlive(pid)) {
+      try {
+        process.kill(pid, "SIGTERM");
+        killed = true;
+      } catch {}
+    }
+  }
+
+  if (killed) {
+    await new Promise((r) => setTimeout(r, 2000));
+    for (const pid of [s.uPid, s.ePid]) {
+      if (isAlive(pid)) {
+        try { process.kill(pid, "SIGKILL"); } catch {}
+      }
+    }
+  }
+
+  // Finalize the run record in telemetry (best-effort)
+  if (s.runId && api) {
+    try {
+      const isDone = existsSync(join(OVERTIME_DIR, `.done-${slug}`));
+      const finalStatus = isDone ? "done" : "stopped";
+
+      let gitCommits: string[] = [];
+      try {
+        const worktreeDir = s.worktree || process.cwd();
+        const log = execSync(
+          `git -C "${worktreeDir}" log --format="%H" main..HEAD 2>/dev/null`,
+          { stdio: "pipe" }
+        ).toString().trim();
+        if (log) gitCommits = log.split("\n").filter(Boolean);
+      } catch {}
+
+      let totalCyclesU = 0;
+      let totalCyclesE = 0;
+      let totalCostUsd: number | null = null;
+      try {
+        const cycles = await api.listOvertimeCycles(s.runId);
+        totalCyclesU = cycles.filter((cyc) => cyc.agent === "u").length;
+        totalCyclesE = cycles.filter((cyc) => cyc.agent === "e").length;
+        const costs = cycles
+          .map((cyc) => cyc.cost_usd)
+          .filter((v): v is number => v !== null && v !== undefined);
+        if (costs.length) totalCostUsd = costs.reduce((a, b) => a + b, 0);
+      } catch {}
+
+      await api.updateOvertimeRun(s.runId, {
+        status: finalStatus,
+        completed_at: new Date().toISOString(),
+        total_cycles_u: totalCyclesU,
+        total_cycles_e: totalCyclesE,
+        total_cost_usd: totalCostUsd,
+        git_commits: gitCommits,
+      });
+    } catch {}
+  }
+
+  delete pids[slug];
+  await writePidFile(pids);
+}
+
 async function stopOvertime(targetSlug: string | undefined, opts: { clean?: boolean }) {
   const pids = await readPidFile();
   const allSlugs = Object.keys(pids);
@@ -873,10 +947,9 @@ async function stopOvertime(targetSlug: string | undefined, opts: { clean?: bool
 
   const slugs = targetSlug !== undefined ? [targetSlug] : allSlugs;
 
-  let token: string | undefined;
   let api: AstarAPI | undefined;
   try {
-    token = await getToken();
+    const token = await getToken();
     api = new AstarAPI(token);
   } catch {}
 
@@ -884,85 +957,21 @@ async function stopOvertime(targetSlug: string | undefined, opts: { clean?: bool
 
   for (const slug of slugs) {
     const s = pids[slug];
-    let killed = false;
+    const worktree = s.worktree;
+    const taskNumber = s.taskNumber;
 
-    for (const pid of [s.uPid, s.ePid]) {
-      if (isAlive(pid)) {
-        try {
-          process.kill(pid, "SIGTERM");
-          killed = true;
-        } catch {}
-      }
-    }
+    await stopSingleSessionCore(slug, pids, api);
 
-    // Wait a moment then force kill if needed
-    if (killed) {
-      await new Promise((r) => setTimeout(r, 2000));
-      for (const pid of [s.uPid, s.ePid]) {
-        if (isAlive(pid)) {
-          try { process.kill(pid, "SIGKILL"); } catch {}
-        }
-      }
-    }
+    console.log(`  ${c.green}✓${c.reset} Stopped ${c.white}${slug}${c.reset} (task #${taskNumber})`);
 
-    console.log(`  ${c.green}✓${c.reset} Stopped ${c.white}${slug}${c.reset} (task #${s.taskNumber})`);
-
-    // Finalize the run record in telemetry
-    if (s.runId && api) {
+    if (opts.clean && worktree) {
       try {
-        const isDone = existsSync(join(OVERTIME_DIR, `.done-${slug}`));
-        const finalStatus = isDone ? "done" : "stopped";
-
-        // Collect commits on the branch since main
-        let gitCommits: string[] = [];
-        try {
-          const worktreeDir = s.worktree || process.cwd();
-          const log = execSync(
-            `git -C "${worktreeDir}" log --format="%H" main..HEAD 2>/dev/null`,
-            { stdio: "pipe" }
-          ).toString().trim();
-          if (log) gitCommits = log.split("\n").filter(Boolean);
-        } catch {}
-
-        // Aggregate cycle stats from stored cycle records
-        let totalCyclesU = 0;
-        let totalCyclesE = 0;
-        let totalCostUsd: number | null = null;
-        try {
-          const cycles = await api.listOvertimeCycles(s.runId);
-          totalCyclesU = cycles.filter((cyc) => cyc.agent === "u").length;
-          totalCyclesE = cycles.filter((cyc) => cyc.agent === "e").length;
-          const costs = cycles
-            .map((cyc) => cyc.cost_usd)
-            .filter((v): v is number => v !== null && v !== undefined);
-          if (costs.length) totalCostUsd = costs.reduce((a, b) => a + b, 0);
-        } catch {}
-
-        await api.updateOvertimeRun(s.runId, {
-          status: finalStatus,
-          completed_at: new Date().toISOString(),
-          total_cycles_u: totalCyclesU,
-          total_cycles_e: totalCyclesE,
-          total_cost_usd: totalCostUsd,
-          git_commits: gitCommits,
-        });
-        console.log(`    ${c.dim}Run record finalized (${finalStatus}, ${totalCyclesU + totalCyclesE} cycles)${c.reset}`);
-      } catch (e: any) {
-        console.log(`    ${c.dim}(telemetry update skipped: ${e.message})${c.reset}`);
-      }
-    }
-
-    if (opts.clean && s.worktree) {
-      try {
-        execSync(`git worktree remove "${s.worktree}" --force`, { stdio: "pipe" });
+        execSync(`git worktree remove "${worktree}" --force`, { stdio: "pipe" });
         console.log(`    ${c.dim}Removed worktree${c.reset}`);
       } catch {}
     }
-
-    delete pids[slug];
   }
 
-  await writePidFile(pids);
   console.log("");
 }
 
@@ -1181,7 +1190,16 @@ async function extractLogTail(slug: string): Promise<string | null> {
   return null;
 }
 
-async function renderOvertimeMonitor(api: AstarAPI): Promise<void> {
+interface MonitorPromptState {
+  mode: "none" | "stop";
+  buffer: string;
+  message: string; // last status message shown after an action
+}
+
+async function renderOvertimeMonitor(
+  api: AstarAPI,
+  promptState: MonitorPromptState
+): Promise<void> {
   const pids = await readPidFile();
   const slugs = Object.keys(pids);
   const cols = process.stdout.columns || 80;
@@ -1198,7 +1216,7 @@ async function renderOvertimeMonitor(api: AstarAPI): Promise<void> {
 
   if (!slugs.length) {
     process.stdout.write(`  ${c.dim}No overtime sessions.${c.reset}\n\n`);
-    process.stdout.write(`  ${c.dim}ctrl+c quit${c.reset}\n`);
+    process.stdout.write(`  ${c.dim}[q] quit${c.reset}\n`);
     return;
   }
 
@@ -1255,7 +1273,17 @@ async function renderOvertimeMonitor(api: AstarAPI): Promise<void> {
     process.stdout.write("\n");
   }
 
-  process.stdout.write(`  ${c.dim}[q] quit · refreshing every 5s${c.reset}\n`);
+  if (promptState.message) {
+    process.stdout.write(`  ${c.dim}${promptState.message}${c.reset}\n`);
+  }
+
+  if (promptState.mode === "stop") {
+    process.stdout.write(
+      `  ${c.white}stop session:${c.reset} ${promptState.buffer}${c.cyan}█${c.reset}  ${c.dim}[enter] confirm · [esc] cancel${c.reset}\n`
+    );
+  } else {
+    process.stdout.write(`  ${c.dim}[q] quit · [s] stop session · refreshing every 5s${c.reset}\n`);
+  }
 }
 
 async function monitorOvertime(): Promise<void> {
@@ -1273,6 +1301,7 @@ async function monitorOvertime(): Promise<void> {
   process.stdout.write("\x1b[?25l"); // hide cursor
 
   let interval: ReturnType<typeof setInterval>;
+  const promptState: MonitorPromptState = { mode: "none", buffer: "", message: "" };
 
   const cleanup = () => {
     clearInterval(interval);
@@ -1291,7 +1320,7 @@ async function monitorOvertime(): Promise<void> {
       api = new AstarAPI(token);
     } catch {}
     try {
-      await renderOvertimeMonitor(api);
+      await renderOvertimeMonitor(api, promptState);
     } catch {}
   };
 
@@ -1301,9 +1330,56 @@ async function monitorOvertime(): Promise<void> {
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(true);
     process.stdin.resume();
-    process.stdin.on("data", (key: Buffer) => {
-      if (key[0] === 0x03 || key[0] === 0x71) { // ctrl+c or q
+    process.stdin.on("data", async (key: Buffer) => {
+      const code = key[0];
+
+      if (promptState.mode === "stop") {
+        if (code === 0x0d || code === 0x0a) {
+          // Enter — attempt to stop the entered slug
+          const slug = promptState.buffer.trim();
+          promptState.mode = "none";
+          promptState.buffer = "";
+          if (slug) {
+            const pids = await readPidFile();
+            if (!pids[slug]) {
+              promptState.message = `✗ No session "${slug}"`;
+            } else {
+              let stopApi: AstarAPI | undefined;
+              try {
+                const t = await getToken();
+                stopApi = new AstarAPI(t);
+              } catch {}
+              await stopSingleSessionCore(slug, pids, stopApi);
+              promptState.message = `✓ Stopped ${slug}`;
+            }
+          }
+          await tick();
+        } else if (code === 0x1b) {
+          // Escape — cancel prompt
+          promptState.mode = "none";
+          promptState.buffer = "";
+          promptState.message = "";
+          await tick();
+        } else if (code === 0x7f) {
+          // Backspace
+          promptState.buffer = promptState.buffer.slice(0, -1);
+          await tick();
+        } else if (code >= 0x20 && code < 0x7f) {
+          // Printable ASCII
+          promptState.buffer += String.fromCharCode(code);
+          await tick();
+        }
+        return;
+      }
+
+      // Normal mode key handling
+      if (code === 0x03 || code === 0x71) { // ctrl+c or q
         cleanup();
+      } else if (code === 0x73) { // s
+        promptState.mode = "stop";
+        promptState.buffer = "";
+        promptState.message = "";
+        await tick();
       }
     });
   } else {
