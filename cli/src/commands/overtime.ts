@@ -602,7 +602,7 @@ async function startOvertime(fileFilter?: string) {
         parent_task_number: parentTaskNumber,
         worktree_path: worktree,
         branch_name: branchName,
-        project_id: spec.project ?? null,
+        project: spec.project ?? null,
       });
       runId = runResult.id;
     } catch (e: any) {

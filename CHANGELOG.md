@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 ## [Unreleased]
 
 ### Added
+- `overtime_runs` now stores a `project_id` FK — runs created from a spec with a `project:` field are linked to that project in the database
 - `astar overtime status --verbose` — shows last cycle's cost, turns used, and model for each running session alongside existing progress/state/uptime
 - `overtime` E-Agent now explicitly rejects placeholder/stub returns, workaround code, import hacks, and mock-heavy test patches that mask real failures — reopens the subtask with "This routes around the problem instead of fixing it"
 - `overtime` U-Agent now runs the full project test suite before each commit — checks ENVIRONMENT CONTEXT for an explicit test command, falls back to common runners (pytest, npm test, bun test, cargo test, go test ./...), and reports results in the task comment

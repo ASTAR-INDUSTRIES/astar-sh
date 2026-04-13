@@ -2826,6 +2826,14 @@ app.post("/overtime/runs", async (c) => {
   if (!body.spec_title) return c.json({ error: "spec_title is required" }, 400, corsHeaders);
 
   const sb = getSupabase();
+
+  let projectId: string | null = null;
+  if (body.project) {
+    const project = await resolveProjectRef(sb, body.project);
+    if (!project) return c.json({ error: `Project "${body.project}" not found` }, 404, corsHeaders);
+    projectId = project.id;
+  }
+
   const { data, error } = await sb.from("overtime_runs").insert({
     slug: body.slug,
     spec_title: body.spec_title,
@@ -2835,6 +2843,7 @@ app.post("/overtime/runs", async (c) => {
     model: body.model ?? null,
     worktree_path: body.worktree_path ?? null,
     branch_name: body.branch_name ?? null,
+    project_id: projectId,
     created_by: user.email,
   }).select("id").single();
 
@@ -2848,7 +2857,7 @@ app.post("/overtime/runs", async (c) => {
     entity_id: data?.id,
     action: "started",
     channel: "api",
-    state_after: { slug: body.slug, spec_title: body.spec_title, type: body.type || "dev" },
+    state_after: { slug: body.slug, spec_title: body.spec_title, type: body.type || "dev", project_id: projectId },
   });
 
   return c.json({ ok: true, id: data!.id }, 200, corsHeaders);
