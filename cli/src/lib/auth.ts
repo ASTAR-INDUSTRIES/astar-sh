@@ -5,6 +5,7 @@ import { getConfig, getAuthCache, saveAuthCache, clearAuthCache, paths, ensureAg
 import { c } from "./ui";
 
 const SCOPES = ["openid", "profile", "email"];
+const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000; // refresh 5 min before expiry
 
 function debugLog(msg: string) {
   if (process.env.ASTAR_DEBUG === "1") {
@@ -195,7 +196,7 @@ export async function getToken(opts?: { interactive?: boolean }): Promise<string
   const cache = await getAuthCache();
   if (!cache) throw new Error("Not authenticated. Run 'astar login' first.");
 
-  if (cache.expiresAt > Date.now()) return cache.accessToken;
+  if (cache.expiresAt > Date.now() + TOKEN_EXPIRY_BUFFER_MS) return cache.accessToken;
 
   // Token expired — try silent refresh first
   const refreshed = await silentRefresh(cache);
