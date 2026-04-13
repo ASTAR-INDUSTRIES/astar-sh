@@ -177,6 +177,180 @@ function truncateStr(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }
 
+// ── Guide ───────────────────────────────────────────────────────────
+
+function showGuide() {
+  const d = c.dim;
+  const w = c.white;
+  const cy = c.cyan;
+  const y = c.yellow;
+  const r = c.reset;
+  const b = c.bold;
+  const m = c.magenta;
+
+  console.log(`
+  ${b}${w}ASTAR AGENT — GUIDE${r}
+
+  Agents are non-human employees: registered identities with Microsoft
+  accounts, declared scopes, and launchd-driven heartbeats. They read
+  their inbox, act on tasks, and log everything to the audit trail.
+
+  ${b}${w}DATA MODEL${r}
+
+    ${b}agents${r} table
+      ${cy}id${r}          uuid          Primary key
+      ${cy}slug${r}        text          Unique identifier (used in CLI and MCP)
+      ${cy}name${r}        text          Display name
+      ${cy}email${r}       text          Agent's Microsoft account email
+      ${cy}role${r}        text          Description of agent's function
+      ${cy}owner${r}       text          Email of the human responsible
+      ${cy}skill_slug${r}  text          FK → skills (the Claude skill this agent runs)
+      ${cy}scopes${r}      text[]        Array of allowed MCP scopes
+      ${cy}status${r}      text          active | paused | retired
+      ${cy}machine${r}     text          Hostname where heartbeat runs
+      ${cy}config${r}      jsonb         Runtime configuration (e.g. heartbeat_seconds)
+      ${cy}last_seen${r}   timestamptz   Last successful heartbeat
+      ${cy}created_at${r}  timestamptz
+
+  ${b}${w}LIFECYCLE${r}
+
+    ${d}—${r} → ${cy}active${r} → ${y}paused${r} → ${cy}active${r} → ${d}retired${r}
+
+    ${cy}astar agent hire <slug>${r}     One-command onboarding (see below)
+    ${cy}astar agent pause <slug>${r}    Suspends heartbeat
+    ${cy}astar agent resume <slug>${r}   Re-enables heartbeat
+    ${cy}astar agent retire <slug>${r}   Permanent decommission
+
+  ${b}${w}HIRE — WHAT HAPPENS${r}
+
+    ${cy}astar agent hire <slug>${r} is fully automated:
+
+      1. Registers agent in DB (slug, name, email, skill, scopes, machine, owner)
+      2. Creates workstation at ${cy}~/.astar/agents/<slug>/${r}
+      3. Authenticates agent's Microsoft account (interactive browser flow)
+      4. Generates ${cy}MEMORY.md${r} with initial state block
+      5. Creates ${cy}run.sh${r} heartbeat script with circuit breaker
+      6. Installs launchd plist at
+         ${cy}~/Library/LaunchAgents/com.astar.agent.<slug>.plist${r}
+
+  ${b}${w}WORKSTATION DIRECTORY${r}
+
+    ${cy}~/.astar/agents/<slug>/${r}
+      ${d}auth.json${r}           Agent's Microsoft token (MSAL)
+      ${d}msal-cache.json${r}     Token cache for silent refresh
+      ${d}MEMORY.md${r}           Agent state — readable and writable by the agent
+      ${d}run.sh${r}              Heartbeat executable
+      ${d}beat.log${r}            stdout from each heartbeat
+      ${d}beat.err${r}            stderr from each heartbeat
+      ${d}.beats_YYYYMMDD${r}     Daily beat counter (circuit breaker)
+
+  ${b}${w}HEARTBEAT CYCLE${r}
+
+    launchd fires ${cy}run.sh${r} every N seconds (default 30):
+
+      1. Increment daily beat counter
+      2. Check circuit breaker — abort if over daily limit (default 100)
+      3. Invoke Claude with agent's skill, allowed tools, max 20 turns
+      4. Claude reads inbox → acts → updates MEMORY.md
+      5. All mutations logged to audit trail
+
+    ${cy}astar agent start <slug>${r}   Load plist (begin heartbeating)
+    ${cy}astar agent stop <slug>${r}    Unload plist (pause without status change)
+    ${cy}astar agent logs <slug>${r}    Show recent audit events for this agent
+
+  ${b}${w}SCOPES${r}
+
+    Scopes gate which MCP tools an agent can call. Undeclared tool calls
+    are denied and logged to audit with action ${y}scope_denied${r}.
+
+    ${cy}inbox.read${r}       read_inbox, list_inbox
+    ${cy}inbox.write${r}      ask_agent
+    ${cy}inbox.respond${r}    respond_inbox
+    ${cy}task.create${r}      create_task
+    ${cy}task.read${r}        list_tasks, get_task, get_velocity, suggest_next_task
+    ${cy}task.write${r}       update_task, complete_task, comment_task, link_task
+    ${cy}audit.read${r}       query_audit
+    ${cy}news.create${r}      create_news
+    ${cy}news.read${r}        list_news
+    ${cy}news.write${r}       update_news, delete_news
+    ${cy}tweet.post${r}       post_tweet
+    ${cy}tweet.read${r}       list_tweets
+    ${cy}skill.read${r}       list_skills, get_skill
+    ${cy}feedback.read${r}    list_feedback
+    ${cy}feedback.write${r}   submit_feedback
+    ${cy}agent.read${r}       list_agents, get_agent
+    ${cy}project.create${r}   create_project
+    ${cy}project.read${r}     list_projects, get_project
+    ${cy}project.write${r}    update_project
+    ${cy}milestone.create${r} create_milestone
+    ${cy}milestone.read${r}   list_milestones
+
+  ${b}${w}REGISTERED AGENTS vs OVERTIME AGENTS${r}
+
+    ${b}Registered agents${r}               ${b}Overtime agents (U-Agent / E-Agent)${r}
+    Persisted in DB                     Ephemeral — not in agents table
+    launchd heartbeat loop              Spawned once per spec, then exit
+    Microsoft account required          Inherit the human's auth token
+    Declared scopes                     Full MCP access (runs as human)
+    Read inbox → act autonomously       Work a task queue; communicate
+                                        via task comments only
+
+  ${b}${w}MCP TOOLS (for agents)${r}
+
+    ${m}list_agents${r}         List all registered agents (scope: agent.read)
+    ${m}get_agent${r}           Full agent detail + recent activity (scope: agent.read)
+    ${m}register_agent${r}      Register a new agent (admin only)
+    ${m}list_inbox${r}          List inbox messages (scope: inbox.read)
+    ${m}read_inbox${r}          Read a specific inbox thread (scope: inbox.read)
+    ${m}respond_inbox${r}       Reply to an inbox message (scope: inbox.respond)
+    ${m}ask_agent${r}           Send a message to another agent's inbox (scope: inbox.write)
+
+  ${b}${w}CLI COMMANDS${r}
+
+    ${cy}astar agent${r}                            Live monitor dashboard
+    ${cy}astar agent list${r}                       List all agents
+    ${cy}astar agent info <slug>${r}                Detail + recent activity
+    ${cy}astar agent hire <slug>${r}                Full onboarding
+    ${cy}astar agent register${r}                   Manual registration (no auth/workstation)
+    ${cy}astar agent login <slug>${r}               Re-authenticate Microsoft account
+    ${cy}astar agent pause <slug>${r}               Suspend heartbeat
+    ${cy}astar agent resume <slug>${r}              Resume heartbeat
+    ${cy}astar agent retire <slug>${r}              Decommission permanently
+    ${cy}astar agent start <slug>${r}               Load launchd plist
+    ${cy}astar agent stop <slug>${r}                Unload launchd plist
+    ${cy}astar agent logs <slug>${r}                Show audit trail
+    ${cy}astar agent guide${r}                      This guide
+
+  ${b}${w}GOTCHAS${r}
+
+    ${y}Scopes are enforced at the MCP layer, not the DB layer.${r}
+    An agent with broad scopes in the DB is still blocked if the skill
+    doesn't declare those tools. Set scopes conservatively.
+
+    ${y}Circuit breaker is per-day.${r} The counter resets at midnight (local time
+    of the machine). If an agent hits the limit mid-day, it stops until
+    midnight — no manual reset needed, just wait.
+
+    ${y}MEMORY.md is the agent's only persistent state.${r} It is not synced
+    anywhere. If the workstation is wiped, the agent loses its memory.
+    Agents should write durable facts to MEMORY.md each cycle.
+
+    ${y}Microsoft auth tokens expire.${r} Silent refresh via MSAL works most
+    of the time, but if auth.json is stale, the heartbeat will fail.
+    Run ${cy}astar agent login <slug>${r} to re-authenticate interactively.
+
+    ${y}Retiring is permanent.${r} Status transitions to ${d}retired${r} cannot be
+    reversed via CLI. To reuse a slug, retire and re-hire.
+
+  ${b}${w}SEE ALSO${r}
+
+    ${cy}astar guide${r}            full system ontology
+    ${cy}astar todo guide${r}       task system — data model, statuses, subtasks
+    ${cy}astar overtime guide${r}   overnight automation — specs, U/E-Agent
+    ${cy}astar audit guide${r}      audit trail — scope_denied events and more
+  `);
+}
+
 export function registerAgentCommands(program: Command) {
   const agent = program
     .command("agent")
@@ -592,6 +766,11 @@ claude -p "You are ${opts.name} running in heartbeat mode (beat $((BEATS + 1))/$
         console.log(`${c.dim}Not running${c.reset}`);
       }
     });
+
+  agent
+    .command("guide")
+    .description("Agent system documentation — registry, scopes, heartbeat, auth, MCP tools")
+    .action(showGuide);
 }
 
 function scopesToTools(scopes: string[]): string {
