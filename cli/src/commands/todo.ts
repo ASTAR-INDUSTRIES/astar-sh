@@ -28,6 +28,10 @@ function parseNum(s: string): number {
   return parseInt(s.replace("#", ""));
 }
 
+function isAgentId(id: string | null | undefined): boolean {
+  return typeof id === "string" && (id.startsWith("u-agent:") || id.startsWith("e-agent:"));
+}
+
 const statusColors: Record<string, string> = {
   open: c.white,
   in_progress: c.yellow,
@@ -96,14 +100,17 @@ let lastOpenTasks: Task[] = [];
 let lastCompletedTasks: Task[] = [];
 let monitorError = "";
 
-async function renderMonitor(api: AstarAPI, opts: { mineOnly?: boolean; myEmail?: string; event?: string; project?: string } = {}) {
+async function renderMonitor(api: AstarAPI, opts: { mineOnly?: boolean; myEmail?: string; event?: string; project?: string; allTasks?: boolean } = {}) {
   try {
     const [open, done] = await Promise.all([
       api.listTasks({ assigned_to: opts.mineOnly ? undefined : "all", event: opts.event, project: opts.project, include_subtasks: true }),
       api.listTasks({ assigned_to: opts.mineOnly ? undefined : "all", event: opts.event, project: opts.project, status: "completed" }),
     ]);
-    lastOpenTasks = open;
-    lastCompletedTasks = done;
+    // When showing only the user's own tasks, hide overtime agent tasks by default
+    // (tasks assigned to u-agent:* or e-agent:*). Use --all to include them.
+    const filterAgents = opts.mineOnly && !opts.allTasks;
+    lastOpenTasks = filterAgents ? open.filter((t) => !isAgentId(t.assigned_to)) : open;
+    lastCompletedTasks = filterAgents ? done.filter((t) => !isAgentId(t.assigned_to)) : done;
     monitorError = "";
   } catch (e: any) {
     const code = e.code || "";
@@ -387,6 +394,7 @@ export function registerTodoCommands(program: Command) {
     .option("--event <slug>", "Filter to a single event")
     .option("--project <slug>", "Filter to a single project")
     .option("--monitor", "Live-updating view of your tasks")
+    .option("--all", "Include overtime agent tasks (u-agent:*, e-agent:*)")
     .action(async (opts) => {
       if (opts.monitor) {
         const authStatus = await getAuthStatus();
@@ -396,7 +404,7 @@ export function registerTodoCommands(program: Command) {
           return new AstarAPI(token);
         }
         async function tick() {
-          try { const api = await freshApi(); await renderMonitor(api, { mineOnly: true, myEmail, event: opts.event, project: opts.project }); } catch { /* token dead, renderMonitor handles display */ }
+          try { const api = await freshApi(); await renderMonitor(api, { mineOnly: true, myEmail, event: opts.event, project: opts.project, allTasks: opts.all }); } catch { /* token dead, renderMonitor handles display */ }
         }
         await tick();
         const interval = setInterval(tick, 10000);
@@ -417,7 +425,9 @@ export function registerTodoCommands(program: Command) {
       const api = new AstarAPI(token);
       try {
         const tasks = await api.listTasks({ status: "open", event: opts.event, project: opts.project, include_subtasks: true });
-        renderTaskTable(tasks);
+        // Hide overtime agent tasks by default; show them only with --all
+        const filtered = opts.all ? tasks : tasks.filter((t) => !isAgentId(t.assigned_to));
+        renderTaskTable(filtered);
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} ${e.message}`);
         process.exit(1);
