@@ -244,7 +244,8 @@ function canAccessEvent(event: any, user: AuthUser, project?: any | null): boole
 
 function canAccessTask(task: any, user: AuthUser, project?: any | null): boolean {
   if (!task) return false;
-  const isOwner = task.created_by === user.email || task.assigned_to === user.email;
+  const callerEmail = user.email.toLowerCase();
+  const isOwner = task.created_by?.toLowerCase() === callerEmail || task.assigned_to?.toLowerCase() === callerEmail;
   if (task.visibility === "private") return isOwner;
   if (isOwner) return true;
   if (project) return canAccessProject(project, user);
@@ -1672,7 +1673,13 @@ app.get("/tasks", async (c) => {
   const sb = getSupabase();
   let filterProject: any = null;
   let filterEvent: any = null;
+  const callerEmail = user.email.toLowerCase();
   let query = sb.from("tasks").select("*").is("archived_at", null).order("created_at", { ascending: false }).limit(fetchLimit);
+
+  // Server-side visibility enforcement: private tasks are only returned if the
+  // caller is the creator or assignee. This runs at the DB level so private
+  // tasks never enter the application layer for non-owners.
+  query = query.or(`visibility.neq.private,created_by.eq.${callerEmail},assigned_to.eq.${callerEmail}`);
 
   if (triage === "true") {
     query = query.eq("requires_triage", true);
@@ -1736,7 +1743,7 @@ app.get("/tasks", async (c) => {
   const includeSubtasks = c.req.query("include_subtasks") === "true";
   if (includeSubtasks && tasks.length && !parent) {
     const parentIds = tasks.map((t: any) => t.id);
-    const { data: subs } = await sb.from("tasks").select("*").in("parent_task_id", parentIds).is("archived_at", null).order("task_number", { ascending: true });
+    const { data: subs } = await sb.from("tasks").select("*").in("parent_task_id", parentIds).is("archived_at", null).or(`visibility.neq.private,created_by.eq.${callerEmail},assigned_to.eq.${callerEmail}`).order("task_number", { ascending: true });
     if (subs?.length) {
       const subsByParent: Record<string, any[]> = {};
       for (const subtask of subs) (subsByParent[subtask.parent_task_id] ||= []).push(subtask);
