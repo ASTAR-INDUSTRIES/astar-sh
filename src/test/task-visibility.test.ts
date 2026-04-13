@@ -225,6 +225,65 @@ describe("GET /tasks/:number — response codes (subtask #179)", () => {
   });
 });
 
+// ── MCP list_tasks — include_all rejection (subtask #180) ───────────────────
+//
+// Mirrors the guard in supabase/functions/mcp-server/index.ts (case "list_tasks"):
+//   if (args.include_all) {
+//     return [{ type: "text", text: "Denied: include_all is disabled …" }];
+//   }
+//
+// include_all is rejected for all callers because JWT-backed admin claims are
+// not yet issued.  The tool schema also documents it as disabled.
+
+const INCLUDE_ALL_DENIED_MSG =
+  "Denied: include_all is disabled until JWT-backed admin claims are enforced server-side.";
+
+/**
+ * Minimal replica of the MCP list_tasks include_all guard.
+ * Returns the denial text when include_all is truthy; null otherwise.
+ */
+function mcpListTasksIncludeAllGuard(args: { include_all?: boolean }): string | null {
+  if (args.include_all) {
+    return INCLUDE_ALL_DENIED_MSG;
+  }
+  return null;
+}
+
+describe("MCP list_tasks — include_all is always rejected (subtask #180)", () => {
+  it("include_all: true returns a denial message", () => {
+    expect(mcpListTasksIncludeAllGuard({ include_all: true })).toBe(INCLUDE_ALL_DENIED_MSG);
+  });
+
+  it("include_all: false does not trigger the guard", () => {
+    expect(mcpListTasksIncludeAllGuard({ include_all: false })).toBeNull();
+  });
+
+  it("include_all omitted does not trigger the guard", () => {
+    expect(mcpListTasksIncludeAllGuard({})).toBeNull();
+  });
+
+  it("denial message contains the expected text about admin claims", () => {
+    const msg = mcpListTasksIncludeAllGuard({ include_all: true })!;
+    expect(msg).toContain("admin claims");
+  });
+
+  it("denial message is stable (caller cannot bypass by passing a non-boolean truthy value)", () => {
+    // TypeScript coerces the schema boolean, but guard uses truthiness — test that
+    // a truthy-coerced value still triggers the deny path.
+    const argsWithTruthy = { include_all: 1 as unknown as boolean };
+    expect(mcpListTasksIncludeAllGuard(argsWithTruthy)).toBe(INCLUDE_ALL_DENIED_MSG);
+  });
+
+  it("Erik calling with include_all: true is still denied (no admin exception yet)", () => {
+    // Even the task owner / platform owner gets rejected — no admin claims issued.
+    expect(mcpListTasksIncludeAllGuard({ include_all: true })).not.toBeNull();
+  });
+
+  it("Mikael calling with include_all: true is denied (cannot enumerate all tasks)", () => {
+    expect(mcpListTasksIncludeAllGuard({ include_all: true })).not.toBeNull();
+  });
+});
+
 describe("end-to-end simulation: user B queries tasks assigned to user A", () => {
   // Simulates what happens when Mikael calls GET /tasks?assigned_to=erik@...
   // The DB filter runs first, then canAccessTask post-filters.
