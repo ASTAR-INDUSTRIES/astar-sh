@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 ## [Unreleased]
 
 ### Added
+- `astar todo guide` — task system documentation: data model (including project_id FK), status lifecycle, subtask hierarchy, visibility rules, triage workflow, recurring tasks, event/project linkage, MCP tools, and gotchas
 - `astar audit guide` — audit system documentation: data model, actor types, entity types, action types, channels, how to query, scope_denied events, and the relationship between audit and overtime
 - `astar events guide` — event system documentation: data model, status lifecycle, event types, attendees model, task linkage, CLI commands, and MCP tools
 - `astar projects guide` — project system documentation: data model, visibility/access control, how to attach tasks/events/agents/milestones, CLI commands, and MCP tools

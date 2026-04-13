@@ -237,6 +237,7 @@ function showGuide() {
       ${cy}due_date${r}       date          Optional
       ${cy}tags${r}           text[]        Array of strings
       ${cy}event_id${r}       uuid          FK → events (optional)
+      ${cy}project_id${r}     uuid          FK → projects (optional)
       ${cy}parent_task_id${r} uuid          FK → tasks (subtask hierarchy)
       ${cy}confidence${r}     numeric       AI confidence score 0–1
       ${cy}requires_triage${r} boolean      true for agent-created tasks
