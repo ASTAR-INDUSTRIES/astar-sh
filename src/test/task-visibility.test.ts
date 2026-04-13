@@ -165,6 +165,66 @@ describe("DB-level visibility filter (passesDbFilter)", () => {
   });
 });
 
+// ── GET /tasks/:number response-code logic (subtask #179) ───────────────────
+//
+// Mirrors the response-code logic added to the single-task handler:
+//   - Task not found            → 404
+//   - Private task, not owner   → 403
+//   - Any other access failure  → 404
+//   - Access granted            → 200
+function getTaskHttpStatus(
+  task: { created_by?: string | null; assigned_to?: string | null; visibility?: string | null } | null,
+  user: { email: string },
+  project?: { visibility?: string; owner?: string } | null
+): number {
+  if (!task) return 404;
+  if (!canAccessTask(task, user, project)) {
+    return task.visibility === "private" ? 403 : 404;
+  }
+  return 200;
+}
+
+describe("GET /tasks/:number — response codes (subtask #179)", () => {
+  it("returns 404 when the task does not exist", () => {
+    expect(getTaskHttpStatus(null, MIKAEL)).toBe(404);
+  });
+
+  it("returns 403 when Mikael requests Erik's private task", () => {
+    const task = { created_by: ERIK.email, assigned_to: ERIK.email, visibility: "private" };
+    expect(getTaskHttpStatus(task, MIKAEL)).toBe(403);
+  });
+
+  it("returns 200 when Erik requests his own private task", () => {
+    const task = { created_by: ERIK.email, assigned_to: null, visibility: "private" };
+    expect(getTaskHttpStatus(task, ERIK)).toBe(200);
+  });
+
+  it("returns 200 when Mikael (assignee) requests a private task assigned to him", () => {
+    const task = { created_by: ERIK.email, assigned_to: MIKAEL.email, visibility: "private" };
+    expect(getTaskHttpStatus(task, MIKAEL)).toBe(200);
+  });
+
+  it("returns 200 for a team task regardless of caller", () => {
+    const task = { created_by: ERIK.email, assigned_to: null, visibility: "team" };
+    expect(getTaskHttpStatus(task, MIKAEL)).toBe(200);
+  });
+
+  it("returns 200 for a public task regardless of caller", () => {
+    const task = { created_by: ERIK.email, assigned_to: null, visibility: "public" };
+    expect(getTaskHttpStatus(task, MIKAEL)).toBe(200);
+  });
+
+  it("returns 403 with case-insensitive email comparison (task stored mixed-case)", () => {
+    const task = { created_by: "ERIK@ASTARCONSULTING.NO", assigned_to: null, visibility: "private" };
+    expect(getTaskHttpStatus(task, MIKAEL)).toBe(403);
+  });
+
+  it("returns 200 for owner even when task stored with mixed-case email", () => {
+    const task = { created_by: "ERIK@ASTARCONSULTING.NO", assigned_to: null, visibility: "private" };
+    expect(getTaskHttpStatus(task, ERIK)).toBe(200);
+  });
+});
+
 describe("end-to-end simulation: user B queries tasks assigned to user A", () => {
   // Simulates what happens when Mikael calls GET /tasks?assigned_to=erik@...
   // The DB filter runs first, then canAccessTask post-filters.

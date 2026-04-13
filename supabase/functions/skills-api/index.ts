@@ -1881,7 +1881,13 @@ app.get("/tasks/:number", async (c) => {
   const { data: task, error } = await sb.from("tasks").select("*").eq("task_number", num).single();
   if (error || !task) return c.json({ error: "Task not found" }, 404, corsHeaders);
   await hydrateRecordsWithProjects(sb, [task]);
-  if (!canAccessTask(task, user, task.project)) return c.json({ error: "Task not found" }, 404, corsHeaders);
+  if (!canAccessTask(task, user, task.project)) {
+    // Return 403 for private tasks so the caller knows the task exists but is forbidden.
+    // Return 404 for team/public tasks the caller genuinely has no access to (project-gated).
+    const status = task.visibility === "private" ? 403 : 404;
+    const message = task.visibility === "private" ? "Forbidden" : "Task not found";
+    return c.json({ error: message }, status, corsHeaders);
+  }
 
   const { data: activity } = await sb.from("audit_events").select("*").eq("entity_type", "task").eq("entity_id", String(task.task_number)).order("timestamp", { ascending: false }).limit(20);
   const { data: subtasks } = await sb.from("tasks").select("*").eq("parent_task_id", task.id).order("task_number", { ascending: true });
