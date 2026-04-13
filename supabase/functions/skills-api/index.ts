@@ -2957,6 +2957,53 @@ app.get("/overtime/runs/:id/cycles", async (c) => {
   return c.json({ cycles: data || [] }, 200, corsHeaders);
 });
 
+// ── GET /overtime/runs/:id/rejections — count E-Agent rejections for a run ─
+app.get("/overtime/runs/:id/rejections", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const id = c.req.param("id");
+  const sb = getSupabase();
+
+  // Get the run to find the parent task number
+  const { data: run, error: runErr } = await sb
+    .from("overtime_runs")
+    .select("id, parent_task_number")
+    .eq("id", id)
+    .single();
+  if (runErr || !run) return c.json({ error: "Run not found" }, 404, corsHeaders);
+  if (!run.parent_task_number) return c.json({ total_rejections: 0 }, 200, corsHeaders);
+
+  // Get all subtasks of the parent task
+  const { data: parentTask } = await sb
+    .from("tasks")
+    .select("id")
+    .eq("task_number", run.parent_task_number)
+    .single();
+  if (!parentTask) return c.json({ total_rejections: 0 }, 200, corsHeaders);
+
+  const { data: subtasks } = await sb
+    .from("tasks")
+    .select("task_number")
+    .eq("parent_task_id", parentTask.id);
+  if (!subtasks || subtasks.length === 0) return c.json({ total_rejections: 0 }, 200, corsHeaders);
+
+  const subtaskNumbers = subtasks.map((s: any) => String(s.task_number));
+
+  // Count audit events where a subtask was reopened (completed → open)
+  const { data: events, error: eventsErr } = await sb
+    .from("audit_events")
+    .select("id")
+    .eq("entity_type", "task")
+    .eq("action", "updated")
+    .in("entity_id", subtaskNumbers)
+    .filter("state_before->>status", "eq", "completed")
+    .filter("state_after->>status", "eq", "open");
+
+  if (eventsErr) return c.json({ error: eventsErr.message }, 500, corsHeaders);
+  return c.json({ total_rejections: (events || []).length }, 200, corsHeaders);
+});
+
 // ── GET /overtime/dashboard — aggregate stats across all runs ──────────
 app.get("/overtime/dashboard", async (c) => {
   const user = await validateMsToken(c.req.raw);

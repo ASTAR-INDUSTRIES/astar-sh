@@ -903,6 +903,10 @@ export class AstarAPI {
     return data.cycles;
   }
 
+  async getOvertimeRejections(runId: string): Promise<{ total_rejections: number }> {
+    return this.fetch<{ total_rejections: number }>(`/overtime/runs/${runId}/rejections`);
+  }
+
   async getOvertimeDashboard(): Promise<OvertimeDashboard> {
     return this.fetch<OvertimeDashboard>("/overtime/dashboard");
   }

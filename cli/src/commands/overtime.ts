@@ -374,6 +374,9 @@ if command -v jq &>/dev/null && command -v curl &>/dev/null; then
   TOTAL_U=$(echo "$CYCLES_RESP" | jq '[.cycles[] | select(.agent=="u")] | length' 2>/dev/null || echo "0")
   TOTAL_E=$(echo "$CYCLES_RESP" | jq '[.cycles[] | select(.agent=="e")] | length' 2>/dev/null || echo "0")
   TOTAL_COST=$(echo "$CYCLES_RESP" | jq '[.cycles[].cost_usd // 0] | add // null' 2>/dev/null || echo "null")
+  REJ_RESP=$(curl -sf "${apiUrl}/overtime/runs/${runId}/rejections" \\
+    -H "Authorization: Bearer $AUTH_TOKEN" 2>/dev/null)
+  TOTAL_REJ=$(echo "$REJ_RESP" | jq '.total_rejections // 0' 2>/dev/null || echo "0")
   FINALIZE_JSON=$(jq -nc \\
     --arg status "done" \\
     --arg completed_at "$FINAL_TS" \\
@@ -381,13 +384,14 @@ if command -v jq &>/dev/null && command -v curl &>/dev/null; then
     --argjson total_cycles_u "\${TOTAL_U:-0}" \\
     --argjson total_cycles_e "\${TOTAL_E:-0}" \\
     --argjson total_cost_usd "\${TOTAL_COST:-null}" \\
-    '{status: $status, completed_at: $completed_at, git_commits: $git_commits, total_cycles_u: $total_cycles_u, total_cycles_e: $total_cycles_e, total_cost_usd: $total_cost_usd}' 2>/dev/null)
+    --argjson total_rejections "\${TOTAL_REJ:-0}" \\
+    '{status: $status, completed_at: $completed_at, git_commits: $git_commits, total_cycles_u: $total_cycles_u, total_cycles_e: $total_cycles_e, total_cost_usd: $total_cost_usd, total_rejections: $total_rejections}' 2>/dev/null)
   if [ -n "$FINALIZE_JSON" ]; then
     curl -sf -X PATCH "${apiUrl}/overtime/runs/${runId}" \\
       -H "Authorization: Bearer $AUTH_TOKEN" \\
       -H "Content-Type: application/json" \\
       -d "$FINALIZE_JSON" >/dev/null 2>&1 || true
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] Run finalized (done, U=$TOTAL_U E=$TOTAL_E cycles)."
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] Run finalized (done, U=$TOTAL_U E=$TOTAL_E cycles, $TOTAL_REJ rejections)."
   fi
 fi` : "";
 
@@ -930,15 +934,23 @@ async function stopOvertime(opts: { clean?: boolean }) {
           if (costs.length) totalCostUsd = costs.reduce((a, b) => a + b, 0);
         } catch {}
 
+        // Count E-Agent rejections (subtasks reopened from completed → open)
+        let totalRejections = 0;
+        try {
+          const { total_rejections } = await api.getOvertimeRejections(s.runId);
+          totalRejections = total_rejections;
+        } catch {}
+
         await api.updateOvertimeRun(s.runId, {
           status: finalStatus,
           completed_at: new Date().toISOString(),
           total_cycles_u: totalCyclesU,
           total_cycles_e: totalCyclesE,
           total_cost_usd: totalCostUsd,
+          total_rejections: totalRejections,
           git_commits: gitCommits,
         });
-        console.log(`    ${c.dim}Run record finalized (${finalStatus}, ${totalCyclesU + totalCyclesE} cycles)${c.reset}`);
+        console.log(`    ${c.dim}Run record finalized (${finalStatus}, ${totalCyclesU + totalCyclesE} cycles, ${totalRejections} rejection${totalRejections !== 1 ? "s" : ""})${c.reset}`);
       } catch (e: any) {
         console.log(`    ${c.dim}(telemetry update skipped: ${e.message})${c.reset}`);
       }

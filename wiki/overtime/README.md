@@ -221,6 +221,28 @@ Each individual agent invocation writes one row here. Together with `overtime_ru
 | `turns_used` | integer | Turns consumed out of max |
 | `max_turns` | integer | Max turns configured for this cycle |
 
+### Run finalization
+
+When a run ends — either via `astar overtime stop` or organically when E-Agent creates the done file — the CLI finalizes the run record with:
+
+- `status`: `done` (done file existed) or `stopped` (manually killed)
+- `completed_at`: timestamp of finalization
+- `total_cycles_u` / `total_cycles_e`: counted from `overtime_cycles` records
+- `total_cost_usd`: summed from cycle `cost_usd` values
+- `total_rejections`: counted from `audit_events` via `GET /overtime/runs/:id/rejections`
+- `git_commits`: all commit hashes on the branch since `main`
+
+### Rejection counting
+
+`total_rejections` measures how many times E-Agent sent a subtask back to open. The pattern: E-Agent calls PATCH /tasks/:number with `{ status: "open" }` on a subtask that was previously "completed". This generates an `audit_events` row with `action="updated"`, `state_before.status="completed"`, `state_after.status="open"`.
+
+The `GET /overtime/runs/:id/rejections` endpoint reconstructs this count at finalization time by:
+1. Looking up the run's `parent_task_number`
+2. Finding all subtasks of that parent task
+3. Querying `audit_events` for the completed→open pattern across all those subtask numbers
+
+Both the TypeScript `stop` command and the bash E-Agent done-path use this endpoint, so `total_rejections` is accurate regardless of which path ends the run.
+
 ## Limitations (v1)
 
 - Runs on the machine that starts it — laptop must stay on

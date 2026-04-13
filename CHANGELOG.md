@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 ## [Unreleased]
 
 ### Added
+- `astar overtime stop` and organic E-Agent done-path now count E-Agent rejections (subtasks reopened from completed → open) and store the total on the run record as `total_rejections`; backed by new `GET /overtime/runs/:id/rejections` endpoint
 - `astar overtime stats <id> --cycles` — full per-cycle breakdown with tokens in and tokens out as separate columns, plus cost bolded; omitting `--cycles` shows the existing compact combined-token view
 - `astar overtime stats` (no args) now shows a per-run comparison table: slug, subtasks delivered, total cost, cost per subtask, rejections, cycles (U/E), and duration — sorted by most recent; backed by new `GET /overtime/comparison` endpoint
 - `astar overtime dashboard` — aggregate view across all runs: avg cost per subtask (prominent), total spend, runs completed, subtasks delivered, avg cost/run, cycles, rejection rate, tokens in/out, and a 7-day ASCII sparkline (▁▂▃▄▅▆▇█) of daily cost
