@@ -1134,6 +1134,133 @@ async function showStats(runId?: string) {
   console.log("");
 }
 
+// ── Monitor ─────────────────────────────────────────────────────────
+
+async function extractCostFromLog(slug: string): Promise<number | null> {
+  const logPath = join(LOGS_DIR, `${slug}.log`);
+  try {
+    const file = Bun.file(logPath);
+    if (!(await file.exists())) return null;
+    const text = await file.text();
+    const lines = text.split("\n").filter(Boolean).reverse();
+    for (const line of lines) {
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed.total_cost_usd != null) return parsed.total_cost_usd;
+      } catch {}
+    }
+  } catch {}
+  return null;
+}
+
+async function renderOvertimeMonitor(api: AstarAPI): Promise<void> {
+  const pids = await readPidFile();
+  const slugs = Object.keys(pids);
+  const cols = process.stdout.columns || 80;
+  const now = new Date().toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
+  process.stdout.write("\x1b[2J\x1b[H");
+
+  const titleRightPad = " ".repeat(Math.max(1, cols - 30));
+  process.stdout.write(`\n  ${c.bold}${c.white}OVERTIME MONITOR${c.reset}${titleRightPad}${c.dim}${now}${c.reset}\n\n`);
+
+  if (!slugs.length) {
+    process.stdout.write(`  ${c.dim}No overtime sessions.${c.reset}\n\n`);
+    process.stdout.write(`  ${c.dim}ctrl+c quit${c.reset}\n`);
+    return;
+  }
+
+  for (const slug of slugs) {
+    const s = pids[slug];
+    const uAlive = isAlive(s.uPid);
+    const eAlive = isAlive(s.ePid);
+    const doneFileExists = existsSync(join(OVERTIME_DIR, `.done-${slug}`));
+
+    const stateLabel = doneFileExists
+      ? `${c.green}done${c.reset}`
+      : uAlive || eAlive
+        ? `${c.yellow}running${c.reset}`
+        : `${c.red}stopped${c.reset}`;
+
+    const started = new Date(s.startedAt);
+    const elapsed = Math.floor((Date.now() - started.getTime()) / 60000);
+    const uptime =
+      elapsed < 60 ? `${elapsed}m` : `${Math.floor(elapsed / 60)}h ${elapsed % 60}m`;
+
+    const cost = await extractCostFromLog(slug);
+    const costStr = cost != null ? fmtCost(cost) : `${c.dim}—${c.reset}`;
+
+    // Header line: slug, task, state, uptime, cost
+    process.stdout.write(
+      `  ${c.bold}${c.white}${slug}${c.reset}  #${c.cyan}${s.taskNumber}${c.reset}  ${stateLabel}  ${c.dim}${uptime}${c.reset}  ${costStr}\n`
+    );
+
+    // Subtask progress bar
+    try {
+      const { subtasks } = await api.getTask(s.taskNumber);
+      const icons = subtasks.map((t) => {
+        if (t.status === "completed") return `${c.green}✓${c.reset}`;
+        if (t.status === "in_progress") return `${c.yellow}▸${c.reset}`;
+        return `${c.dim}○${c.reset}`;
+      });
+      const done = subtasks.filter((t) => t.status === "completed").length;
+      const bar = icons.join(" ");
+      process.stdout.write(`  ${bar}  ${c.dim}${done}/${subtasks.length}${c.reset}\n`);
+    } catch {
+      process.stdout.write(`  ${c.dim}subtasks unavailable${c.reset}\n`);
+    }
+
+    process.stdout.write("\n");
+  }
+
+  process.stdout.write(`  ${c.dim}ctrl+c quit · refreshing every 5s${c.reset}\n`);
+}
+
+async function monitorOvertime(): Promise<void> {
+  let api: AstarAPI;
+  try {
+    const token = await getToken();
+    api = new AstarAPI(token);
+  } catch {
+    console.error(
+      `${c.red}✗${c.reset} Not authenticated. Run ${c.cyan}astar login${c.reset} first.`
+    );
+    process.exit(1);
+  }
+
+  process.stdout.write("\x1b[?25l"); // hide cursor
+
+  const cleanup = () => {
+    clearInterval(interval);
+    process.stdout.write("\x1b[?25h"); // show cursor
+    process.stdout.write("\n");
+    process.exit(0);
+  };
+
+  const tick = async () => {
+    try {
+      // Refresh token each cycle
+      const token = await getToken();
+      api = new AstarAPI(token);
+    } catch {}
+    try {
+      await renderOvertimeMonitor(api);
+    } catch {}
+  };
+
+  await tick();
+  const interval = setInterval(tick, 5000);
+
+  process.on("SIGINT", cleanup);
+
+  // Keep alive
+  await new Promise(() => {});
+}
+
 // ── Guide ───────────────────────────────────────────────────────────
 
 function showGuide() {
@@ -1247,6 +1374,7 @@ function showGuide() {
     ${cy}astar overtime recap${r}               morning summary
     ${cy}astar overtime stop${r}                kill agents
     ${cy}astar overtime stop --clean${r}        kill + remove worktrees
+    ${cy}astar overtime monitor${r}              live full-screen dashboard (5s refresh)
     ${cy}astar overtime stats${r}                cost, cycles, tokens across all runs
     ${cy}astar overtime stats <id>${r}           per-cycle breakdown for a specific run
     ${cy}astar overtime guide${r}               this guide
@@ -1324,6 +1452,11 @@ export function registerOvertimeCommands(program: Command) {
     .command("guide")
     .description("Best practices for writing overnight specs")
     .action(showGuide);
+
+  overtime
+    .command("monitor")
+    .description("Live full-screen dashboard of overtime sessions (5s refresh)")
+    .action(monitorOvertime);
 
   overtime
     .command("stop")
