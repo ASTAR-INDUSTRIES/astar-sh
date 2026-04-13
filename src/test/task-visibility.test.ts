@@ -284,6 +284,249 @@ describe("MCP list_tasks — include_all is always rejected (subtask #180)", () 
   });
 });
 
+// ── MCP mutation tools — visibility enforcement (subtask #181) ──────────────
+//
+// Mirrors the access-control logic in the four MCP handlers:
+//   get_task      → canAccessTask only (read)
+//   update_task   → canAccessTask, then canModifyTask
+//   complete_task → canAccessTask, then canModifyTask
+//   comment_task  → canAccessTask, then canModifyTask
+//
+// The MCP server now uses case-insensitive email comparison in both
+// canAccessTask and canModifyTask, matching the skills-api implementation.
+
+/**
+ * Mirror of the updated canAccessTask from mcp-server/index.ts.
+ * Uses case-insensitive email comparison.
+ */
+function mcpCanAccessTask(
+  task: { created_by?: string | null; assigned_to?: string | null; visibility?: string | null },
+  user: { email: string },
+  project?: { visibility?: string; owner?: string } | null
+): boolean {
+  if (!task) return false;
+  const callerEmail = user.email.toLowerCase();
+  const isOwner =
+    task.created_by?.toLowerCase() === callerEmail ||
+    task.assigned_to?.toLowerCase() === callerEmail;
+  if (task.visibility === "private") return isOwner;
+  if (isOwner) return true;
+  if (project) {
+    if (project.visibility === "team") return true;
+    return project.owner?.toLowerCase() === callerEmail;
+  }
+  return task.visibility === "public" || task.visibility === "team";
+}
+
+/**
+ * Mirror of the updated canModifyTask from mcp-server/index.ts.
+ * Uses case-insensitive email comparison.
+ */
+function mcpCanModifyTask(
+  task: { created_by?: string | null; assigned_to?: string | null } | null,
+  user: { email: string }
+): boolean {
+  if (!task) return false;
+  const callerEmail = user.email.toLowerCase();
+  return (
+    task.created_by?.toLowerCase() === callerEmail ||
+    task.assigned_to?.toLowerCase() === callerEmail
+  );
+}
+
+/**
+ * Simulates the MCP get_task handler response.
+ * Returns the error text if access is denied, or null if access is granted.
+ */
+function mcpGetTask(
+  task: { created_by?: string | null; assigned_to?: string | null; visibility?: string | null } | null,
+  user: { email: string }
+): string | null {
+  if (!task) return "Error: Task not found.";
+  if (!mcpCanAccessTask(task, user)) return "Error: Task not found.";
+  return null; // access granted
+}
+
+/**
+ * Simulates the MCP update_task handler response.
+ * Returns the error text if denied, or null if the caller may proceed.
+ */
+function mcpUpdateTask(
+  task: { created_by?: string | null; assigned_to?: string | null; visibility?: string | null } | null,
+  user: { email: string }
+): string | null {
+  if (!task) return "Error: Task not found.";
+  if (!mcpCanAccessTask(task, user)) return "Error: Task not found.";
+  if (!mcpCanModifyTask(task, user)) return "Denied: only the creator or assignee can modify this task.";
+  return null;
+}
+
+/**
+ * Simulates the MCP complete_task handler response.
+ */
+function mcpCompleteTask(
+  task: { created_by?: string | null; assigned_to?: string | null; visibility?: string | null } | null,
+  user: { email: string }
+): string | null {
+  if (!task) return "Error: Task not found.";
+  if (!mcpCanAccessTask(task, user)) return "Error: Task not found.";
+  if (!mcpCanModifyTask(task, user)) return "Denied: only the creator or assignee can complete this task.";
+  return null;
+}
+
+/**
+ * Simulates the MCP comment_task handler response.
+ */
+function mcpCommentTask(
+  task: { created_by?: string | null; assigned_to?: string | null; visibility?: string | null } | null,
+  user: { email: string }
+): string | null {
+  if (!task) return "Error: Task not found.";
+  if (!mcpCanAccessTask(task, user)) return "Error: Task not found.";
+  if (!mcpCanModifyTask(task, user)) return "Denied: only the creator or assignee can comment on this task.";
+  return null;
+}
+
+describe("MCP get_task — visibility enforcement (subtask #181)", () => {
+  const erikPrivate = { created_by: ERIK.email, assigned_to: ERIK.email, visibility: "private" };
+  const erikTeam = { created_by: ERIK.email, assigned_to: ERIK.email, visibility: "team" };
+  const erikPublic = { created_by: ERIK.email, assigned_to: ERIK.email, visibility: "public" };
+
+  it("non-owner cannot get_task on a private task", () => {
+    expect(mcpGetTask(erikPrivate, MIKAEL)).toBe("Error: Task not found.");
+  });
+
+  it("owner can get_task on their own private task", () => {
+    expect(mcpGetTask(erikPrivate, ERIK)).toBeNull();
+  });
+
+  it("assignee can get_task on a private task assigned to them", () => {
+    const task = { created_by: ERIK.email, assigned_to: MIKAEL.email, visibility: "private" };
+    expect(mcpGetTask(task, MIKAEL)).toBeNull();
+  });
+
+  it("any user can get_task on a team task", () => {
+    expect(mcpGetTask(erikTeam, MIKAEL)).toBeNull();
+  });
+
+  it("any user can get_task on a public task", () => {
+    expect(mcpGetTask(erikPublic, MIKAEL)).toBeNull();
+  });
+
+  it("returns Task not found for missing task", () => {
+    expect(mcpGetTask(null, MIKAEL)).toBe("Error: Task not found.");
+  });
+
+  it("email comparison is case-insensitive", () => {
+    const task = { created_by: "ERIK@ASTARCONSULTING.NO", assigned_to: null, visibility: "private" };
+    expect(mcpGetTask(task, MIKAEL)).toBe("Error: Task not found.");
+    expect(mcpGetTask(task, ERIK)).toBeNull();
+  });
+});
+
+describe("MCP update_task — visibility and modify enforcement (subtask #181)", () => {
+  const erikPrivate = { created_by: ERIK.email, assigned_to: ERIK.email, visibility: "private" };
+  const erikTeam = { created_by: ERIK.email, assigned_to: null, visibility: "team" };
+
+  it("non-owner cannot update a private task (returns Task not found)", () => {
+    expect(mcpUpdateTask(erikPrivate, MIKAEL)).toBe("Error: Task not found.");
+  });
+
+  it("owner can update their own private task", () => {
+    expect(mcpUpdateTask(erikPrivate, ERIK)).toBeNull();
+  });
+
+  it("non-owner seeing a team task cannot update it (not creator/assignee)", () => {
+    expect(mcpUpdateTask(erikTeam, MIKAEL)).toBe(
+      "Denied: only the creator or assignee can modify this task."
+    );
+  });
+
+  it("assignee of a team task can update it", () => {
+    const task = { created_by: ERIK.email, assigned_to: MIKAEL.email, visibility: "team" };
+    expect(mcpUpdateTask(task, MIKAEL)).toBeNull();
+  });
+
+  it("returns Task not found for missing task", () => {
+    expect(mcpUpdateTask(null, MIKAEL)).toBe("Error: Task not found.");
+  });
+
+  it("email comparison is case-insensitive for ownership check", () => {
+    const task = { created_by: "ERIK@ASTARCONSULTING.NO", assigned_to: null, visibility: "private" };
+    expect(mcpUpdateTask(task, MIKAEL)).toBe("Error: Task not found.");
+    expect(mcpUpdateTask(task, ERIK)).toBeNull();
+  });
+});
+
+describe("MCP complete_task — visibility and modify enforcement (subtask #181)", () => {
+  const erikPrivate = { created_by: ERIK.email, assigned_to: ERIK.email, visibility: "private" };
+  const erikTeam = { created_by: ERIK.email, assigned_to: null, visibility: "team" };
+
+  it("non-owner cannot complete a private task", () => {
+    expect(mcpCompleteTask(erikPrivate, MIKAEL)).toBe("Error: Task not found.");
+  });
+
+  it("owner can complete their own private task", () => {
+    expect(mcpCompleteTask(erikPrivate, ERIK)).toBeNull();
+  });
+
+  it("non-owner cannot complete a team task they are not assigned to", () => {
+    expect(mcpCompleteTask(erikTeam, MIKAEL)).toBe(
+      "Denied: only the creator or assignee can complete this task."
+    );
+  });
+
+  it("assignee can complete a task assigned to them", () => {
+    const task = { created_by: ERIK.email, assigned_to: MIKAEL.email, visibility: "team" };
+    expect(mcpCompleteTask(task, MIKAEL)).toBeNull();
+  });
+
+  it("returns Task not found for missing task", () => {
+    expect(mcpCompleteTask(null, MIKAEL)).toBe("Error: Task not found.");
+  });
+
+  it("email comparison is case-insensitive", () => {
+    const task = { created_by: "MIKAEL@ASTARCONSULTING.NO", assigned_to: null, visibility: "private" };
+    expect(mcpCompleteTask(task, MIKAEL)).toBeNull();
+  });
+});
+
+describe("MCP comment_task — visibility and modify enforcement (subtask #181)", () => {
+  const erikPrivate = { created_by: ERIK.email, assigned_to: ERIK.email, visibility: "private" };
+  const erikTeam = { created_by: ERIK.email, assigned_to: null, visibility: "team" };
+
+  it("non-owner cannot comment on a private task (returns Task not found)", () => {
+    expect(mcpCommentTask(erikPrivate, MIKAEL)).toBe("Error: Task not found.");
+  });
+
+  it("owner can comment on their own private task", () => {
+    expect(mcpCommentTask(erikPrivate, ERIK)).toBeNull();
+  });
+
+  it("non-owner cannot comment on a team task they did not create", () => {
+    expect(mcpCommentTask(erikTeam, MIKAEL)).toBe(
+      "Denied: only the creator or assignee can comment on this task."
+    );
+  });
+
+  it("assignee can comment on a task assigned to them", () => {
+    const task = { created_by: ERIK.email, assigned_to: MIKAEL.email, visibility: "team" };
+    expect(mcpCommentTask(task, MIKAEL)).toBeNull();
+  });
+
+  it("returns Task not found for missing task", () => {
+    expect(mcpCommentTask(null, MIKAEL)).toBe("Error: Task not found.");
+  });
+
+  it("email comparison is case-insensitive", () => {
+    const task = { created_by: "ERIK@ASTARCONSULTING.NO", assigned_to: null, visibility: "private" };
+    // Mikael is denied visibility
+    expect(mcpCommentTask(task, MIKAEL)).toBe("Error: Task not found.");
+    // Erik matches case-insensitively
+    expect(mcpCommentTask(task, ERIK)).toBeNull();
+  });
+});
+
 describe("end-to-end simulation: user B queries tasks assigned to user A", () => {
   // Simulates what happens when Mikael calls GET /tasks?assigned_to=erik@...
   // The DB filter runs first, then canAccessTask post-filters.
