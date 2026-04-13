@@ -123,6 +123,147 @@ async function renderEventList(api: AstarAPI, filters: { status?: string; type?:
   console.log("");
 }
 
+// ── Guide ───────────────────────────────────────────────────────────
+
+function showGuide() {
+  const d = c.dim;
+  const w = c.white;
+  const cy = c.cyan;
+  const y = c.yellow;
+  const r = c.reset;
+  const b = c.bold;
+  const m = c.magenta;
+  const g = c.green;
+
+  console.log(`
+  ${b}${w}ASTAR EVENTS — GUIDE${r}
+
+  Events are first-class time-bounded work items: conferences, partner
+  meetings, speaking slots, and podcasts. They provide a time anchor for
+  tasks — anything that needs to happen before or at a specific occasion.
+
+  ${b}${w}DATA MODEL${r}
+
+    ${b}events${r} table
+      ${cy}id${r}              uuid          Primary key
+      ${cy}slug${r}            text          Unique identifier used in CLI and MCP
+      ${cy}title${r}           text          Required display name
+      ${cy}type${r}            text          arranged | speaking | attending | podcast
+      ${cy}status${r}          text          tentative | confirmed | completed | cancelled
+      ${cy}goal${r}            text          Required — why this event exists / success criteria
+      ${cy}date${r}            date          Optional scheduled date (YYYY-MM-DD)
+      ${cy}date_tentative${r}  boolean       true when the date is approximate
+      ${cy}location${r}        text          Optional venue or URL
+      ${cy}attendees${r}       jsonb         Array of attendee objects (see Attendees below)
+      ${cy}visibility${r}      text          private | team | public
+      ${cy}project_id${r}      uuid          FK → projects (optional)
+      ${cy}created_by${r}      text          Email of creator
+      ${cy}created_at${r}      timestamptz
+      ${cy}updated_at${r}      timestamptz
+
+    ${b}attendees${r} (inside the jsonb array)
+      ${cy}kind${r}    "internal" | "external"
+      ${cy}name${r}    Display name
+      ${cy}org${r}     Organization (external only, optional)
+      ${cy}role${r}    Role or title (external only, optional)
+
+  ${b}${w}STATUS LIFECYCLE${r}
+
+    ${y}tentative${r} → ${g}confirmed${r} → ${d}completed${r}
+                          ↘ ${c.red}cancelled${r}
+
+    New events default to ${y}tentative${r}. Move to ${g}confirmed${r} once the date
+    and logistics are locked. Mark ${d}completed${r} after the event runs.
+    Use ${c.red}cancelled${r} if it falls through.
+
+    The ${cy}date_tentative${r} flag is separate from status — it indicates
+    the date is approximate even when the event is confirmed.
+
+  ${b}${w}EVENT TYPES${r}
+
+    ${cy}arranged${r}   You arranged/organized the event (host role)
+    ${cy}speaking${r}   You are presenting or speaking
+    ${cy}attending${r}  You are attending (default)
+    ${cy}podcast${r}    Podcast recording or appearance
+
+  ${b}${w}ATTENDEES MODEL${r}
+
+    Internal attendees have only ${cy}kind${r} and ${cy}name${r}.
+    External attendees also carry ${cy}org${r} and ${cy}role${r}.
+
+    CLI: ${cy}--internal "Alice"${r} and ${cy}--external "Bob|Acme Corp|CEO"${r}
+    The ${cy}update${r} command replaces the entire attendees array — re-pass
+    all attendees when adding one, or use ${cy}--clear-attendees${r} to remove all.
+
+  ${b}${w}TASK LINKAGE${r}
+
+    Tasks attach to an event via ${cy}tasks.event_id${r}.
+    When you view an event with ${cy}astar events info <slug>${r}, all linked
+    tasks and their subtasks are shown.
+
+    Create a task tied to an event:
+      ${cy}astar todo "Prepare slides" --event <slug>${r}
+    Filter tasks for an event:
+      ${cy}astar todo --event <slug>${r}
+
+    Tasks survive if their event is cancelled — they are not auto-deleted.
+
+  ${b}${w}MCP TOOLS (for agents)${r}
+
+    ${m}create_event${r}   Create an event (title, goal, type, status, date, attendees)
+    ${m}list_events${r}    List events — filter by status, type, month, project, search
+    ${m}get_event${r}      Full event detail + linked tasks
+    ${m}update_event${r}   Patch any event field
+
+  ${b}${w}CLI COMMANDS${r}
+
+    ${cy}astar events${r}                     List all events
+    ${cy}astar events "Title" --goal "..."${r} Create an event (goal required)
+    ${cy}astar events list${r}                Same as above
+    ${cy}astar events list --status confirmed${r}
+    ${cy}astar events list --type speaking${r}
+    ${cy}astar events list --month 2026-06${r}
+    ${cy}astar events list --project <slug>${r}
+    ${cy}astar events info <slug>${r}         Full detail + linked tasks
+    ${cy}astar events update <slug>${r}       Patch event fields
+    ${cy}astar events update <slug> --status confirmed${r}
+    ${cy}astar events update <slug> --date 2026-06-15${r}
+    ${cy}astar events guide${r}               This guide
+
+  ${b}${w}RELATIONSHIPS TO OTHER SUBSYSTEMS${r}
+
+    ${cy}events → tasks${r}       tasks.event_id scopes tasks to an event
+    ${cy}events → projects${r}    events.project_id groups events into workstreams
+    ${cy}events → audit${r}       event create/update/delete is logged
+
+  ${b}${w}GOTCHAS${r}
+
+    ${y}Goal is required.${r} You cannot create an event without ${cy}--goal${r}.
+    This enforces intentionality — every event must justify itself.
+
+    ${y}Slug is the stable identifier.${r} Use slug for all CLI and MCP calls.
+    Auto-derived from title if not set. Changing slug breaks existing references.
+
+    ${y}Attendees are replaced, not merged.${r} Calling update with new attendees
+    replaces the entire list. Fetch current attendees first if adding incrementally.
+
+    ${y}date vs date_tentative:${r} A confirmed event can still have a tentative date.
+    Use ${cy}--exact-date${r} to clear the tentative flag once the date is locked.
+
+    ${y}Tasks are not deleted with the event.${r} Cancelling or deleting an event
+    leaves its tasks intact — they lose the event_id link but remain in the task list.
+
+  ${b}${w}SEE ALSO${r}
+
+    ${cy}astar guide${r}            full system ontology
+    ${cy}astar todo guide${r}       task system — subtasks, triage, MCP tools
+    ${cy}astar projects guide${r}   project workstreams and membership
+    ${cy}astar audit guide${r}      audit trail — querying mutations
+  `);
+}
+
+// ── Register ────────────────────────────────────────────────────────
+
 export function registerEventCommands(program: Command) {
   const events = program
     .command("events [title]")
@@ -258,6 +399,11 @@ export function registerEventCommands(program: Command) {
         process.exit(1);
       }
     });
+
+  events
+    .command("guide")
+    .description("Event system documentation — types, lifecycle, attendees, task linkage, MCP tools")
+    .action(showGuide);
 
   events
     .command("update <slug>")
