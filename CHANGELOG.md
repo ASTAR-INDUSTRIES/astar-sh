@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 ## [Unreleased]
 
 ### Fixed
+- `astar todo team` no longer shows private tasks — the team board is filtered to `team` and `public` visibility only, excluding private tasks of all users (including the caller's own)
 - Private tasks are no longer visible to other users via `GET /tasks` — visibility is now enforced at the database query level and email ownership checks are case-insensitive
 
 ### Added

@@ -437,7 +437,10 @@ export function registerTodoCommands(program: Command) {
       const token = await requireAuth();
       const api = new AstarAPI(token);
       try {
-        const tasks = await api.listTasks({ assigned_to: "all", event: opts.event, project: opts.project, include_subtasks: true });
+        const allTasks = await api.listTasks({ assigned_to: "all", event: opts.event, project: opts.project, include_subtasks: true });
+        // Team view only shows team and public tasks — private tasks are personal
+        // and must not appear in the shared team board, even for the caller's own tasks.
+        const tasks = allTasks.filter((t) => t.visibility !== "private");
         if (!tasks.length) {
           console.log(`${c.dim}No tasks found.${c.reset}`);
           return;
