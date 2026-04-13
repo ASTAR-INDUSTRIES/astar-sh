@@ -7,6 +7,7 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ### Fixed
 - `astar todo --monitor` now counts completed subtasks in the "done today" tally (previously only top-level completed tasks were counted)
+- `astar todo mine` and `astar todo list` correctly show completed subtasks indented under their open parent tasks (verified: server-side include_subtasks query has no status filter, client-side renderTaskTable renders all subtasks regardless of status)
 
 ### Added
 - `astar overtime status --verbose` — shows last cycle's cost, turns used, and model for each running session alongside existing progress/state/uptime
