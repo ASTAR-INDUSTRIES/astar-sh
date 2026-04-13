@@ -1041,6 +1041,7 @@ const TOOLS = [
         visibility: { type: "string", enum: ["private", "team", "public"], description: "Task visibility" },
         parent_task_number: { type: "number", description: "Set parent task (makes this a subtask). Use 0 to remove parent." },
         reason: { type: "string", description: "Why this change is being made (for audit trail)" },
+        agent_id: { type: "string", description: "Agent identity for audit (e.g. 'u-agent:slug'). Pass when acting as a session-scoped agent." },
       },
       required: ["task_number"],
     },
@@ -1094,6 +1095,7 @@ const TOOLS = [
         task_number: { type: "number", description: "Task number" },
         comment: { type: "string", description: "Comment text" },
         reason: { type: "string", description: "Context for this comment (for audit trail)" },
+        agent_id: { type: "string", description: "Agent identity for audit (e.g. 'u-agent:slug'). Pass when acting as a session-scoped agent." },
       },
       required: ["task_number", "comment"],
     },
@@ -2308,10 +2310,11 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       if (args.status === "completed") { patch.completed_by = user.email; patch.completed_at = new Date().toISOString(); }
       const { error } = await sb.from("tasks").update(patch).eq("id", task.id);
       if (error) return [{ type: "text", text: `Error: ${error.message}` }];
+      const updateAgentId = (typeof args.agent_id === "string" && /^[ue]-agent:[a-z0-9-]+$/.test(args.agent_id)) ? args.agent_id : null;
       await sb.from("audit_events").insert({
         actor_email: user.email,
-        actor_type: actorType,
-        actor_agent_id: actorAgentId,
+        actor_type: updateAgentId ? "agent" : actorType,
+        actor_agent_id: updateAgentId ?? actorAgentId,
         entity_type: "task",
         entity_id: String(args.task_number),
         action: args.status === "completed" ? "completed" : "updated",
@@ -2432,10 +2435,11 @@ async function handleTool(name: string, args: any, user: { email: string; userId
       await hydrateRecordsWithProjects(sb, [task]);
       if (!canAccessTask(task, user, task.project)) return [{ type: "text", text: "Error: Task not found." }];
       if (!canModifyTask(task, user)) return [{ type: "text", text: "Denied: only the creator or assignee can comment on this task." }];
+      const commentAgentId = (typeof args.agent_id === "string" && /^[ue]-agent:[a-z0-9-]+$/.test(args.agent_id)) ? args.agent_id : null;
       await sb.from("audit_events").insert({
         actor_email: user.email,
-        actor_type: actorType,
-        actor_agent_id: actorAgentId,
+        actor_type: commentAgentId ? "agent" : actorType,
+        actor_agent_id: commentAgentId ?? actorAgentId,
         entity_type: "task",
         entity_id: String(args.task_number),
         action: "commented",

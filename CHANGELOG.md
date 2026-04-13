@@ -5,6 +5,9 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+### Changed
+- `astar overtime recap` activity log now shows agent identity (e.g. `u-agent:auth-hardening`) instead of the human email for comments made by overnight agents
+
 ### Added
 - `astar todo mine` now hides overtime agent tasks (`u-agent:*`, `e-agent:*`) by default; use `--all` to include them
 - `astar overtime status --verbose` — shows last cycle's cost, turns used, and model for each running session alongside existing progress/state/uptime
