@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 ## [Unreleased]
 
 ### Added
+- `astar overtime stats` (no args) now shows a per-run comparison table: slug, subtasks delivered, total cost, cost per subtask, rejections, cycles (U/E), and duration — sorted by most recent; backed by new `GET /overtime/comparison` endpoint
 - `GET /overtime/dashboard` API endpoint — returns aggregate stats across all runs (total cost, tokens, cycles, rejections, subtasks delivered, avg cost per subtask, avg cost per run, avg cycles per run, avg rejection rate) with a 7-day daily breakdown
 - `astar overtime status --verbose` — shows last cycle's cost, turns used, and model for each running session alongside existing progress/state/uptime
 - `overtime` E-Agent now explicitly rejects placeholder/stub returns, workaround code, import hacks, and mock-heavy test patches that mask real failures — reopens the subtask with "This routes around the problem instead of fixing it"

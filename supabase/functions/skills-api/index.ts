@@ -3035,6 +3035,57 @@ app.get("/overtime/dashboard", async (c) => {
   }, 200, corsHeaders);
 });
 
+// ── GET /overtime/comparison — per-run comparison table ───────────────
+app.get("/overtime/comparison", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const sb = getSupabase();
+
+  const { data: runs, error: runsErr } = await sb
+    .from("overtime_runs")
+    .select("*")
+    .order("started_at", { ascending: false })
+    .limit(50);
+  if (runsErr) return c.json({ error: runsErr.message }, 500, corsHeaders);
+
+  const allRuns = runs || [];
+
+  // Fetch only the fields needed for subtask counting
+  const { data: cycles, error: cyclesErr } = await sb
+    .from("overtime_cycles")
+    .select("run_id, subtask_number, action_taken");
+  if (cyclesErr) return c.json({ error: cyclesErr.message }, 500, corsHeaders);
+
+  const allCycles = cycles || [];
+
+  // Group cycles by run_id for O(1) lookup
+  const cyclesByRun = new Map<string, typeof allCycles>();
+  for (const cy of allCycles) {
+    const list = cyclesByRun.get(cy.run_id) || [];
+    list.push(cy);
+    cyclesByRun.set(cy.run_id, list);
+  }
+
+  const comparison = allRuns.map((r) => {
+    const runCycles = cyclesByRun.get(r.id) || [];
+    const subtaskCount = new Set(
+      runCycles
+        .filter((cy) => cy.action_taken === "implemented" && cy.subtask_number != null)
+        .map((cy) => cy.subtask_number)
+    ).size;
+    const totalCost = Number(r.total_cost_usd) || 0;
+    const costPerSubtask = subtaskCount > 0 && totalCost > 0 ? totalCost / subtaskCount : null;
+    return {
+      ...r,
+      subtask_count: subtaskCount,
+      cost_per_subtask: costPerSubtask != null ? Math.round(costPerSubtask * 1e6) / 1e6 : null,
+    };
+  });
+
+  return c.json({ runs: comparison }, 200, corsHeaders);
+});
+
 // ── Health ─────────────────────────────────────────────────────────────
 app.get("/", (c) => c.json({ status: "ok", service: "skills-api" }, 200, corsHeaders));
 

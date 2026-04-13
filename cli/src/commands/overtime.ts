@@ -5,7 +5,7 @@ import { homedir } from "os";
 import { unlinkSync, existsSync } from "fs";
 import { getToken } from "../lib/auth";
 import { getConfig } from "../lib/config";
-import { AstarAPI, type Task, type TaskActivity, type OvertimeRun } from "../lib/api";
+import { AstarAPI, type Task, type TaskActivity, type OvertimeRun, type OvertimeRunComparison } from "../lib/api";
 import { c, table } from "../lib/ui";
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -986,10 +986,10 @@ async function showStats(runId?: string) {
   const api = new AstarAPI(token);
 
   if (!runId) {
-    // List recent runs
-    let runs;
+    // Per-slug comparison table
+    let runs: OvertimeRunComparison[];
     try {
-      runs = await api.listOvertimeRuns();
+      runs = await api.getOvertimeComparison();
     } catch (e: any) {
       console.error(`${c.red}✗${c.reset} ${e.message}`);
       process.exit(1);
@@ -1005,7 +1005,7 @@ async function showStats(runId?: string) {
     console.log("");
 
     table(
-      ["Slug", "Status", "U", "E", "Reject", "Cost", "Duration"],
+      ["Slug", "Subtasks", "Cost", "Cost/Subtask", "Rejections", "Cycles", "Duration"],
       runs.map((r) => {
         const dur =
           r.completed_at
@@ -1013,19 +1013,20 @@ async function showStats(runId?: string) {
             : r.status === "running"
               ? fmtDuration(Date.now() - new Date(r.started_at).getTime()) + "…"
               : "—";
+        const totalCycles = (r.total_cycles_u ?? 0) + (r.total_cycles_e ?? 0);
         return [
           `${c.white}${r.slug}${c.reset}`,
-          statusColor(r.status),
-          String(r.total_cycles_u),
-          String(r.total_cycles_e),
-          String(r.total_rejections),
+          r.subtask_count > 0 ? String(r.subtask_count) : `${c.dim}—${c.reset}`,
           fmtCost(r.total_cost_usd),
+          r.cost_per_subtask != null ? `${c.bold}${fmtCost(r.cost_per_subtask)}${c.reset}` : `${c.dim}—${c.reset}`,
+          r.total_rejections > 0 ? `${c.yellow}${r.total_rejections}${c.reset}` : `${c.dim}0${c.reset}`,
+          totalCycles > 0 ? `${c.dim}${r.total_cycles_u}U ${r.total_cycles_e}E${c.reset}` : `${c.dim}—${c.reset}`,
           `${c.dim}${dur}${c.reset}`,
         ];
       })
     );
     console.log("");
-    console.log(`  ${c.dim}Pass a run ID to see per-cycle breakdown: astar overtime stats <id>${c.reset}`);
+    console.log(`  ${c.dim}Pass a run ID for per-cycle breakdown: astar overtime stats <id>${c.reset}`);
     console.log("");
     return;
   }

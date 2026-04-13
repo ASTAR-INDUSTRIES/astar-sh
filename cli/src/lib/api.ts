@@ -320,6 +320,11 @@ export interface OvertimeCycle {
   max_turns?: number | null;
 }
 
+export interface OvertimeRunComparison extends OvertimeRun {
+  subtask_count: number;
+  cost_per_subtask: number | null;
+}
+
 export interface OvertimeDashboard {
   summary: {
     total_runs: number;
@@ -900,5 +905,10 @@ export class AstarAPI {
 
   async getOvertimeDashboard(): Promise<OvertimeDashboard> {
     return this.fetch<OvertimeDashboard>("/overtime/dashboard");
+  }
+
+  async getOvertimeComparison(): Promise<OvertimeRunComparison[]> {
+    const data = await this.fetch<{ runs: OvertimeRunComparison[] }>("/overtime/comparison");
+    return data.runs;
   }
 }
