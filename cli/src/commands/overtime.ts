@@ -1220,6 +1220,11 @@ async function renderOvertimeMonitor(
     return;
   }
 
+  // Aggregate stats accumulated while rendering each session
+  let aggCost: number | null = null;
+  let aggCycles = 0;
+  let aggRejections = 0;
+
   for (const slug of slugs) {
     const s = pids[slug];
     const uAlive = isAlive(s.uPid);
@@ -1242,15 +1247,16 @@ async function renderOvertimeMonitor(
       extractLogTail(slug),
     ]);
     const costStr = cost != null ? fmtCost(cost) : `${c.dim}—${c.reset}`;
+    if (cost != null) aggCost = (aggCost ?? 0) + cost;
 
     // Header line: slug, task, state, uptime, cost
     process.stdout.write(
       `  ${c.bold}${c.white}${slug}${c.reset}  #${c.cyan}${s.taskNumber}${c.reset}  ${stateLabel}  ${c.dim}${uptime}${c.reset}  ${costStr}\n`
     );
 
-    // Subtask progress bar
+    // Subtask progress bar + rejection count from activity
     try {
-      const { subtasks } = await api.getTask(s.taskNumber);
+      const { subtasks, activity } = await api.getTask(s.taskNumber);
       const icons = subtasks.map((t) => {
         if (t.status === "completed") return `${c.green}✓${c.reset}`;
         if (t.status === "in_progress") return `${c.yellow}▸${c.reset}`;
@@ -1259,8 +1265,22 @@ async function renderOvertimeMonitor(
       const done = subtasks.filter((t) => t.status === "completed").length;
       const bar = icons.join(" ");
       process.stdout.write(`  ${bar}  ${c.dim}${done}/${subtasks.length}${c.reset}\n`);
+
+      // Count status-changed-to-open events as E-Agent rejections
+      const rejections = activity.filter(
+        (a) => a.action === "status_changed" && a.details?.to === "open"
+      ).length;
+      aggRejections += rejections;
     } catch {
       process.stdout.write(`  ${c.dim}subtasks unavailable${c.reset}\n`);
+    }
+
+    // Cycles from telemetry
+    if (s.runId) {
+      try {
+        const cycles = await api.listOvertimeCycles(s.runId);
+        aggCycles += cycles.length;
+      } catch {}
     }
 
     // Log tail
@@ -1272,6 +1292,13 @@ async function renderOvertimeMonitor(
 
     process.stdout.write("\n");
   }
+
+  // Aggregate stats footer
+  const aggCostStr = aggCost != null ? fmtCost(aggCost) : `${c.dim}—${c.reset}`;
+  process.stdout.write(
+    `  ${c.dim}${slugs.length} session${slugs.length !== 1 ? "s" : ""}  ·  ${aggCostStr} total  ·  ${aggCycles} cycles  ·  ${aggRejections} rejection${aggRejections !== 1 ? "s" : ""}${c.reset}\n`
+  );
+  process.stdout.write("\n");
 
   if (promptState.message) {
     process.stdout.write(`  ${c.dim}${promptState.message}${c.reset}\n`);

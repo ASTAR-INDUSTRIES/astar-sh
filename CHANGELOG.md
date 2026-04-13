@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 ## [Unreleased]
 
 ### Added
+- `astar overtime monitor` — aggregate stats footer: total sessions, summed cost (from log JSON), total cycles (from telemetry), and rejection count (status-changed-to-open events from task activity); all values are best-effort and fall back to 0/— if unavailable
 - `astar overtime monitor` — `[s]` keybinding prompts for a session slug and stops that session (same kill + telemetry logic as `astar overtime stop <slug>`); `[q]` and the footer hint both update to show the new keybinding
 - `astar overtime monitor` — shows a one-line log tail per session below the progress bar: the last human-readable (non-JSON) line from `.astar/overtime/logs/<slug>.log`, truncated to terminal width
 - `astar overtime monitor` — live full-screen dashboard showing all active sessions with slug, task number, subtask progress bar (✓/▸/○), state, uptime, and cost parsed from log files; refreshes every 5 seconds
