@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 ## [Unreleased]
 
 ### Added
+- `astar projects guide` — project system documentation: data model, visibility/access control, how to attach tasks/events/agents/milestones, CLI commands, and MCP tools
 - `astar guide` — top-level system overview: all subsystems, entity relationship map, agent usage patterns, and links to per-subsystem guides
 - `astar overtime status --verbose` — shows last cycle's cost, turns used, and model for each running session alongside existing progress/state/uptime
 - `overtime` E-Agent now explicitly rejects placeholder/stub returns, workaround code, import hacks, and mock-heavy test patches that mask real failures — reopens the subtask with "This routes around the problem instead of fixing it"
