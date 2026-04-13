@@ -5,6 +5,9 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+### Fixed
+- `astar todo --monitor` now counts completed subtasks in the "done today" tally (previously only top-level completed tasks were counted)
+
 ### Added
 - `astar overtime status --verbose` — shows last cycle's cost, turns used, and model for each running session alongside existing progress/state/uptime
 - `overtime` E-Agent now explicitly rejects placeholder/stub returns, workaround code, import hacks, and mock-heavy test patches that mask real failures — reopens the subtask with "This routes around the problem instead of fixing it"
