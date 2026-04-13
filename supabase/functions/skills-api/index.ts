@@ -637,6 +637,7 @@ app.get("/projects/:slug", async (c) => {
     eventsResult,
     agentsResult,
     milestonesResult,
+    overtimeRunsResult,
   ] = await Promise.all([
     sb.from("tasks")
       .select("*")
@@ -661,17 +662,60 @@ app.get("/projects/:slug", async (c) => {
       .eq("project_id", project.id)
       .order("date", { ascending: false })
       .limit(50),
+    sb.from("overtime_runs")
+      .select("*")
+      .eq("project_id", project.id)
+      .order("started_at", { ascending: false })
+      .limit(50),
   ]);
 
   if (tasksResult.error) return c.json({ error: tasksResult.error.message }, 500, corsHeaders);
   if (eventsResult.error) return c.json({ error: eventsResult.error.message }, 500, corsHeaders);
   if (agentsResult.error) return c.json({ error: agentsResult.error.message }, 500, corsHeaders);
   if (milestonesResult.error) return c.json({ error: milestonesResult.error.message }, 500, corsHeaders);
+  if (overtimeRunsResult.error) return c.json({ error: overtimeRunsResult.error.message }, 500, corsHeaders);
 
   const tasks = (tasksResult.data || []).filter((task: any) => canAccessTask(task, user, project));
   const events = (eventsResult.data || []).filter((event: any) => canAccessEvent(event, user, project));
   const agents = (agentsResult.data || []).filter((agent: any) => canAccessAgent(agent, user, project));
   const milestones = (milestonesResult.data || []).filter((milestone: any) => canAccessMilestone(milestone, user, project));
+  const overtimeRuns = overtimeRunsResult.data || [];
+
+  // Enrich overtime runs with subtask counts
+  const parentTaskNumbers = overtimeRuns
+    .map((r: any) => r.parent_task_number)
+    .filter((n: any) => n != null) as number[];
+
+  if (parentTaskNumbers.length > 0) {
+    const { data: parentTasks } = await sb.from("tasks")
+      .select("id, task_number")
+      .in("task_number", parentTaskNumbers);
+
+    if (parentTasks && parentTasks.length > 0) {
+      const parentIdByTaskNumber: Record<number, string> = {};
+      for (const pt of parentTasks) parentIdByTaskNumber[pt.task_number] = pt.id;
+
+      const parentIds = Object.values(parentIdByTaskNumber);
+      const { data: subtaskRows } = await sb.from("tasks")
+        .select("parent_task_id")
+        .in("parent_task_id", parentIds)
+        .is("archived_at", null);
+
+      const subtaskCountByParentId: Record<string, number> = {};
+      for (const row of subtaskRows || []) {
+        subtaskCountByParentId[row.parent_task_id] = (subtaskCountByParentId[row.parent_task_id] || 0) + 1;
+      }
+
+      for (const run of overtimeRuns as any[]) {
+        const pid = run.parent_task_number != null ? parentIdByTaskNumber[run.parent_task_number] : undefined;
+        run.subtask_count = pid ? (subtaskCountByParentId[pid] || 0) : 0;
+      }
+    } else {
+      for (const run of overtimeRuns as any[]) run.subtask_count = 0;
+    }
+  } else {
+    for (const run of overtimeRuns as any[]) run.subtask_count = 0;
+  }
 
   await hydrateTasksWithContext(sb, tasks as any[]);
   await hydrateRecordsWithProjects(sb, events as any[]);
@@ -687,6 +731,7 @@ app.get("/projects/:slug", async (c) => {
     events,
     agents,
     milestones,
+    overtime_runs: overtimeRuns,
   }, 200, corsHeaders);
 });
 

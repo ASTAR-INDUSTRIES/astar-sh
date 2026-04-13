@@ -288,6 +288,7 @@ export interface OvertimeRun {
   spec_title: string;
   type: string;
   parent_task_number?: number | null;
+  project_id?: string | null;
   started_at: string;
   completed_at?: string | null;
   status: string;
@@ -299,6 +300,7 @@ export interface OvertimeRun {
   worktree_path?: string | null;
   branch_name?: string | null;
   git_commits: string[];
+  subtask_count?: number;
 }
 
 export interface OvertimeCycle {
@@ -459,7 +461,7 @@ export class AstarAPI {
     return data.projects;
   }
 
-  async getProject(slug: string): Promise<{ project: Project; tasks: Task[]; events: Event[]; agents: Agent[]; milestones: Milestone[] }> {
+  async getProject(slug: string): Promise<{ project: Project; tasks: Task[]; events: Event[]; agents: Agent[]; milestones: Milestone[]; overtime_runs: OvertimeRun[] }> {
     return this.fetch(`/projects/${slug}`);
   }
 
