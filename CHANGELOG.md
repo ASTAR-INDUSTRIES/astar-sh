@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 ## [Unreleased]
 
 ### Added
+- `astar audit guide` — audit system documentation: data model, actor types, entity types, action types, channels, how to query, scope_denied events, and the relationship between audit and overtime
 - `astar events guide` — event system documentation: data model, status lifecycle, event types, attendees model, task linkage, CLI commands, and MCP tools
 - `astar projects guide` — project system documentation: data model, visibility/access control, how to attach tasks/events/agents/milestones, CLI commands, and MCP tools
 - `astar guide` — top-level system overview: all subsystems, entity relationship map, agent usage patterns, and links to per-subsystem guides
