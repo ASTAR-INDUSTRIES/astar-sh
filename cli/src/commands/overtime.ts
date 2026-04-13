@@ -14,6 +14,7 @@ interface OvertimeSpec {
   slug: string;
   title: string;
   type: string;
+  project?: string;
   context: string;
   requirements: string[];
   notes: string;
@@ -86,6 +87,7 @@ function parseSpec(content: string, filename: string): OvertimeSpec {
 
   let title = slug;
   let type = "dev";
+  let project: string | undefined;
   const contextLines: string[] = [];
   const requirements: string[] = [];
   const notesLines: string[] = [];
@@ -103,6 +105,12 @@ function parseSpec(content: string, filename: string): OvertimeSpec {
 
     if (/^overtime:\s*/i.test(trimmed)) {
       type = trimmed.replace(/^overtime:\s*/i, "").trim() || "dev";
+      if (section === "preamble") section = "context";
+      continue;
+    }
+
+    if (/^project:\s*/i.test(trimmed)) {
+      project = trimmed.replace(/^project:\s*/i, "").trim() || undefined;
       if (section === "preamble") section = "context";
       continue;
     }
@@ -143,6 +151,7 @@ function parseSpec(content: string, filename: string): OvertimeSpec {
     slug,
     title,
     type,
+    project,
     context: contextLines.join("\n").trim(),
     requirements,
     notes: notesLines.join("\n").trim(),
@@ -175,6 +184,7 @@ async function createOvertimeTasks(
     description,
     priority: "medium",
     tags: ["overtime", spec.type],
+    project: spec.project,
   });
 
   for (const req of spec.requirements) {
@@ -183,6 +193,7 @@ async function createOvertimeTasks(
       parent_task_number: parent.task_number,
       tags: ["overtime"],
       priority: "medium",
+      project: spec.project,
     });
   }
 
@@ -591,6 +602,7 @@ async function startOvertime(fileFilter?: string) {
         parent_task_number: parentTaskNumber,
         worktree_path: worktree,
         branch_name: branchName,
+        project_id: spec.project ?? null,
       });
       runId = runResult.id;
     } catch (e: any) {

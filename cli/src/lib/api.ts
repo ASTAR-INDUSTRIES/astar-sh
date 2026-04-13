@@ -829,6 +829,7 @@ export class AstarAPI {
     model?: string | null;
     worktree_path?: string | null;
     branch_name?: string | null;
+    project_id?: string | null;
   }): Promise<{ ok: boolean; id: string }> {
     const config = await getConfig();
     const res = await fetch(`${config.apiUrl}/overtime/runs`, {
