@@ -10,13 +10,21 @@ import { c, table } from "../lib/ui";
 
 // ── Types ───────────────────────────────────────────────────────────
 
-interface OvertimeSpec {
+export interface VerificationCheck {
+  name: string;
+  run: string;
+  expect?: string;
+  expect_absent?: string;
+}
+
+export interface OvertimeSpec {
   slug: string;
   title: string;
   type: string;
   context: string;
   requirements: string[];
   notes: string;
+  verifications: VerificationCheck[];
 }
 
 interface OvertimeSession {
@@ -80,7 +88,7 @@ function ensureClaudeInstalled(): void {
 
 // ── Spec parser ─────────────────────────────────────────────────────
 
-function parseSpec(content: string, filename: string): OvertimeSpec {
+export function parseSpec(content: string, filename: string): OvertimeSpec {
   const slug = basename(filename, ".md").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const lines = content.split("\n");
 
@@ -89,8 +97,10 @@ function parseSpec(content: string, filename: string): OvertimeSpec {
   const contextLines: string[] = [];
   const requirements: string[] = [];
   const notesLines: string[] = [];
+  const verifications: VerificationCheck[] = [];
+  let currentVerification: Partial<VerificationCheck> | null = null;
 
-  let section: "preamble" | "context" | "requirements" | "notes" = "preamble";
+  let section: "preamble" | "context" | "requirements" | "notes" | "verification" = "preamble";
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -108,17 +118,38 @@ function parseSpec(content: string, filename: string): OvertimeSpec {
     }
 
     if (/^##\s+requirements/i.test(trimmed)) {
+      if (currentVerification?.name && currentVerification?.run) {
+        verifications.push(currentVerification as VerificationCheck);
+        currentVerification = null;
+      }
       section = "requirements";
       continue;
     }
 
     if (/^##\s+notes/i.test(trimmed)) {
+      if (currentVerification?.name && currentVerification?.run) {
+        verifications.push(currentVerification as VerificationCheck);
+        currentVerification = null;
+      }
       section = "notes";
+      continue;
+    }
+
+    if (/^##\s+verification/i.test(trimmed)) {
+      if (currentVerification?.name && currentVerification?.run) {
+        verifications.push(currentVerification as VerificationCheck);
+        currentVerification = null;
+      }
+      section = "verification";
       continue;
     }
 
     if (/^##\s+/.test(trimmed) && section !== "preamble") {
       // Unknown H2 — treat as notes
+      if (currentVerification?.name && currentVerification?.run) {
+        verifications.push(currentVerification as VerificationCheck);
+        currentVerification = null;
+      }
       section = "notes";
       notesLines.push(line);
       continue;
@@ -136,7 +167,40 @@ function parseSpec(content: string, filename: string): OvertimeSpec {
       case "notes":
         notesLines.push(line);
         break;
+      case "verification": {
+        // Start a new check block
+        const nameMatch = trimmed.match(/^-\s+name:\s+(.+)$/);
+        if (nameMatch) {
+          if (currentVerification?.name && currentVerification?.run) {
+            verifications.push(currentVerification as VerificationCheck);
+          }
+          currentVerification = { name: nameMatch[1].trim() };
+          break;
+        }
+        if (!currentVerification) break;
+        const runMatch = trimmed.match(/^run:\s+(.+)$/);
+        if (runMatch) {
+          currentVerification.run = runMatch[1].trim();
+          break;
+        }
+        const expectMatch = trimmed.match(/^expect:\s+"?([^"]*)"?$/);
+        if (expectMatch) {
+          currentVerification.expect = expectMatch[1].trim();
+          break;
+        }
+        const expectAbsentMatch = trimmed.match(/^expect_absent:\s+"?([^"]*)"?$/);
+        if (expectAbsentMatch) {
+          currentVerification.expect_absent = expectAbsentMatch[1].trim();
+          break;
+        }
+        break;
+      }
     }
+  }
+
+  // Flush any in-progress verification check at EOF
+  if (currentVerification?.name && currentVerification?.run) {
+    verifications.push(currentVerification as VerificationCheck);
   }
 
   return {
@@ -146,6 +210,7 @@ function parseSpec(content: string, filename: string): OvertimeSpec {
     context: contextLines.join("\n").trim(),
     requirements,
     notes: notesLines.join("\n").trim(),
+    verifications,
   };
 }
 
