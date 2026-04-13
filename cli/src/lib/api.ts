@@ -863,8 +863,11 @@ export class AstarAPI {
     return res.json();
   }
 
-  async listOvertimeRuns(): Promise<OvertimeRun[]> {
-    const data = await this.fetch<{ runs: OvertimeRun[] }>("/overtime/runs");
+  async listOvertimeRuns(filters?: { project?: string }): Promise<OvertimeRun[]> {
+    const params = new URLSearchParams();
+    if (filters?.project) params.set("project", filters.project);
+    const qs = params.toString();
+    const data = await this.fetch<{ runs: OvertimeRun[] }>(`/overtime/runs${qs ? `?${qs}` : ""}`);
     return data.runs;
   }
 

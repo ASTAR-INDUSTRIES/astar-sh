@@ -2953,11 +2953,20 @@ app.get("/overtime/runs", async (c) => {
   if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
 
   const sb = getSupabase();
-  const { data, error } = await sb.from("overtime_runs")
+  const projectSlug = c.req.query("project");
+
+  let query = sb.from("overtime_runs")
     .select("*")
     .order("started_at", { ascending: false })
     .limit(50);
 
+  if (projectSlug) {
+    const project = await resolveProjectRef(sb, projectSlug);
+    if (!project) return c.json({ error: `Project "${projectSlug}" not found` }, 404, corsHeaders);
+    query = query.eq("project_id", project.id);
+  }
+
+  const { data, error } = await query;
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
   return c.json({ runs: data || [] }, 200, corsHeaders);
 });

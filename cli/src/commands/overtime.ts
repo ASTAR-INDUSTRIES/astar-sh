@@ -1029,7 +1029,7 @@ function statusColor(status: string): string {
   return c.dim + status + c.reset;
 }
 
-async function showStats(runId?: string) {
+async function showStats(runId?: string, opts?: { project?: string }) {
   const token = await requireAuth();
   const api = new AstarAPI(token);
 
@@ -1037,7 +1037,7 @@ async function showStats(runId?: string) {
     // List recent runs
     let runs;
     try {
-      runs = await api.listOvertimeRuns();
+      runs = await api.listOvertimeRuns(opts?.project ? { project: opts.project } : undefined);
     } catch (e: any) {
       console.error(`${c.red}✗${c.reset} ${e.message}`);
       process.exit(1);
@@ -1364,8 +1364,9 @@ export function registerOvertimeCommands(program: Command) {
   overtime
     .command("stats [run-id]")
     .description("Show telemetry for overtime runs — list all or detail for a specific run")
-    .action(async (runId?: string) => {
-      await showStats(runId);
+    .option("--project <slug>", "Filter runs by project slug")
+    .action(async (runId?: string, opts?: { project?: string }) => {
+      await showStats(runId, opts);
     });
 
   overtime

@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 ## [Unreleased]
 
 ### Added
+- `astar overtime stats --project <slug>` — filter the runs list to only show runs linked to a specific project
 - `overtime` specs now support a `feedback:` field (e.g. `feedback: id1, id2`) — the parent task is linked to those feedback items via `task_links`, and the feedback is auto-closed as "done" when the run completes
 - `overtime_runs` now stores a `project_id` FK — runs created from a spec with a `project:` field are linked to that project in the database
 - `astar overtime status --verbose` — shows last cycle's cost, turns used, and model for each running session alongside existing progress/state/uptime
