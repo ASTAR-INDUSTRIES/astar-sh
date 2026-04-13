@@ -1369,6 +1369,85 @@ function showGuide() {
 `);
 }
 
+// ── Code review ──────────────────────────────────────────────────────
+
+export function buildReviewPrompt(spec: OvertimeSpec, diff: string): string {
+  const requirementsList = spec.requirements.map((r, i) => `  ${i + 1}. ${r}`).join("\n");
+  return `You are an independent code reviewer. Review the following branch diff for semantic bugs.
+
+SPEC: ${spec.title}
+CONTEXT: ${spec.context}
+${spec.notes ? `NOTES: ${spec.notes}\n` : ""}Requirements this branch is meant to satisfy:
+${requirementsList}
+
+Focus ONLY on semantic bugs — not style or formatting:
+- Misread APIs: wrong method names, wrong return type assumptions, wrong argument order
+- Wrong assumptions: value assumed always defined, off-by-one errors, empty-list assumptions
+- Hot-path costs: N+1 queries, unnecessary re-computation per call, blocking I/O in a hot path
+- Logic errors: conditions always true/false, unreachable branches, broken invariants
+- Subtle concurrency bugs: race conditions, missing awaits, shared mutable state
+
+For each issue found, report:
+1. File and approximate line number
+2. What the bug is
+3. Why it is wrong
+4. What the correct behavior should be
+
+If no semantic bugs are found, say so clearly.
+
+BRANCH DIFF (git diff main..HEAD):
+\`\`\`diff
+${diff}
+\`\`\``;
+}
+
+async function reviewOvertime(slug: string) {
+  ensureClaudeInstalled();
+
+  const specPath = join(OVERTIME_DIR, `${slug}.md`);
+  const specFile = Bun.file(specPath);
+  if (!(await specFile.exists())) {
+    console.error(`${c.red}✗${c.reset} No spec file found at ${c.cyan}.astar/overtime/${slug}.md${c.reset}`);
+    process.exit(1);
+  }
+
+  const spec = parseSpec(await specFile.text(), `${slug}.md`);
+
+  // Use the overtime worktree if it exists, otherwise fall back to cwd
+  const worktreePath = join(WORKTREE_DIR, `overtime-${slug}`);
+  const cwd = existsSync(worktreePath) ? worktreePath : process.cwd();
+
+  let diff: string;
+  try {
+    diff = execSync(`git -C "${cwd}" diff main..HEAD`, { stdio: "pipe" }).toString();
+  } catch (e: any) {
+    console.error(`${c.red}✗${c.reset} Failed to get git diff: ${e.message}`);
+    process.exit(1);
+  }
+
+  if (!diff.trim()) {
+    console.log(`${c.yellow}⚠${c.reset} No changes found on branch overtime/${slug} relative to main.`);
+    return;
+  }
+
+  console.log(`${c.dim}Reviewing ${c.white}${spec.title}${c.reset}${c.dim} …${c.reset}\n`);
+
+  const prompt = buildReviewPrompt(spec, diff);
+  const proc = spawn("claude", [
+    "-p", prompt,
+    "--max-turns", "10",
+    "--dangerously-skip-permissions",
+  ], {
+    cwd,
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    proc.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`claude exited with code ${code}`))));
+    proc.on("error", reject);
+  });
+}
+
 // ── Register ────────────────────────────────────────────────────────
 
 export function registerOvertimeCommands(program: Command) {
@@ -1407,6 +1486,13 @@ export function registerOvertimeCommands(program: Command) {
     .command("guide")
     .description("Best practices for writing overnight specs")
     .action(showGuide);
+
+  overtime
+    .command("review <slug>")
+    .description("Run an independent code-review subagent over the branch diff for a spec slug")
+    .action(async (slug: string) => {
+      await reviewOvertime(slug);
+    });
 
   overtime
     .command("stop")

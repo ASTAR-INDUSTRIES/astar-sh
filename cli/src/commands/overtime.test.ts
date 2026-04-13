@@ -1,5 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import { parseSpec, eAgentPrompt } from "./overtime";
+import { Command } from "commander";
+import { parseSpec, eAgentPrompt, buildReviewPrompt, registerOvertimeCommands } from "./overtime";
 
 // ── parseSpec: ## Verification section ──────────────────────────────
 
@@ -219,5 +220,121 @@ Some context.
     expect(prompt).toContain("server health check");
     expect(prompt).toContain("no errors in logs");
     expect(prompt).toContain("rate limit header present");
+  });
+});
+
+// ── buildReviewPrompt ────────────────────────────────────────────────
+
+describe("buildReviewPrompt", () => {
+  const spec = parseSpec(`# Auth Hardening
+overtime: dev
+
+Improve auth security.
+
+## Requirements
+- [ ] JWT refresh handles concurrent requests safely
+- [ ] Add rate limiting to login endpoint
+
+## Notes
+Do not touch the OAuth flow.
+`, "auth-hardening.md");
+
+  const diff = `diff --git a/src/auth.ts b/src/auth.ts
+index abc1234..def5678 100644
+--- a/src/auth.ts
++++ b/src/auth.ts
+@@ -1,3 +1,6 @@
++export async function refreshToken(token: string) {
++  return db.tokens.find(token);
++}`;
+
+  it("includes the diff in the prompt", () => {
+    const prompt = buildReviewPrompt(spec, diff);
+    expect(prompt).toContain("src/auth.ts");
+    expect(prompt).toContain("refreshToken");
+  });
+
+  it("includes spec title", () => {
+    const prompt = buildReviewPrompt(spec, diff);
+    expect(prompt).toContain("Auth Hardening");
+  });
+
+  it("includes each requirement", () => {
+    const prompt = buildReviewPrompt(spec, diff);
+    expect(prompt).toContain("JWT refresh handles concurrent requests safely");
+    expect(prompt).toContain("Add rate limiting to login endpoint");
+  });
+
+  it("includes notes", () => {
+    const prompt = buildReviewPrompt(spec, diff);
+    expect(prompt).toContain("Do not touch the OAuth flow.");
+  });
+
+  it("focuses on semantic bugs, not style", () => {
+    const prompt = buildReviewPrompt(spec, diff);
+    expect(prompt).toContain("semantic bugs");
+    expect(prompt.toLowerCase()).toContain("not style");
+  });
+
+  it("mentions hot-path costs as a review target", () => {
+    const prompt = buildReviewPrompt(spec, diff);
+    expect(prompt.toLowerCase()).toContain("hot-path");
+  });
+
+  it("wraps diff in a fenced code block", () => {
+    const prompt = buildReviewPrompt(spec, diff);
+    expect(prompt).toContain("```diff");
+  });
+
+  it("omits NOTES line when spec has no notes", () => {
+    const noNotes = parseSpec(`# Simple
+overtime: dev
+
+Some context.
+
+## Requirements
+- [ ] Do a thing
+`, "simple.md");
+    const prompt = buildReviewPrompt(noNotes, diff);
+    expect(prompt).not.toContain("NOTES:");
+  });
+});
+
+// ── review command — registration and help ───────────────────────────
+
+describe("review command — registration and help", () => {
+  it("registers as a subcommand of overtime", () => {
+    const program = new Command();
+    registerOvertimeCommands(program);
+    const overtimeCmd = program.commands.find((cmd) => cmd.name() === "overtime");
+    expect(overtimeCmd).toBeDefined();
+    const reviewCmd = overtimeCmd!.commands.find((cmd) => cmd.name() === "review");
+    expect(reviewCmd).toBeDefined();
+  });
+
+  it("review command accepts a <slug> argument", () => {
+    const program = new Command();
+    registerOvertimeCommands(program);
+    const overtimeCmd = program.commands.find((cmd) => cmd.name() === "overtime")!;
+    const reviewCmd = overtimeCmd.commands.find((cmd) => cmd.name() === "review")!;
+    // Commander stores args in _args; check via usage or help text
+    const help = reviewCmd.helpInformation();
+    expect(help).toContain("slug");
+  });
+
+  it("review command description mentions code-review or review", () => {
+    const program = new Command();
+    registerOvertimeCommands(program);
+    const overtimeCmd = program.commands.find((cmd) => cmd.name() === "overtime")!;
+    const reviewCmd = overtimeCmd.commands.find((cmd) => cmd.name() === "review")!;
+    expect(reviewCmd.description().toLowerCase()).toContain("review");
+  });
+
+  it("overtime help output includes review", () => {
+    const program = new Command();
+    registerOvertimeCommands(program);
+    const overtimeCmd = program.commands.find((cmd) => cmd.name() === "overtime")!;
+    const help = overtimeCmd.helpInformation();
+    expect(help).toContain("review");
   });
 });
