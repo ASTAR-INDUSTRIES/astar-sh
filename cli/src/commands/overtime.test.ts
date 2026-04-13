@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { parseSpec } from "./overtime";
+import { parseSpec, eAgentPrompt } from "./overtime";
 
 // ── parseSpec: ## Verification section ──────────────────────────────
 
@@ -112,7 +112,7 @@ overtime: dev
     expect(result.verifications[0].expect).toBe("hello world");
   });
 
-  it("handles verification before requirements", () => {
+  it("handles verification before requirements (order independence)", () => {
     const verificationFirst = `# Test
 overtime: dev
 
@@ -131,5 +131,93 @@ None.
     expect(result.verifications).toHaveLength(1);
     expect(result.verifications[0].name).toBe("pre-check");
     expect(result.requirements).toHaveLength(1);
+  });
+});
+
+// ── eAgentPrompt: VERIFICATION CONTRACT injection ────────────────────
+
+describe("eAgentPrompt — VERIFICATION CONTRACT injection", () => {
+  const specWithVerifications = parseSpec(`# Auth Hardening
+overtime: dev
+
+Context about the work.
+
+## Requirements
+- [ ] JWT refresh handles concurrent requests safely
+- [ ] Add rate limiting to login endpoint
+
+## Verification
+- name: server health check
+  run: curl -s localhost:3000/health
+  expect: "ok"
+- name: no errors in logs
+  run: cat logs/app.log
+  expect_absent: "ERROR"
+- name: rate limit header present
+  run: curl -sI localhost:3000/login
+  expect: "X-RateLimit-Limit"
+`, "auth-hardening.md");
+
+  const specWithoutVerifications = parseSpec(`# Simple Task
+overtime: dev
+
+Some context.
+
+## Requirements
+- [ ] Do a thing
+`, "simple.md");
+
+  const doneFile = "/tmp/.done-auth-hardening";
+
+  it("includes VERIFICATION CONTRACT section when verifications are present", () => {
+    const prompt = eAgentPrompt(42, specWithVerifications, doneFile);
+    expect(prompt).toContain("VERIFICATION CONTRACT");
+  });
+
+  it("includes each verification run command", () => {
+    const prompt = eAgentPrompt(42, specWithVerifications, doneFile);
+    expect(prompt).toContain("curl -s localhost:3000/health");
+    expect(prompt).toContain("cat logs/app.log");
+    expect(prompt).toContain("curl -sI localhost:3000/login");
+  });
+
+  it("includes expect substrings in the contract", () => {
+    const prompt = eAgentPrompt(42, specWithVerifications, doneFile);
+    expect(prompt).toContain('"ok"');
+    expect(prompt).toContain('"X-RateLimit-Limit"');
+  });
+
+  it("includes expect_absent substrings in the contract", () => {
+    const prompt = eAgentPrompt(42, specWithVerifications, doneFile);
+    expect(prompt).toContain('"ERROR"');
+    expect(prompt).toContain("NOT to contain");
+  });
+
+  it("includes verification step in FINAL SIGN-OFF when verifications present", () => {
+    const prompt = eAgentPrompt(42, specWithVerifications, doneFile);
+    expect(prompt).toContain("VERIFICATION CONTRACT (below)");
+  });
+
+  it("includes verification rule in RULES when verifications present", () => {
+    const prompt = eAgentPrompt(42, specWithVerifications, doneFile);
+    expect(prompt).toContain("All VERIFICATION CONTRACT checks must pass before sign-off");
+  });
+
+  it("does NOT include VERIFICATION CONTRACT when verifications are absent", () => {
+    const prompt = eAgentPrompt(7, specWithoutVerifications, doneFile);
+    expect(prompt).not.toContain("VERIFICATION CONTRACT");
+  });
+
+  it("still includes requirements in the prompt when verifications are present", () => {
+    const prompt = eAgentPrompt(42, specWithVerifications, doneFile);
+    expect(prompt).toContain("JWT refresh handles concurrent requests safely");
+    expect(prompt).toContain("Add rate limiting to login endpoint");
+  });
+
+  it("includes all 3 verification names in the contract", () => {
+    const prompt = eAgentPrompt(42, specWithVerifications, doneFile);
+    expect(prompt).toContain("server health check");
+    expect(prompt).toContain("no errors in logs");
+    expect(prompt).toContain("rate limit header present");
   });
 });

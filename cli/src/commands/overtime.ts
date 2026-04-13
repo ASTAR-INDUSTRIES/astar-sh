@@ -336,10 +336,28 @@ RULES:
 - If the subtask title or description contains words like "cheap", "lightweight", "no fresh measurements", or "negligible cost": before calling any existing function to satisfy that constraint, trace its call graph (grep the source, follow imports, read the bodies of functions it calls). Then comment on the subtask with what you found — e.g. "getVelocity() calls the API → not cheap". Do this before writing code that depends on the assumption being true.`;
 }
 
-function eAgentPrompt(taskNumber: number, spec: OvertimeSpec, doneFile: string, envContext?: string | null): string {
+export function eAgentPrompt(taskNumber: number, spec: OvertimeSpec, doneFile: string, envContext?: string | null): string {
   const envBlock = envContext
     ? `\nENVIRONMENT CONTEXT:\n${envContext}\n`
     : "";
+
+  const verificationContract = spec.verifications.length > 0
+    ? `\nVERIFICATION CONTRACT — run ALL checks before final sign-off:\n${spec.verifications.map((v, i) => {
+        const lines = [`  ${i + 1}. ${v.name}`, `     run: ${v.run}`];
+        if (v.expect) lines.push(`     expect output to contain: "${v.expect}"`);
+        if (v.expect_absent) lines.push(`     expect output NOT to contain: "${v.expect_absent}"`);
+        return lines.join("\n");
+      }).join("\n")}\n`
+    : "";
+
+  const verificationSignOffStep = spec.verifications.length > 0
+    ? `   h. Run every check in the VERIFICATION CONTRACT (below). A check fails if the command exits non-zero, the expected substring is absent, or a forbidden substring is present. Any failure blocks sign-off — do NOT create the done file.\n`
+    : "";
+
+  const verificationRule = spec.verifications.length > 0
+    ? `- All VERIFICATION CONTRACT checks must pass before sign-off. Run each command, verify the output, and reject if any check fails.\n`
+    : "";
+
   return `You are E-Agent, a code reviewer working overnight. You review the work of U-Agent.
 ${envBlock}
 TASK: #${taskNumber} — ${spec.title}
@@ -368,7 +386,7 @@ ${spec.requirements.map((r, i) => `      - Requirement ${i + 1}: "${r}"`).join("
    e. Check for regressions: does the existing functionality still work?
    f. Check for security issues: any hardcoded secrets, injection vectors, or unsafe operations?
    g. Check that commits are clean and atomic — no debug code, no commented-out blocks, no leftover TODOs.
-
+${verificationSignOffStep}
    If EVERYTHING passes:
    - Call comment_task on parent #${taskNumber} with a detailed sign-off report:
      "SIGN-OFF: All requirements verified."
@@ -380,7 +398,7 @@ ${spec.requirements.map((r, i) => `      - Requirement ${i + 1}: "${r}"`).join("
    If ANY check fails during final review:
    - Do NOT sign off. Reopen the failing subtask with specific feedback.
    - Do NOT create the done file.
-
+${verificationContract}
 RULES:
 - Be thorough. The human is asleep — you are the last line of defense before they see this work.
 - Focus on correctness: does the code actually satisfy the requirement?
@@ -389,7 +407,7 @@ RULES:
 - Do not nitpick style. Focus on logic, correctness, edge cases.
 - You cannot edit code. You can only review and comment.
 - The done file (touch command) is critical — it signals the overnight session to stop.
-- Explicitly reject any of the following — reopen the subtask with the message "This routes around the problem instead of fixing it":
+${verificationRule}- Explicitly reject any of the following — reopen the subtask with the message "This routes around the problem instead of fixing it":
   - Placeholder or stub returns (e.g. \`return null\`, \`return []\`, \`return "TODO"\`, \`pass\`, \`throw new Error("not implemented")\`)
   - Workaround code that avoids the actual failure path instead of fixing it
   - Import hacks (re-exporting the wrong type, casting \`as any\`, \`@ts-ignore\`, \`// eslint-disable\`)
