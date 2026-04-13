@@ -221,6 +221,8 @@ export function registerTodoCommands(program: Command) {
     .option("--project <slug>", "Assign or filter tasks by project")
     .option("--estimate <hours>", "Estimated hours")
     .option("--recurring <interval>", "Recurring: weekly, monthly, quarterly")
+    .option("--private", "Create task with private visibility (only visible to you)")
+    .option("--public", "Create task with public visibility (visible to everyone)")
     .option("--monitor", "Live-updating task view (refreshes every 10s)")
     .action(async (title: string | undefined, opts) => {
       if (opts.monitor) {
@@ -268,10 +270,12 @@ export function registerTodoCommands(program: Command) {
       const api = new AstarAPI(token);
 
       try {
+        const visibility = opts.private ? "private" : opts.public ? "public" : "team";
         const createPayload: any = {
           title,
           description: opts.description,
           priority: opts.priority,
+          visibility,
           assigned_to: opts.assign,
           due_date: opts.due,
           tags: opts.tag ? [opts.tag] : undefined,

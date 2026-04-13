@@ -527,6 +527,44 @@ describe("MCP comment_task — visibility and modify enforcement (subtask #181)"
   });
 });
 
+// ── CLI visibility flag resolution (subtask #182) ───────────────────────────
+//
+// Mirrors the flag-resolution logic in cli/src/commands/todo.ts:
+//   const visibility = opts.private ? "private" : opts.public ? "public" : "team";
+//
+// Default is "team"; --private sets "private"; --public sets "public".
+// If both flags are given, --private wins (first check in the ternary).
+
+function resolveVisibility(opts: { private?: boolean; public?: boolean }): string {
+  return opts.private ? "private" : opts.public ? "public" : "team";
+}
+
+describe("CLI todo — visibility flag resolution (subtask #182)", () => {
+  it("defaults to team when no flags are passed", () => {
+    expect(resolveVisibility({})).toBe("team");
+  });
+
+  it("--private produces visibility=private", () => {
+    expect(resolveVisibility({ private: true })).toBe("private");
+  });
+
+  it("--public produces visibility=public", () => {
+    expect(resolveVisibility({ public: true })).toBe("public");
+  });
+
+  it("--private takes precedence over --public when both are set", () => {
+    expect(resolveVisibility({ private: true, public: true })).toBe("private");
+  });
+
+  it("false flags do not override the default", () => {
+    expect(resolveVisibility({ private: false, public: false })).toBe("team");
+  });
+
+  it("only --public set produces public, not team", () => {
+    expect(resolveVisibility({ private: false, public: true })).toBe("public");
+  });
+});
+
 describe("end-to-end simulation: user B queries tasks assigned to user A", () => {
   // Simulates what happens when Mikael calls GET /tasks?assigned_to=erik@...
   // The DB filter runs first, then canAccessTask post-filters.
