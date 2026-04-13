@@ -697,6 +697,131 @@ export type Database = {
           },
         ]
       }
+      overtime_cycles: {
+        Row: {
+          action_taken: string | null
+          agent: string
+          completed_at: string | null
+          cost_usd: number | null
+          cycle_number: number
+          exit_code: number | null
+          id: string
+          max_turns: number | null
+          model: string | null
+          run_id: string
+          started_at: string
+          subtask_number: number | null
+          tokens_in: number | null
+          tokens_out: number | null
+          tool_calls_count: number | null
+          turns_used: number | null
+        }
+        Insert: {
+          action_taken?: string | null
+          agent: string
+          completed_at?: string | null
+          cost_usd?: number | null
+          cycle_number: number
+          exit_code?: number | null
+          id?: string
+          max_turns?: number | null
+          model?: string | null
+          run_id: string
+          started_at?: string
+          subtask_number?: number | null
+          tokens_in?: number | null
+          tokens_out?: number | null
+          tool_calls_count?: number | null
+          turns_used?: number | null
+        }
+        Update: {
+          action_taken?: string | null
+          agent?: string
+          completed_at?: string | null
+          cost_usd?: number | null
+          cycle_number?: number
+          exit_code?: number | null
+          id?: string
+          max_turns?: number | null
+          model?: string | null
+          run_id?: string
+          started_at?: string
+          subtask_number?: number | null
+          tokens_in?: number | null
+          tokens_out?: number | null
+          tool_calls_count?: number | null
+          turns_used?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "overtime_cycles_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "overtime_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      overtime_runs: {
+        Row: {
+          branch_name: string | null
+          completed_at: string | null
+          created_by: string
+          git_commits: string[]
+          id: string
+          model: string | null
+          parent_task_number: number | null
+          slug: string
+          spec_title: string
+          started_at: string
+          status: string
+          total_cost_usd: number | null
+          total_cycles_e: number
+          total_cycles_u: number
+          total_rejections: number
+          type: string
+          worktree_path: string | null
+        }
+        Insert: {
+          branch_name?: string | null
+          completed_at?: string | null
+          created_by: string
+          git_commits?: string[]
+          id?: string
+          model?: string | null
+          parent_task_number?: number | null
+          slug: string
+          spec_title: string
+          started_at?: string
+          status?: string
+          total_cost_usd?: number | null
+          total_cycles_e?: number
+          total_cycles_u?: number
+          total_rejections?: number
+          type?: string
+          worktree_path?: string | null
+        }
+        Update: {
+          branch_name?: string | null
+          completed_at?: string | null
+          created_by?: string
+          git_commits?: string[]
+          id?: string
+          model?: string | null
+          parent_task_number?: number | null
+          slug?: string
+          spec_title?: string
+          started_at?: string
+          status?: string
+          total_cost_usd?: number | null
+          total_cycles_e?: number
+          total_cycles_u?: number
+          total_rejections?: number
+          type?: string
+          worktree_path?: string | null
+        }
+        Relationships: []
+      }
       posts: {
         Row: {
           author_avatar: string | null
