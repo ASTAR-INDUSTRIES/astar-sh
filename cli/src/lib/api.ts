@@ -116,6 +116,7 @@ export interface Task {
   description?: string;
   status: string;
   priority: string;
+  visibility?: string;
   created_by: string;
   assigned_to?: string;
   completed_by?: string;
@@ -320,6 +321,34 @@ export interface OvertimeCycle {
   tool_calls_count?: number | null;
   turns_used?: number | null;
   max_turns?: number | null;
+}
+
+export interface OvertimeRunComparison extends OvertimeRun {
+  subtask_count: number;
+  cost_per_subtask: number | null;
+}
+
+export interface OvertimeDashboard {
+  summary: {
+    total_runs: number;
+    total_cost_usd: number;
+    total_tokens_in: number;
+    total_tokens_out: number;
+    total_cycles: number;
+    total_rejections: number;
+    total_subtasks_delivered: number;
+    avg_cost_per_run: number;
+    avg_cost_per_subtask: number;
+    avg_cycles_per_run: number;
+    avg_rejection_rate: number;
+  };
+  daily: Array<{
+    date: string;
+    cost_usd: number;
+    runs: number;
+    cycles: number;
+    subtasks_delivered: number;
+  }>;
 }
 
 export class AstarAPI {
@@ -645,6 +674,7 @@ export class AstarAPI {
     title: string;
     description?: string;
     priority?: string;
+    visibility?: string;
     assigned_to?: string;
     due_date?: string;
     tags?: string[];
@@ -879,5 +909,18 @@ export class AstarAPI {
   async listOvertimeCycles(runId: string): Promise<OvertimeCycle[]> {
     const data = await this.fetch<{ cycles: OvertimeCycle[] }>(`/overtime/runs/${runId}/cycles`);
     return data.cycles;
+  }
+
+  async getOvertimeRejections(runId: string): Promise<{ total_rejections: number }> {
+    return this.fetch<{ total_rejections: number }>(`/overtime/runs/${runId}/rejections`);
+  }
+
+  async getOvertimeDashboard(): Promise<OvertimeDashboard> {
+    return this.fetch<OvertimeDashboard>("/overtime/dashboard");
+  }
+
+  async getOvertimeComparison(): Promise<OvertimeRunComparison[]> {
+    const data = await this.fetch<{ runs: OvertimeRunComparison[] }>("/overtime/comparison");
+    return data.runs;
   }
 }

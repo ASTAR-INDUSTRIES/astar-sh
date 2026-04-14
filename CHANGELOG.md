@@ -5,10 +5,45 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.79] - 2026-04-14
+
 ### Added
+- `overtime` specs now support `project: <slug>` and `feedback: id1, id2` preamble fields — the parent task and run record are linked to the project, and feedback items are auto-closed on done
 - `astar overtime stats --project <slug>` — filter the runs list to only show runs linked to a specific project
-- `overtime` specs now support a `feedback:` field (e.g. `feedback: id1, id2`) — the parent task is linked to those feedback items via `task_links`, and the feedback is auto-closed as "done" when the run completes
-- `overtime_runs` now stores a `project_id` FK — runs created from a spec with a `project:` field are linked to that project in the database
+- `astar projects info <slug>` now includes linked overtime runs with status, cost, and subtask counts
+- `overtime_runs.project_id` FK column (DB migration 20260413200000)
+
+## [0.0.78] - 2026-04-14
+
+### Added
+- `astar overtime dashboard` — aggregate view across all runs: avg cost per subtask, total spend, runs, subtasks delivered, cycles, rejection rate, and a 7-day ASCII sparkline of daily cost
+- `astar overtime stats` (no args) — per-run comparison table: slug, subtasks delivered, total cost, cost per subtask, rejections, cycles, duration
+- `astar overtime stats <id> --cycles` — full per-cycle breakdown with tokens in/out as separate columns
+- `astar overtime stop` and agent done-path now count E-Agent rejections (subtasks reopened) and store them on the run record
+
+## [0.0.77] - 2026-04-14
+
+### Changed
+- `astar overtime recap` activity log shows agent identity (e.g. `u-agent:auth-hardening`) instead of human email for comments made by overnight agents
+
+### Added
+- Overtime sessions now assign tasks to session-scoped agent IDs (`u-agent:<slug>`, `e-agent:<slug>`) so the audit trail attributes agent actions distinctly
+- `astar todo mine` hides overtime agent tasks by default; use `--all` to include them
+
+## [0.0.76] - 2026-04-14
+
+### Fixed
+- `astar todo team` no longer shows private tasks — the team board is filtered to `team` and `public` visibility only
+- Private tasks are no longer visible to other users via `GET /tasks` — visibility is now enforced at the database query level
+- `astar todo --monitor` now counts completed subtasks in the "done today" tally
+- `astar todo mine` and `astar todo list` show completed subtasks indented under their open parent tasks
+- `astar` dashboard "Tasks: X open" count now includes open subtasks
+
+### Added
+- `astar overtime monitor` — live full-screen dashboard showing all active sessions with slug, task number, subtask progress bar, state, uptime, cost, and log tail; refreshes every 5 seconds
+- `astar overtime monitor` — `[s]` keybinding stops a session by slug; `[q]` quits; footer shows aggregate stats (sessions, total cost, cycles, rejections)
+- `astar overtime stop <slug>` — stop a single session by slug instead of all running sessions
+- `astar todo "title" --private` creates the task with `visibility=private`; `--public` creates with `visibility=public`; default is `team`
 - `astar overtime status --verbose` — shows last cycle's cost, turns used, and model for each running session alongside existing progress/state/uptime
 - `overtime` E-Agent now explicitly rejects placeholder/stub returns, workaround code, import hacks, and mock-heavy test patches that mask real failures — reopens the subtask with "This routes around the problem instead of fixing it"
 - `overtime` U-Agent now runs the full project test suite before each commit — checks ENVIRONMENT CONTEXT for an explicit test command, falls back to common runners (pytest, npm test, bun test, cargo test, go test ./...), and reports results in the task comment
