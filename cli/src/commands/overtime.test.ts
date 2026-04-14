@@ -171,52 +171,52 @@ Some context.
   const doneFile = "/tmp/.done-auth-hardening";
 
   it("includes VERIFICATION CONTRACT section when verifications are present", () => {
-    const prompt = eAgentPrompt(42, specWithVerifications, doneFile);
+    const prompt = eAgentPrompt(42, specWithVerifications, doneFile, "e-agent:test");
     expect(prompt).toContain("VERIFICATION CONTRACT");
   });
 
   it("includes each verification run command", () => {
-    const prompt = eAgentPrompt(42, specWithVerifications, doneFile);
+    const prompt = eAgentPrompt(42, specWithVerifications, doneFile, "e-agent:test");
     expect(prompt).toContain("curl -s localhost:3000/health");
     expect(prompt).toContain("cat logs/app.log");
     expect(prompt).toContain("curl -sI localhost:3000/login");
   });
 
   it("includes expect substrings in the contract", () => {
-    const prompt = eAgentPrompt(42, specWithVerifications, doneFile);
+    const prompt = eAgentPrompt(42, specWithVerifications, doneFile, "e-agent:test");
     expect(prompt).toContain('"ok"');
     expect(prompt).toContain('"X-RateLimit-Limit"');
   });
 
   it("includes expect_absent substrings in the contract", () => {
-    const prompt = eAgentPrompt(42, specWithVerifications, doneFile);
+    const prompt = eAgentPrompt(42, specWithVerifications, doneFile, "e-agent:test");
     expect(prompt).toContain('"ERROR"');
     expect(prompt).toContain("NOT to contain");
   });
 
   it("includes verification step in FINAL SIGN-OFF when verifications present", () => {
-    const prompt = eAgentPrompt(42, specWithVerifications, doneFile);
+    const prompt = eAgentPrompt(42, specWithVerifications, doneFile, "e-agent:test");
     expect(prompt).toContain("VERIFICATION CONTRACT (below)");
   });
 
   it("includes verification rule in RULES when verifications present", () => {
-    const prompt = eAgentPrompt(42, specWithVerifications, doneFile);
+    const prompt = eAgentPrompt(42, specWithVerifications, doneFile, "e-agent:test");
     expect(prompt).toContain("All VERIFICATION CONTRACT checks must pass before sign-off");
   });
 
   it("does NOT include VERIFICATION CONTRACT when verifications are absent", () => {
-    const prompt = eAgentPrompt(7, specWithoutVerifications, doneFile);
+    const prompt = eAgentPrompt(7, specWithoutVerifications, doneFile, "e-agent:test");
     expect(prompt).not.toContain("VERIFICATION CONTRACT");
   });
 
   it("still includes requirements in the prompt when verifications are present", () => {
-    const prompt = eAgentPrompt(42, specWithVerifications, doneFile);
+    const prompt = eAgentPrompt(42, specWithVerifications, doneFile, "e-agent:test");
     expect(prompt).toContain("JWT refresh handles concurrent requests safely");
     expect(prompt).toContain("Add rate limiting to login endpoint");
   });
 
   it("includes all 3 verification names in the contract", () => {
-    const prompt = eAgentPrompt(42, specWithVerifications, doneFile);
+    const prompt = eAgentPrompt(42, specWithVerifications, doneFile, "e-agent:test");
     expect(prompt).toContain("server health check");
     expect(prompt).toContain("no errors in logs");
     expect(prompt).toContain("rate limit header present");
@@ -354,34 +354,34 @@ Some context.
   const doneFile = "/tmp/.done-simple";
 
   it("sign-off step instructs to run the FULL project test suite", () => {
-    const prompt = eAgentPrompt(10, spec, doneFile);
+    const prompt = eAgentPrompt(10, spec, doneFile, "e-agent:test");
     expect(prompt).toContain("FULL project test suite");
   });
 
   it("sign-off step says not just tests for touched files", () => {
-    const prompt = eAgentPrompt(10, spec, doneFile);
+    const prompt = eAgentPrompt(10, spec, doneFile, "e-agent:test");
     expect(prompt).toContain("not just tests for touched files");
   });
 
   it("sign-off step includes auto-detection guidance (check ENVIRONMENT CONTEXT)", () => {
-    const prompt = eAgentPrompt(10, spec, doneFile);
+    const prompt = eAgentPrompt(10, spec, doneFile, "e-agent:test");
     expect(prompt).toContain("ENVIRONMENT CONTEXT");
   });
 
   it("sign-off step lists common test runners for auto-detection", () => {
-    const prompt = eAgentPrompt(10, spec, doneFile);
+    const prompt = eAgentPrompt(10, spec, doneFile, "e-agent:test");
     expect(prompt).toContain("bun test");
     expect(prompt).toContain("npm test");
   });
 
   it("sign-off step states touched-file passing does not allow sign-off if full suite fails", () => {
-    const prompt = eAgentPrompt(10, spec, doneFile);
+    const prompt = eAgentPrompt(10, spec, doneFile, "e-agent:test");
     expect(prompt).toContain("touched-file tests pass");
     expect(prompt).toContain("failing test elsewhere blocks sign-off");
   });
 
   it("RULES section contains full test suite instruction", () => {
-    const prompt = eAgentPrompt(10, spec, doneFile);
+    const prompt = eAgentPrompt(10, spec, doneFile, "e-agent:test");
     expect(prompt).toContain("FULL project test suite before sign-off");
   });
 });
@@ -413,29 +413,29 @@ Do not touch the OAuth flow.
   const doneFile = "/tmp/.done-boundary";
 
   it("sign-off step instructs to run git diff main..HEAD --stat", () => {
-    const prompt = eAgentPrompt(10, specNoNotes, doneFile);
+    const prompt = eAgentPrompt(10, specNoNotes, doneFile, "e-agent:test");
     expect(prompt).toContain("git diff main..HEAD --stat");
   });
 
   it("sign-off step labels the step as a boundary check", () => {
-    const prompt = eAgentPrompt(10, specNoNotes, doneFile);
+    const prompt = eAgentPrompt(10, specNoNotes, doneFile, "e-agent:test");
     expect(prompt).toContain("Boundary check");
   });
 
   it("sign-off step says to reject if unexpected files appear in stat output", () => {
-    const prompt = eAgentPrompt(10, specNoNotes, doneFile);
+    const prompt = eAgentPrompt(10, specNoNotes, doneFile, "e-agent:test");
     expect(prompt).toContain("unexpected files");
   });
 
   it("includes notes-based path check when spec has notes", () => {
-    const prompt = eAgentPrompt(10, specWithNotes, doneFile);
+    const prompt = eAgentPrompt(10, specWithNotes, doneFile, "e-agent:test");
     expect(prompt).toContain("Do not touch the OAuth flow.");
     expect(prompt).toContain("grep the diff stat output for those paths");
     expect(prompt).toContain("reject sign-off if any are present");
   });
 
   it("does NOT include notes path check when spec has no notes", () => {
-    const prompt = eAgentPrompt(10, specNoNotes, doneFile);
+    const prompt = eAgentPrompt(10, specNoNotes, doneFile, "e-agent:test");
     expect(prompt).not.toContain("grep the diff stat output for those paths");
   });
 });

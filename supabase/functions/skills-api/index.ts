@@ -242,12 +242,23 @@ function canAccessEvent(event: any, user: AuthUser, project?: any | null): boole
   return event.visibility === "public" || event.visibility === "team" || event.created_by === user.email;
 }
 
+// Returns true for session-scoped agent IDs (u-agent:*, e-agent:*) that are not
+// registered users. These identities are used by overtime agents for assigned_to.
+function isAgentId(id: string | null | undefined): boolean {
+  return typeof id === "string" && (id.startsWith("u-agent:") || id.startsWith("e-agent:"));
+}
+
 function canAccessTask(task: any, user: AuthUser, project?: any | null): boolean {
   if (!task) return false;
   const callerEmail = user.email.toLowerCase();
   const isOwner = task.created_by?.toLowerCase() === callerEmail || task.assigned_to?.toLowerCase() === callerEmail;
-  if (task.visibility === "private") return isOwner;
-  if (isOwner) return true;
+  // Agent-assigned tasks (u-agent:*, e-agent:*) are not owned by a real user account.
+  // The human who started the overtime session is identified by created_by — use that
+  // as the ownership signal so the agent's tasks remain visible to the session creator.
+  const isAgentTaskOwner = isAgentId(task.assigned_to) && task.created_by?.toLowerCase() === callerEmail;
+  const hasAccess = isOwner || isAgentTaskOwner;
+  if (task.visibility === "private") return hasAccess;
+  if (hasAccess) return true;
   if (project) return canAccessProject(project, user);
   return task.visibility === "public" || task.visibility === "team";
 }
@@ -265,7 +276,11 @@ function canAccessAgent(agent: any, user: AuthUser, project?: any | null): boole
 }
 
 function canModifyTask(task: any, user: AuthUser): boolean {
-  return !!task && (task.created_by === user.email || task.assigned_to === user.email);
+  if (!task) return false;
+  const callerEmail = user.email.toLowerCase();
+  // Agent-assigned tasks can be modified by the human who created the session (created_by).
+  return task.created_by?.toLowerCase() === callerEmail || task.assigned_to?.toLowerCase() === callerEmail
+    || (isAgentId(task.assigned_to) && task.created_by?.toLowerCase() === callerEmail);
 }
 
 async function listOwnedAgentSlugs(sb: ReturnType<typeof getSupabase>, ownerEmail: string): Promise<Set<string>> {
@@ -1697,7 +1712,10 @@ app.get("/tasks", async (c) => {
   if (assignedTo && assignedTo !== "all") {
     query = query.eq("assigned_to", assignedTo);
   } else if (!assignedTo && !triage && !parent) {
-    query = query.or(`assigned_to.eq.${user.email},created_by.eq.${user.email}`);
+    // Include tasks the user owns or created. The created_by clause covers agent-assigned
+    // tasks (u-agent:*, e-agent:*) since those agents use the human's auth token and
+    // therefore always have created_by = user.email.
+    query = query.or(`assigned_to.eq.${callerEmail},created_by.eq.${callerEmail}`);
   }
 
   if (status) {

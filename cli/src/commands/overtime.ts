@@ -30,6 +30,8 @@ export interface OvertimeSpec {
 interface OvertimeSession {
   uPid: number;
   ePid: number;
+  uAgentId: string;
+  eAgentId: string;
   taskNumber: number;
   worktree: string;
   startedAt: string;
@@ -235,11 +237,14 @@ async function createOvertimeTasks(
     spec.notes ? `\n---\n**Notes:** ${spec.notes}` : "",
   ].filter(Boolean).join("\n");
 
+  const uAgentId = `u-agent:${spec.slug}`;
+
   const parent = await api.createTask({
     title: `[overtime] ${spec.title}`,
     description,
     priority: "medium",
     tags: ["overtime", spec.type],
+    assigned_to: uAgentId,
   });
 
   for (const req of spec.requirements) {
@@ -248,6 +253,7 @@ async function createOvertimeTasks(
       parent_task_number: parent.task_number,
       tags: ["overtime"],
       priority: "medium",
+      assigned_to: uAgentId,
     });
   }
 
@@ -300,11 +306,13 @@ async function loadContextFile(slug: string): Promise<string | null> {
 
 // ── Agent prompts ───────────────────────────────────────────────────
 
-function uAgentPrompt(taskNumber: number, spec: OvertimeSpec, envContext?: string | null): string {
+function uAgentPrompt(taskNumber: number, spec: OvertimeSpec, agentId: string, envContext?: string | null): string {
   const envBlock = envContext
     ? `\nENVIRONMENT CONTEXT:\n${envContext}\n`
     : "";
   return `You are U-Agent, an implementation engineer working overnight on behalf of a human developer.
+
+AGENT IDENTITY: ${agentId}
 ${envBlock}
 TASK: #${taskNumber} — ${spec.title}
 CONTEXT: ${spec.context}
@@ -313,7 +321,7 @@ ${spec.notes ? `NOTES: ${spec.notes}` : ""}
 CYCLE:
 1. Call get_task for #${taskNumber} to see the parent task and its subtasks.
 2. Find the first subtask with status "open". If none remain, you are done — exit.
-3. Call update_task to set that subtask to "in_progress".
+3. Call update_task to set that subtask to "in_progress", passing agent_id="${agentId}".
 4. Read the subtask title carefully — it is your requirement.
 5. Implement the requirement. Edit files, write code, add tests if appropriate.
 6. Run the full test suite for the project (not just the file you changed):
@@ -322,8 +330,8 @@ CYCLE:
    - If no test runner is found, note it in your task comment and continue.
    - Include the full suite results in the task comment (step 8).
 7. Git add and commit your changes with a clear message referencing the subtask.
-8. Call comment_task on the subtask describing what you did, which files you changed, and the commit hash.
-9. Call update_task to set the subtask to "completed".
+8. Call comment_task on the subtask describing what you did, which files you changed, and the commit hash. Always pass agent_id="${agentId}" so your identity appears in the audit trail.
+9. Call update_task to set the subtask to "completed", passing agent_id="${agentId}".
 
 RULES:
 - One subtask per cycle. Do it well, then exit.
@@ -336,7 +344,7 @@ RULES:
 - If the subtask title or description contains words like "cheap", "lightweight", "no fresh measurements", or "negligible cost": before calling any existing function to satisfy that constraint, trace its call graph (grep the source, follow imports, read the bodies of functions it calls). Then comment on the subtask with what you found — e.g. "getVelocity() calls the API → not cheap". Do this before writing code that depends on the assumption being true.`;
 }
 
-export function eAgentPrompt(taskNumber: number, spec: OvertimeSpec, doneFile: string, envContext?: string | null): string {
+export function eAgentPrompt(taskNumber: number, spec: OvertimeSpec, doneFile: string, agentId: string, envContext?: string | null): string {
   const envBlock = envContext
     ? `\nENVIRONMENT CONTEXT:\n${envContext}\n`
     : "";
@@ -363,6 +371,8 @@ export function eAgentPrompt(taskNumber: number, spec: OvertimeSpec, doneFile: s
     : "";
 
   return `You are E-Agent, a code reviewer working overnight. You review the work of U-Agent.
+
+AGENT IDENTITY: ${agentId}
 ${envBlock}
 TASK: #${taskNumber} — ${spec.title}
 CONTEXT: ${spec.context}
@@ -377,8 +387,8 @@ CYCLE:
    b. Use git log and git diff to review the actual code changes.
    c. Run any existing tests.
    d. Verify the requirement is actually met — not just that code was written, but that it solves the stated problem.
-   e. If the implementation is GOOD: call comment_task with "LGTM — [brief reason]"
-   f. If the implementation has ISSUES: call update_task to set the subtask back to "open", then call comment_task with specific feedback on what to fix.
+   e. If the implementation is GOOD: call comment_task with "LGTM — [brief reason]", passing agent_id="${agentId}".
+   f. If the implementation has ISSUES: call update_task to set the subtask back to "open" (passing agent_id="${agentId}"), then call comment_task with specific feedback on what to fix (passing agent_id="${agentId}").
 
 5. FINAL SIGN-OFF — only when ALL subtasks have LGTM comments, perform a comprehensive final review before closing:
 
@@ -395,11 +405,11 @@ ${spec.requirements.map((r, i) => `      - Requirement ${i + 1}: "${r}"`).join("
    g. Check that commits are clean and atomic — no debug code, no commented-out blocks, no leftover TODOs.
 ${verificationSignOffStep}
    If EVERYTHING passes:
-   - Call comment_task on parent #${taskNumber} with a detailed sign-off report:
+   - Call comment_task on parent #${taskNumber} with a detailed sign-off report, passing agent_id="${agentId}":
      "SIGN-OFF: All requirements verified."
      Then list each requirement and how it was verified.
      Include: files changed, tests run, branch diff summary.
-   - Call update_task on #${taskNumber} to set status to "completed".
+   - Call update_task on #${taskNumber} to set status to "completed", passing agent_id="${agentId}".
    - Run: touch ${doneFile}
 
    If ANY check fails during final review:
@@ -688,8 +698,10 @@ async function startOvertime(fileFilter?: string) {
       console.log(`    ${c.dim}(telemetry run record unavailable: ${e.message})${c.reset}`);
     }
 
-    const uScript = makeAgentScript("U-Agent", uAgentPrompt(parentTaskNumber, spec, envContext), U_TOOLS, 100, worktree, 180, doneFile, "u", runId, config.apiUrl, token);
-    const eScript = makeAgentScript("E-Agent", eAgentPrompt(parentTaskNumber, spec, doneFile, envContext), E_TOOLS, 100, worktree, 180, doneFile, "e", runId, config.apiUrl, token);
+    const uAgentId = `u-agent:${spec.slug}`;
+    const eAgentId = `e-agent:${spec.slug}`;
+    const uScript = makeAgentScript("U-Agent", uAgentPrompt(parentTaskNumber, spec, uAgentId, envContext), U_TOOLS, 100, worktree, 180, doneFile, "u", runId, config.apiUrl, token);
+    const eScript = makeAgentScript("E-Agent", eAgentPrompt(parentTaskNumber, spec, doneFile, eAgentId, envContext), E_TOOLS, 100, worktree, 180, doneFile, "e", runId, config.apiUrl, token);
 
     // E-Agent starts with a 5-minute delay baked in
     const eScriptWithDelay = `echo "$(date '+%Y-%m-%d %H:%M:%S') [E-Agent] Waiting 5m for U-Agent to start..."\nsleep 300\n${eScript}`;
@@ -701,6 +713,8 @@ async function startOvertime(fileFilter?: string) {
     pids[spec.slug] = {
       uPid: uProc.pid!,
       ePid: eProc.pid!,
+      uAgentId,
+      eAgentId,
       taskNumber: parentTaskNumber,
       worktree,
       startedAt: new Date().toISOString(),
@@ -925,7 +939,7 @@ async function showRecap() {
       for (const a of comments as any[]) {
         const ts = a.timestamp || a.created_at;
         const time = ts ? new Date(ts).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "??:??";
-        const who = ((a.actor_email || a.actor || "") as string).split("@")[0] || "agent";
+        const who = (a.actor_agent_id as string | null) || ((a.actor_email || a.actor || "") as string).split("@")[0] || "agent";
         const msg = (a.state_after?.comment || a.details?.comment || a.context?.comment || "commented") as string;
         console.log(`    ${c.dim}${time}${c.reset}  ${who}  ${c.dim}${msg.split("\n")[0].slice(0, 80)}${c.reset}`);
       }

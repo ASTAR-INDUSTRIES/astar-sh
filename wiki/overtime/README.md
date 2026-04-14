@@ -147,12 +147,27 @@ E-Agent cycle:
   7. Done file stops both agents
 ```
 
+## Agent identity
+
+Each overtime session gives both agents a session-scoped identity:
+
+- **U-Agent**: `u-agent:<slug>` (e.g. `u-agent:auth-hardening`)
+- **E-Agent**: `e-agent:<slug>` (e.g. `e-agent:auth-hardening`)
+
+These are not registered agents — they're ephemeral string identifiers for one session.
+
+**Tasks**: parent task and subtasks are `assigned_to: u-agent:<slug>` so task ownership reflects the agent, not the human.
+
+**Audit trail**: When agents call `comment_task` or `update_task` via MCP, they pass `agent_id` in the call. The mcp-server stores this as `actor_agent_id` in the audit event. The `astar overtime recap` display shows the agent ID (e.g. `u-agent:auth-hardening`) instead of the human email when `actor_agent_id` is set.
+
+The human's MS token is still used for authentication — access control is unchanged. The agent ID is purely an audit annotation.
+
 ## State management
 
 No local state files beyond PIDs. astar.sh is the source of truth.
 
 - **Tasks**: parent task `[overtime] Title` with subtask per requirement
-- **PIDs**: `.astar/overtime/pids.json` tracks running processes
+- **PIDs**: `.astar/overtime/pids.json` tracks running processes (includes `uAgentId`, `eAgentId`)
 - **Done signal**: `.astar/overtime/.done-<slug>` stops both loops
 - **Logs**: `.astar/overtime/logs/<slug>.log`
 - **Code**: `.astar/worktrees/overtime-<slug>` (git worktree)

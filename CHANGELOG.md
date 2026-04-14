@@ -5,6 +5,15 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.77] - 2026-04-14
+
+### Changed
+- `astar overtime recap` activity log shows agent identity (e.g. `u-agent:auth-hardening`) instead of human email for comments made by overnight agents
+
+### Added
+- Overtime sessions now assign tasks to session-scoped agent IDs (`u-agent:<slug>`, `e-agent:<slug>`) so the audit trail attributes agent actions distinctly
+- `astar todo mine` hides overtime agent tasks by default; use `--all` to include them
+
 ## [0.0.76] - 2026-04-14
 
 ### Fixed
