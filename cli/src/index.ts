@@ -24,7 +24,7 @@ import { AstarAPI } from "./lib/api";
 import { c } from "./lib/ui";
 import { resolve } from "path";
 
-export const VERSION = "0.0.75";
+export const VERSION = "0.0.78";
 
 async function showDashboard() {
   const status = await getAuthStatus();
@@ -68,8 +68,11 @@ async function showDashboard() {
   let taskCount = "—";
   try {
     const api = new AstarAPI();
-    const tasks = await api.listTasks().catch(() => []);
-    const open = tasks.filter((t) => t.status === "open" || t.status === "in_progress").length;
+    const tasks = await api.listTasks({ include_subtasks: true }).catch(() => []);
+    const isOpen = (t: { status: string }) => t.status === "open" || t.status === "in_progress";
+    const topOpen = tasks.filter(isOpen).length;
+    const subOpen = tasks.flatMap((t) => t.subtasks ?? []).filter(isOpen).length;
+    const open = topOpen + subOpen;
     taskCount = open > 0 ? `${c.white}${open}${c.reset} open` : "0";
   } catch {}
 

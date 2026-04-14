@@ -5,12 +5,37 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.78] - 2026-04-14
+
 ### Added
-- `astar overtime stop` and organic E-Agent done-path now count E-Agent rejections (subtasks reopened from completed → open) and store the total on the run record as `total_rejections`; backed by new `GET /overtime/runs/:id/rejections` endpoint
-- `astar overtime stats <id> --cycles` — full per-cycle breakdown with tokens in and tokens out as separate columns, plus cost bolded; omitting `--cycles` shows the existing compact combined-token view
-- `astar overtime stats` (no args) now shows a per-run comparison table: slug, subtasks delivered, total cost, cost per subtask, rejections, cycles (U/E), and duration — sorted by most recent; backed by new `GET /overtime/comparison` endpoint
-- `astar overtime dashboard` — aggregate view across all runs: avg cost per subtask (prominent), total spend, runs completed, subtasks delivered, avg cost/run, cycles, rejection rate, tokens in/out, and a 7-day ASCII sparkline (▁▂▃▄▅▆▇█) of daily cost
-- `GET /overtime/dashboard` API endpoint — returns aggregate stats across all runs (total cost, tokens, cycles, rejections, subtasks delivered, avg cost per subtask, avg cost per run, avg cycles per run, avg rejection rate) with a 7-day daily breakdown
+- `astar overtime dashboard` — aggregate view across all runs: avg cost per subtask, total spend, runs, subtasks delivered, cycles, rejection rate, and a 7-day ASCII sparkline of daily cost
+- `astar overtime stats` (no args) — per-run comparison table: slug, subtasks delivered, total cost, cost per subtask, rejections, cycles, duration
+- `astar overtime stats <id> --cycles` — full per-cycle breakdown with tokens in/out as separate columns
+- `astar overtime stop` and agent done-path now count E-Agent rejections (subtasks reopened) and store them on the run record
+
+## [0.0.77] - 2026-04-14
+
+### Changed
+- `astar overtime recap` activity log shows agent identity (e.g. `u-agent:auth-hardening`) instead of human email for comments made by overnight agents
+
+### Added
+- Overtime sessions now assign tasks to session-scoped agent IDs (`u-agent:<slug>`, `e-agent:<slug>`) so the audit trail attributes agent actions distinctly
+- `astar todo mine` hides overtime agent tasks by default; use `--all` to include them
+
+## [0.0.76] - 2026-04-14
+
+### Fixed
+- `astar todo team` no longer shows private tasks — the team board is filtered to `team` and `public` visibility only
+- Private tasks are no longer visible to other users via `GET /tasks` — visibility is now enforced at the database query level
+- `astar todo --monitor` now counts completed subtasks in the "done today" tally
+- `astar todo mine` and `astar todo list` show completed subtasks indented under their open parent tasks
+- `astar` dashboard "Tasks: X open" count now includes open subtasks
+
+### Added
+- `astar overtime monitor` — live full-screen dashboard showing all active sessions with slug, task number, subtask progress bar, state, uptime, cost, and log tail; refreshes every 5 seconds
+- `astar overtime monitor` — `[s]` keybinding stops a session by slug; `[q]` quits; footer shows aggregate stats (sessions, total cost, cycles, rejections)
+- `astar overtime stop <slug>` — stop a single session by slug instead of all running sessions
+- `astar todo "title" --private` creates the task with `visibility=private`; `--public` creates with `visibility=public`; default is `team`
 - `astar overtime status --verbose` — shows last cycle's cost, turns used, and model for each running session alongside existing progress/state/uptime
 - `overtime` E-Agent now explicitly rejects placeholder/stub returns, workaround code, import hacks, and mock-heavy test patches that mask real failures — reopens the subtask with "This routes around the problem instead of fixing it"
 - `overtime` U-Agent now runs the full project test suite before each commit — checks ENVIRONMENT CONTEXT for an explicit test command, falls back to common runners (pytest, npm test, bun test, cargo test, go test ./...), and reports results in the task comment

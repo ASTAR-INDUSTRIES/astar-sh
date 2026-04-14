@@ -242,11 +242,23 @@ function canAccessEvent(event: any, user: AuthUser, project?: any | null): boole
   return event.visibility === "public" || event.visibility === "team" || event.created_by === user.email;
 }
 
+// Returns true for session-scoped agent IDs (u-agent:*, e-agent:*) that are not
+// registered users. These identities are used by overtime agents for assigned_to.
+function isAgentId(id: string | null | undefined): boolean {
+  return typeof id === "string" && (id.startsWith("u-agent:") || id.startsWith("e-agent:"));
+}
+
 function canAccessTask(task: any, user: AuthUser, project?: any | null): boolean {
   if (!task) return false;
-  const isOwner = task.created_by === user.email || task.assigned_to === user.email;
-  if (task.visibility === "private") return isOwner;
-  if (isOwner) return true;
+  const callerEmail = user.email.toLowerCase();
+  const isOwner = task.created_by?.toLowerCase() === callerEmail || task.assigned_to?.toLowerCase() === callerEmail;
+  // Agent-assigned tasks (u-agent:*, e-agent:*) are not owned by a real user account.
+  // The human who started the overtime session is identified by created_by — use that
+  // as the ownership signal so the agent's tasks remain visible to the session creator.
+  const isAgentTaskOwner = isAgentId(task.assigned_to) && task.created_by?.toLowerCase() === callerEmail;
+  const hasAccess = isOwner || isAgentTaskOwner;
+  if (task.visibility === "private") return hasAccess;
+  if (hasAccess) return true;
   if (project) return canAccessProject(project, user);
   return task.visibility === "public" || task.visibility === "team";
 }
@@ -264,7 +276,11 @@ function canAccessAgent(agent: any, user: AuthUser, project?: any | null): boole
 }
 
 function canModifyTask(task: any, user: AuthUser): boolean {
-  return !!task && (task.created_by === user.email || task.assigned_to === user.email);
+  if (!task) return false;
+  const callerEmail = user.email.toLowerCase();
+  // Agent-assigned tasks can be modified by the human who created the session (created_by).
+  return task.created_by?.toLowerCase() === callerEmail || task.assigned_to?.toLowerCase() === callerEmail
+    || (isAgentId(task.assigned_to) && task.created_by?.toLowerCase() === callerEmail);
 }
 
 async function listOwnedAgentSlugs(sb: ReturnType<typeof getSupabase>, ownerEmail: string): Promise<Set<string>> {
@@ -1672,7 +1688,13 @@ app.get("/tasks", async (c) => {
   const sb = getSupabase();
   let filterProject: any = null;
   let filterEvent: any = null;
+  const callerEmail = user.email.toLowerCase();
   let query = sb.from("tasks").select("*").is("archived_at", null).order("created_at", { ascending: false }).limit(fetchLimit);
+
+  // Server-side visibility enforcement: private tasks are only returned if the
+  // caller is the creator or assignee. This runs at the DB level so private
+  // tasks never enter the application layer for non-owners.
+  query = query.or(`visibility.neq.private,created_by.eq.${callerEmail},assigned_to.eq.${callerEmail}`);
 
   if (triage === "true") {
     query = query.eq("requires_triage", true);
@@ -1690,7 +1712,10 @@ app.get("/tasks", async (c) => {
   if (assignedTo && assignedTo !== "all") {
     query = query.eq("assigned_to", assignedTo);
   } else if (!assignedTo && !triage && !parent) {
-    query = query.or(`assigned_to.eq.${user.email},created_by.eq.${user.email}`);
+    // Include tasks the user owns or created. The created_by clause covers agent-assigned
+    // tasks (u-agent:*, e-agent:*) since those agents use the human's auth token and
+    // therefore always have created_by = user.email.
+    query = query.or(`assigned_to.eq.${callerEmail},created_by.eq.${callerEmail}`);
   }
 
   if (status) {
@@ -1736,7 +1761,7 @@ app.get("/tasks", async (c) => {
   const includeSubtasks = c.req.query("include_subtasks") === "true";
   if (includeSubtasks && tasks.length && !parent) {
     const parentIds = tasks.map((t: any) => t.id);
-    const { data: subs } = await sb.from("tasks").select("*").in("parent_task_id", parentIds).is("archived_at", null).order("task_number", { ascending: true });
+    const { data: subs } = await sb.from("tasks").select("*").in("parent_task_id", parentIds).is("archived_at", null).or(`visibility.neq.private,created_by.eq.${callerEmail},assigned_to.eq.${callerEmail}`).order("task_number", { ascending: true });
     if (subs?.length) {
       const subsByParent: Record<string, any[]> = {};
       for (const subtask of subs) (subsByParent[subtask.parent_task_id] ||= []).push(subtask);
@@ -1874,7 +1899,13 @@ app.get("/tasks/:number", async (c) => {
   const { data: task, error } = await sb.from("tasks").select("*").eq("task_number", num).single();
   if (error || !task) return c.json({ error: "Task not found" }, 404, corsHeaders);
   await hydrateRecordsWithProjects(sb, [task]);
-  if (!canAccessTask(task, user, task.project)) return c.json({ error: "Task not found" }, 404, corsHeaders);
+  if (!canAccessTask(task, user, task.project)) {
+    // Return 403 for private tasks so the caller knows the task exists but is forbidden.
+    // Return 404 for team/public tasks the caller genuinely has no access to (project-gated).
+    const status = task.visibility === "private" ? 403 : 404;
+    const message = task.visibility === "private" ? "Forbidden" : "Task not found";
+    return c.json({ error: message }, status, corsHeaders);
+  }
 
   const { data: activity } = await sb.from("audit_events").select("*").eq("entity_type", "task").eq("entity_id", String(task.task_number)).order("timestamp", { ascending: false }).limit(20);
   const { data: subtasks } = await sb.from("tasks").select("*").eq("parent_task_id", task.id).order("task_number", { ascending: true });

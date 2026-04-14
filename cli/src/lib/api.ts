@@ -116,6 +116,7 @@ export interface Task {
   description?: string;
   status: string;
   priority: string;
+  visibility?: string;
   created_by: string;
   assigned_to?: string;
   completed_by?: string;
@@ -671,6 +672,7 @@ export class AstarAPI {
     title: string;
     description?: string;
     priority?: string;
+    visibility?: string;
     assigned_to?: string;
     due_date?: string;
     tags?: string[];
