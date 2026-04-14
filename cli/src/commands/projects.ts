@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import { AstarAPI, type Agent, type Event, type Milestone, type Project, type Task } from "../lib/api";
+import { AstarAPI, type Agent, type Event, type Milestone, type OvertimeRun, type Project, type Task } from "../lib/api";
 import { getToken } from "../lib/auth";
 import { c, table } from "../lib/ui";
 
@@ -77,6 +77,16 @@ function renderMilestoneRows(milestones: Milestone[]) {
     truncate(milestone.title, 36),
     milestone.category,
     `${c.dim}${milestone.created_by || "—"}${c.reset}`,
+  ]);
+}
+
+function renderOvertimeRunRows(runs: OvertimeRun[]) {
+  return runs.map((run) => [
+    `${c.cyan}${run.slug}${c.reset}`,
+    truncate(run.spec_title, 32),
+    run.status,
+    run.total_cost_usd != null ? `$${run.total_cost_usd.toFixed(2)}` : `${c.dim}—${c.reset}`,
+    run.subtask_count != null ? String(run.subtask_count) : `${c.dim}—${c.reset}`,
   ]);
 }
 
@@ -158,7 +168,7 @@ export function registerProjectCommands(program: Command) {
       const token = await requireAuth();
       const api = new AstarAPI(token);
       try {
-        const { project, tasks, events, agents, milestones } = await api.getProject(slug);
+        const { project, tasks, events, agents, milestones, overtime_runs } = await api.getProject(slug);
 
         console.log("");
         console.log(`  ${c.bold}${project.name}${c.reset}`);
@@ -170,6 +180,7 @@ export function registerProjectCommands(program: Command) {
         printSection("Events", ["Slug", "Event", "Status", "Type"], renderEventRows(events), "No attached events.");
         printSection("Agents", ["Slug", "Agent", "Status", "Owner"], renderAgentRows(agents), "No attached agents.");
         printSection("Milestones", ["Date", "Milestone", "Category", "By"], renderMilestoneRows(milestones), "No attached milestones.");
+        printSection("Overtime Runs", ["Slug", "Spec", "Status", "Cost", "Subtasks"], renderOvertimeRunRows(overtime_runs || []), "No linked overtime runs.");
         console.log("");
       } catch (e: any) {
         console.error(`${c.red}✗${c.reset} ${e.message}`);

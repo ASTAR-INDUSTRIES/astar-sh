@@ -5,6 +5,14 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.79] - 2026-04-14
+
+### Added
+- `overtime` specs now support `project: <slug>` and `feedback: id1, id2` preamble fields — the parent task and run record are linked to the project, and feedback items are auto-closed on done
+- `astar overtime stats --project <slug>` — filter the runs list to only show runs linked to a specific project
+- `astar projects info <slug>` now includes linked overtime runs with status, cost, and subtask counts
+- `overtime_runs.project_id` FK column (DB migration 20260413200000)
+
 ## [0.0.78] - 2026-04-14
 
 ### Added

@@ -289,6 +289,7 @@ export interface OvertimeRun {
   spec_title: string;
   type: string;
   parent_task_number?: number | null;
+  project_id?: string | null;
   started_at: string;
   completed_at?: string | null;
   status: string;
@@ -300,6 +301,7 @@ export interface OvertimeRun {
   worktree_path?: string | null;
   branch_name?: string | null;
   git_commits: string[];
+  subtask_count?: number;
 }
 
 export interface OvertimeCycle {
@@ -488,7 +490,7 @@ export class AstarAPI {
     return data.projects;
   }
 
-  async getProject(slug: string): Promise<{ project: Project; tasks: Task[]; events: Event[]; agents: Agent[]; milestones: Milestone[] }> {
+  async getProject(slug: string): Promise<{ project: Project; tasks: Task[]; events: Event[]; agents: Agent[]; milestones: Milestone[]; overtime_runs: OvertimeRun[] }> {
     return this.fetch(`/projects/${slug}`);
   }
 
@@ -859,6 +861,7 @@ export class AstarAPI {
     model?: string | null;
     worktree_path?: string | null;
     branch_name?: string | null;
+    project?: string | null;
   }): Promise<{ ok: boolean; id: string }> {
     const config = await getConfig();
     const res = await fetch(`${config.apiUrl}/overtime/runs`, {
@@ -890,8 +893,11 @@ export class AstarAPI {
     return res.json();
   }
 
-  async listOvertimeRuns(): Promise<OvertimeRun[]> {
-    const data = await this.fetch<{ runs: OvertimeRun[] }>("/overtime/runs");
+  async listOvertimeRuns(filters?: { project?: string }): Promise<OvertimeRun[]> {
+    const params = new URLSearchParams();
+    if (filters?.project) params.set("project", filters.project);
+    const qs = params.toString();
+    const data = await this.fetch<{ runs: OvertimeRun[] }>(`/overtime/runs${qs ? `?${qs}` : ""}`);
     return data.runs;
   }
 

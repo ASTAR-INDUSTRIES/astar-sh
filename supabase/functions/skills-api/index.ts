@@ -653,6 +653,7 @@ app.get("/projects/:slug", async (c) => {
     eventsResult,
     agentsResult,
     milestonesResult,
+    overtimeRunsResult,
   ] = await Promise.all([
     sb.from("tasks")
       .select("*")
@@ -677,17 +678,60 @@ app.get("/projects/:slug", async (c) => {
       .eq("project_id", project.id)
       .order("date", { ascending: false })
       .limit(50),
+    sb.from("overtime_runs")
+      .select("*")
+      .eq("project_id", project.id)
+      .order("started_at", { ascending: false })
+      .limit(50),
   ]);
 
   if (tasksResult.error) return c.json({ error: tasksResult.error.message }, 500, corsHeaders);
   if (eventsResult.error) return c.json({ error: eventsResult.error.message }, 500, corsHeaders);
   if (agentsResult.error) return c.json({ error: agentsResult.error.message }, 500, corsHeaders);
   if (milestonesResult.error) return c.json({ error: milestonesResult.error.message }, 500, corsHeaders);
+  if (overtimeRunsResult.error) return c.json({ error: overtimeRunsResult.error.message }, 500, corsHeaders);
 
   const tasks = (tasksResult.data || []).filter((task: any) => canAccessTask(task, user, project));
   const events = (eventsResult.data || []).filter((event: any) => canAccessEvent(event, user, project));
   const agents = (agentsResult.data || []).filter((agent: any) => canAccessAgent(agent, user, project));
   const milestones = (milestonesResult.data || []).filter((milestone: any) => canAccessMilestone(milestone, user, project));
+  const overtimeRuns = overtimeRunsResult.data || [];
+
+  // Enrich overtime runs with subtask counts
+  const parentTaskNumbers = overtimeRuns
+    .map((r: any) => r.parent_task_number)
+    .filter((n: any) => n != null) as number[];
+
+  if (parentTaskNumbers.length > 0) {
+    const { data: parentTasks } = await sb.from("tasks")
+      .select("id, task_number")
+      .in("task_number", parentTaskNumbers);
+
+    if (parentTasks && parentTasks.length > 0) {
+      const parentIdByTaskNumber: Record<number, string> = {};
+      for (const pt of parentTasks) parentIdByTaskNumber[pt.task_number] = pt.id;
+
+      const parentIds = Object.values(parentIdByTaskNumber);
+      const { data: subtaskRows } = await sb.from("tasks")
+        .select("parent_task_id")
+        .in("parent_task_id", parentIds)
+        .is("archived_at", null);
+
+      const subtaskCountByParentId: Record<string, number> = {};
+      for (const row of subtaskRows || []) {
+        subtaskCountByParentId[row.parent_task_id] = (subtaskCountByParentId[row.parent_task_id] || 0) + 1;
+      }
+
+      for (const run of overtimeRuns as any[]) {
+        const pid = run.parent_task_number != null ? parentIdByTaskNumber[run.parent_task_number] : undefined;
+        run.subtask_count = pid ? (subtaskCountByParentId[pid] || 0) : 0;
+      }
+    } else {
+      for (const run of overtimeRuns as any[]) run.subtask_count = 0;
+    }
+  } else {
+    for (const run of overtimeRuns as any[]) run.subtask_count = 0;
+  }
 
   await hydrateTasksWithContext(sb, tasks as any[]);
   await hydrateRecordsWithProjects(sb, events as any[]);
@@ -703,6 +747,7 @@ app.get("/projects/:slug", async (c) => {
     events,
     agents,
     milestones,
+    overtime_runs: overtimeRuns,
   }, 200, corsHeaders);
 });
 
@@ -2857,6 +2902,14 @@ app.post("/overtime/runs", async (c) => {
   if (!body.spec_title) return c.json({ error: "spec_title is required" }, 400, corsHeaders);
 
   const sb = getSupabase();
+
+  let projectId: string | null = null;
+  if (body.project) {
+    const project = await resolveProjectRef(sb, body.project);
+    if (!project) return c.json({ error: `Project "${body.project}" not found` }, 404, corsHeaders);
+    projectId = project.id;
+  }
+
   const { data, error } = await sb.from("overtime_runs").insert({
     slug: body.slug,
     spec_title: body.spec_title,
@@ -2866,6 +2919,7 @@ app.post("/overtime/runs", async (c) => {
     model: body.model ?? null,
     worktree_path: body.worktree_path ?? null,
     branch_name: body.branch_name ?? null,
+    project_id: projectId,
     created_by: user.email,
   }).select("id").single();
 
@@ -2879,7 +2933,7 @@ app.post("/overtime/runs", async (c) => {
     entity_id: data?.id,
     action: "started",
     channel: "api",
-    state_after: { slug: body.slug, spec_title: body.spec_title, type: body.type || "dev" },
+    state_after: { slug: body.slug, spec_title: body.spec_title, type: body.type || "dev", project_id: projectId },
   });
 
   return c.json({ ok: true, id: data!.id }, 200, corsHeaders);
@@ -2930,11 +2984,20 @@ app.get("/overtime/runs", async (c) => {
   if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
 
   const sb = getSupabase();
-  const { data, error } = await sb.from("overtime_runs")
+  const projectSlug = c.req.query("project");
+
+  let query = sb.from("overtime_runs")
     .select("*")
     .order("started_at", { ascending: false })
     .limit(50);
 
+  if (projectSlug) {
+    const project = await resolveProjectRef(sb, projectSlug);
+    if (!project) return c.json({ error: `Project "${projectSlug}" not found` }, 404, corsHeaders);
+    query = query.eq("project_id", project.id);
+  }
+
+  const { data, error } = await query;
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
   return c.json({ runs: data || [] }, 200, corsHeaders);
 });

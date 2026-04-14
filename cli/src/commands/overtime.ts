@@ -21,6 +21,8 @@ export interface OvertimeSpec {
   slug: string;
   title: string;
   type: string;
+  project?: string;
+  feedbackIds: string[];
   context: string;
   requirements: string[];
   notes: string;
@@ -36,6 +38,7 @@ interface OvertimeSession {
   worktree: string;
   startedAt: string;
   runId?: string;
+  feedbackIds?: string[];
 }
 
 type PidFile = Record<string, OvertimeSession>;
@@ -96,6 +99,8 @@ export function parseSpec(content: string, filename: string): OvertimeSpec {
 
   let title = slug;
   let type = "dev";
+  let project: string | undefined;
+  let feedbackIds: string[] = [];
   const contextLines: string[] = [];
   const requirements: string[] = [];
   const notesLines: string[] = [];
@@ -115,6 +120,19 @@ export function parseSpec(content: string, filename: string): OvertimeSpec {
 
     if (/^overtime:\s*/i.test(trimmed)) {
       type = trimmed.replace(/^overtime:\s*/i, "").trim() || "dev";
+      if (section === "preamble") section = "context";
+      continue;
+    }
+
+    if (/^project:\s*/i.test(trimmed)) {
+      project = trimmed.replace(/^project:\s*/i, "").trim() || undefined;
+      if (section === "preamble") section = "context";
+      continue;
+    }
+
+    if (/^feedback:\s*/i.test(trimmed)) {
+      const raw = trimmed.replace(/^feedback:\s*/i, "").trim();
+      feedbackIds = raw.split(/[\s,]+/).filter(Boolean);
       if (section === "preamble") section = "context";
       continue;
     }
@@ -209,6 +227,8 @@ export function parseSpec(content: string, filename: string): OvertimeSpec {
     slug,
     title,
     type,
+    project,
+    feedbackIds,
     context: contextLines.join("\n").trim(),
     requirements,
     notes: notesLines.join("\n").trim(),
@@ -244,6 +264,7 @@ async function createOvertimeTasks(
     description,
     priority: "medium",
     tags: ["overtime", spec.type],
+    project: spec.project,
     assigned_to: uAgentId,
   });
 
@@ -253,6 +274,7 @@ async function createOvertimeTasks(
       parent_task_number: parent.task_number,
       tags: ["overtime"],
       priority: "medium",
+      project: spec.project,
       assigned_to: uAgentId,
     });
   }
@@ -676,6 +698,15 @@ async function startOvertime(fileFilter?: string) {
     const { parentTaskNumber, subtaskCount, existed } = await createOvertimeTasks(api, spec);
     const taskLabel = existed ? "existing" : "created";
 
+    // Link feedback items to parent task
+    for (const fid of spec.feedbackIds) {
+      try {
+        await api.linkTask(parentTaskNumber, "feedback", fid);
+      } catch (e: any) {
+        console.log(`    ${c.dim}(feedback link ${fid} failed: ${e.message})${c.reset}`);
+      }
+    }
+
     // Setup worktree
     const worktree = setupWorktree(spec.slug);
 
@@ -696,6 +727,7 @@ async function startOvertime(fileFilter?: string) {
         parent_task_number: parentTaskNumber,
         worktree_path: worktree,
         branch_name: branchName,
+        project: spec.project ?? null,
       });
       runId = runResult.id;
     } catch (e: any) {
@@ -723,6 +755,7 @@ async function startOvertime(fileFilter?: string) {
       worktree,
       startedAt: new Date().toISOString(),
       runId: runId || undefined,
+      feedbackIds: spec.feedbackIds.length ? spec.feedbackIds : undefined,
     };
 
     console.log(`  ${c.green}✓${c.reset} ${c.white}${spec.title}${c.reset}`);
@@ -1080,6 +1113,21 @@ async function stopOvertime(targetSlug: string | undefined, opts: { clean?: bool
 
     console.log(`  ${c.green}✓${c.reset} Stopped ${c.white}${slug}${c.reset} (task #${taskNumber})`);
 
+    // Auto-close linked feedback when run completed successfully (done file present)
+    if (s.feedbackIds?.length && api) {
+      const isDone = existsSync(join(OVERTIME_DIR, `.done-${slug}`));
+      if (isDone) {
+        for (const fid of s.feedbackIds) {
+          try {
+            await api.updateFeedback(fid, "done");
+            console.log(`    ${c.dim}Closed feedback ${fid}${c.reset}`);
+          } catch (e: any) {
+            console.log(`    ${c.dim}(feedback close ${fid} failed: ${e.message})${c.reset}`);
+          }
+        }
+      }
+    }
+
     if (opts.clean && worktree) {
       try {
         execSync(`git worktree remove "${worktree}" --force`, { stdio: "pipe" });
@@ -1114,7 +1162,7 @@ function statusColor(status: string): string {
   return c.dim + status + c.reset;
 }
 
-async function showStats(runId?: string, opts: { cycles?: boolean } = {}) {
+async function showStats(runId?: string, opts: { cycles?: boolean; project?: string } = {}) {
   const token = await requireAuth();
   const api = new AstarAPI(token);
 
@@ -1122,7 +1170,12 @@ async function showStats(runId?: string, opts: { cycles?: boolean } = {}) {
     // Per-slug comparison table
     let runs: OvertimeRunComparison[];
     try {
-      runs = await api.getOvertimeComparison();
+      if (opts.project) {
+        const basic = await api.listOvertimeRuns({ project: opts.project });
+        runs = basic.map((r) => ({ ...r, subtask_count: 0, cost_per_subtask: null }));
+      } else {
+        runs = await api.getOvertimeComparison();
+      }
     } catch (e: any) {
       console.error(`${c.red}✗${c.reset} ${e.message}`);
       process.exit(1);
@@ -1889,7 +1942,8 @@ export function registerOvertimeCommands(program: Command) {
     .command("stats [run-id]")
     .description("Show telemetry for overtime runs — list all or detail for a specific run")
     .option("--cycles", "Show full per-cycle breakdown with tokens in/out split (requires run-id)")
-    .action(async (runId: string | undefined, opts: { cycles?: boolean }) => {
+    .option("--project <slug>", "Filter runs by project slug")
+    .action(async (runId: string | undefined, opts: { cycles?: boolean; project?: string }) => {
       await showStats(runId, opts);
     });
 

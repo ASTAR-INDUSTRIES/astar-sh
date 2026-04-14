@@ -201,6 +201,7 @@ Each overnight run writes a persistent record to `overtime_runs` on astar.sh. Th
 | `spec_title` | text | Title from the spec file |
 | `type` | text | `dev` / `ops` / `docs` / `test` |
 | `parent_task_number` | integer | astar.sh task number |
+| `project_id` | uuid | FK → `projects.id` (nullable) — set when spec includes `project: <slug>` |
 | `started_at` | timestamptz | Session start time |
 | `completed_at` | timestamptz | Session end time (null while running) |
 | `status` | text | `running` / `done` / `failed` / `stopped` |
