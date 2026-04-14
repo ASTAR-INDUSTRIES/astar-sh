@@ -127,7 +127,8 @@ async function renderMonitor(api: AstarAPI, opts: { mineOnly?: boolean; myEmail?
   const todayStr = now.toISOString().split("T")[0];
   const time = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-  const doneToday = completedTasks.filter((t) => t.completed_at?.startsWith(todayStr));
+  const doneTodaySubtasks = openTasks.flatMap((t) => t.subtasks ?? []).filter((s) => s.status === "completed" && s.completed_at?.startsWith(todayStr));
+  const doneToday = [...completedTasks.filter((t) => t.completed_at?.startsWith(todayStr)), ...doneTodaySubtasks];
   const open = openTasks.filter((t) => t.status !== "completed" && t.status !== "cancelled");
 
   const sorted = [...open].sort((a, b) => {
@@ -228,6 +229,8 @@ export function registerTodoCommands(program: Command) {
     .option("--project <slug>", "Assign or filter tasks by project")
     .option("--estimate <hours>", "Estimated hours")
     .option("--recurring <interval>", "Recurring: weekly, monthly, quarterly")
+    .option("--private", "Create task with private visibility (only visible to you)")
+    .option("--public", "Create task with public visibility (visible to everyone)")
     .option("--monitor", "Live-updating task view (refreshes every 10s)")
     .action(async (title: string | undefined, opts) => {
       if (opts.monitor) {
@@ -275,10 +278,12 @@ export function registerTodoCommands(program: Command) {
       const api = new AstarAPI(token);
 
       try {
+        const visibility = opts.private ? "private" : opts.public ? "public" : "team";
         const createPayload: any = {
           title,
           description: opts.description,
           priority: opts.priority,
+          visibility,
           assigned_to: opts.assign,
           due_date: opts.due,
           tags: opts.tag ? [opts.tag] : undefined,
@@ -443,7 +448,10 @@ export function registerTodoCommands(program: Command) {
       const token = await requireAuth();
       const api = new AstarAPI(token);
       try {
-        const tasks = await api.listTasks({ assigned_to: "all", event: opts.event, project: opts.project, include_subtasks: true });
+        const allTasks = await api.listTasks({ assigned_to: "all", event: opts.event, project: opts.project, include_subtasks: true });
+        // Team view only shows team and public tasks — private tasks are personal
+        // and must not appear in the shared team board, even for the caller's own tasks.
+        const tasks = allTasks.filter((t) => t.visibility !== "private");
         if (!tasks.length) {
           console.log(`${c.dim}No tasks found.${c.reset}`);
           return;

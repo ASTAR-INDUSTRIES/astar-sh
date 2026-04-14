@@ -180,10 +180,12 @@ function canAccessEvent(event: any, user: { email: string }, project?: any | nul
 
 function canAccessTask(task: any, user: { email: string }, project?: any | null): boolean {
   if (!task) return false;
-  if (task.visibility === "private") return task.created_by === user.email || task.assigned_to === user.email;
+  const callerEmail = user.email.toLowerCase();
+  const isOwner = task.created_by?.toLowerCase() === callerEmail || task.assigned_to?.toLowerCase() === callerEmail;
+  if (task.visibility === "private") return isOwner;
+  if (isOwner) return true;
   if (project) return canAccessProject(project, user);
-  if (task.visibility === "public" || task.visibility === "team") return true;
-  return task.created_by === user.email || task.assigned_to === user.email;
+  return task.visibility === "public" || task.visibility === "team";
 }
 
 function canAccessMilestone(milestone: any, user: { email: string }, project?: any | null): boolean {
@@ -199,7 +201,9 @@ function canAccessAgent(agent: any, user: { email: string }, project?: any | nul
 }
 
 function canModifyTask(task: any, user: { email: string }): boolean {
-  return !!task && (task.created_by === user.email || task.assigned_to === user.email);
+  if (!task) return false;
+  const callerEmail = user.email.toLowerCase();
+  return task.created_by?.toLowerCase() === callerEmail || task.assigned_to?.toLowerCase() === callerEmail;
 }
 
 async function listOwnedAgentSlugs(sb: ReturnType<typeof adminClient>, ownerEmail: string): Promise<Set<string>> {
