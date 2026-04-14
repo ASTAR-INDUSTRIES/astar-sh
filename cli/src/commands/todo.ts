@@ -120,7 +120,8 @@ async function renderMonitor(api: AstarAPI, opts: { mineOnly?: boolean; myEmail?
   const todayStr = now.toISOString().split("T")[0];
   const time = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-  const doneToday = completedTasks.filter((t) => t.completed_at?.startsWith(todayStr));
+  const doneTodaySubtasks = openTasks.flatMap((t) => t.subtasks ?? []).filter((s) => s.status === "completed" && s.completed_at?.startsWith(todayStr));
+  const doneToday = [...completedTasks.filter((t) => t.completed_at?.startsWith(todayStr)), ...doneTodaySubtasks];
   const open = openTasks.filter((t) => t.status !== "completed" && t.status !== "cancelled");
 
   const sorted = [...open].sort((a, b) => {
