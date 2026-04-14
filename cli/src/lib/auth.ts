@@ -5,6 +5,13 @@ import { getConfig, getAuthCache, saveAuthCache, clearAuthCache, paths, ensureAg
 import { c } from "./ui";
 
 const SCOPES = ["openid", "profile", "email"];
+const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000; // refresh 5 min before expiry
+
+function debugLog(msg: string) {
+  if (process.env.ASTAR_DEBUG === "1") {
+    console.error(`[auth:debug] ${msg}`);
+  }
+}
 
 function getIdTokenExpiry(idToken: string): number | null {
   try {
@@ -13,6 +20,20 @@ function getIdTokenExpiry(idToken: string): number | null {
   } catch {
     return null;
   }
+}
+
+// Resolve the cache expiry from the ID token's JWT exp claim.
+// result.expiresOn from MSAL is the *access token* expiry (Graph API), not the
+// ID token expiry — using it here would cause spurious re-auth when the access
+// token expires before the ID token, or mask the true ID token lifetime.
+function resolveExpiresAt(idToken: string | null | undefined, msalExpiresOn: Date | null | undefined): number {
+  const idTokenExpiry = idToken ? getIdTokenExpiry(idToken) : null;
+  debugLog(
+    `resolveExpiresAt: idToken JWT exp=${idTokenExpiry ? new Date(idTokenExpiry).toISOString() : "null"}` +
+    ` msalExpiresOn=${msalExpiresOn ? msalExpiresOn.toISOString() : "null"}`
+  );
+  // Never fall back to msalExpiresOn — use 1 hr as the safe default instead.
+  return idTokenExpiry ?? Date.now() + 3600_000;
 }
 
 async function getMsalClient() {
@@ -89,7 +110,7 @@ export async function login(): Promise<AuthCache> {
   const token = result.idToken || result.accessToken;
   const cache: AuthCache = {
     accessToken: token,
-    expiresAt: getIdTokenExpiry(token) ?? result.expiresOn?.getTime() ?? Date.now() + 3600_000,
+    expiresAt: resolveExpiresAt(result.idToken, result.expiresOn),
     homeAccountId: result.account?.homeAccountId,
     account: {
       name: result.account?.name ?? "Unknown",
@@ -147,7 +168,7 @@ export async function loginForAgent(slug: string): Promise<AuthCache> {
   const agentToken = result.idToken || result.accessToken;
   const cache: AuthCache = {
     accessToken: agentToken,
-    expiresAt: getIdTokenExpiry(agentToken) ?? result.expiresOn?.getTime() ?? Date.now() + 3600_000,
+    expiresAt: resolveExpiresAt(result.idToken, result.expiresOn),
     homeAccountId: result.account?.homeAccountId,
     account: {
       name: result.account?.name ?? "Unknown",
@@ -175,7 +196,7 @@ export async function getToken(opts?: { interactive?: boolean }): Promise<string
   const cache = await getAuthCache();
   if (!cache) throw new Error("Not authenticated. Run 'astar login' first.");
 
-  if (cache.expiresAt > Date.now()) return cache.accessToken;
+  if (cache.expiresAt > Date.now() + TOKEN_EXPIRY_BUFFER_MS) return cache.accessToken;
 
   // Token expired — try silent refresh first
   const refreshed = await silentRefresh(cache);
@@ -197,23 +218,68 @@ export async function getToken(opts?: { interactive?: boolean }): Promise<string
 }
 
 async function silentRefresh(cache: AuthCache): Promise<AuthCache | null> {
-  if (!cache.homeAccountId) return null;
+  if (!cache.homeAccountId) {
+    debugLog("silentRefresh: no homeAccountId in cache, skipping");
+    return null;
+  }
 
   try {
+    const cacheFile = Bun.file(paths.msalCache);
+    const cacheExists = await cacheFile.exists();
+    debugLog(`silentRefresh: MSAL cache file exists=${cacheExists} path=${paths.msalCache}`);
+
     const client = await getMsalClient();
     const accounts = await client.getTokenCache().getAllAccounts();
+    debugLog(`silentRefresh: accounts in MSAL cache=${accounts.length}`);
+
     const account = accounts.find((a) => a.homeAccountId === cache.homeAccountId);
+    debugLog(`silentRefresh: account matched=${!!account} (homeAccountId=${cache.homeAccountId})`);
     if (!account) return null;
 
-    const result = await client.acquireTokenSilent({ scopes: SCOPES, account });
-    if (!result) return null;
+    let result;
+    try {
+      result = await client.acquireTokenSilent({ scopes: SCOPES, account });
+      debugLog(`silentRefresh: acquireTokenSilent succeeded idToken=${!!result?.idToken} accessToken=${!!result?.accessToken}`);
+    } catch (err) {
+      debugLog(`silentRefresh: acquireTokenSilent threw: ${err instanceof Error ? err.message : String(err)}`);
+
+      // If the MSAL cache exists and contains a refresh token (90-day lifetime),
+      // try again with forceRefresh: true to bypass the stale in-memory cache
+      // and force a network refresh using the stored refresh token.
+      let hasRefreshToken = false;
+      if (cacheExists) {
+        try {
+          const cacheData = JSON.parse(await cacheFile.text());
+          hasRefreshToken =
+            typeof cacheData.RefreshToken === "object" &&
+            cacheData.RefreshToken !== null &&
+            Object.keys(cacheData.RefreshToken).length > 0;
+        } catch {}
+      }
+      debugLog(`silentRefresh: MSAL cache hasRefreshToken=${hasRefreshToken}`);
+
+      if (!hasRefreshToken) return null;
+
+      try {
+        result = await client.acquireTokenSilent({ scopes: SCOPES, account, forceRefresh: true });
+        debugLog(`silentRefresh: acquireTokenSilent(forceRefresh) succeeded idToken=${!!result?.idToken} accessToken=${!!result?.accessToken}`);
+      } catch (err2) {
+        debugLog(`silentRefresh: acquireTokenSilent(forceRefresh) threw: ${err2 instanceof Error ? err2.message : String(err2)}`);
+        return null;
+      }
+    }
+
+    if (!result) {
+      debugLog("silentRefresh: acquireTokenSilent returned null");
+      return null;
+    }
 
     await persistMsalCache(client);
 
     const refreshToken = result.idToken || result.accessToken;
     const refreshed: AuthCache = {
       accessToken: refreshToken,
-      expiresAt: getIdTokenExpiry(refreshToken) ?? result.expiresOn?.getTime() ?? Date.now() + 3600_000,
+      expiresAt: resolveExpiresAt(result.idToken, result.expiresOn),
       homeAccountId: result.account?.homeAccountId,
       account: {
         name: result.account?.name ?? cache.account.name,
@@ -222,7 +288,8 @@ async function silentRefresh(cache: AuthCache): Promise<AuthCache | null> {
     };
     await saveAuthCache(refreshed);
     return refreshed;
-  } catch {
+  } catch (err) {
+    debugLog(`silentRefresh: unexpected error: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }

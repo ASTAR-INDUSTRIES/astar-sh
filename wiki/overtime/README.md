@@ -106,9 +106,15 @@ The `overtime:` line sets the work type. Currently just metadata, but useful for
 astar overtime start              # start all specs in .astar/overtime/
 astar overtime start --file auth  # start only auth.md
 astar overtime status             # check what's running and progress
+astar overtime status --verbose   # + last cycle cost/turns/model
 astar overtime recap              # morning summary with full activity
 astar overtime stop               # kill running agents
 astar overtime stop --clean       # kill + remove git worktrees
+astar overtime stats              # compare all runs: cost, subtasks, rejections
+astar overtime stats <id>         # per-cycle breakdown for one run
+astar overtime stats <id> --cycles  # tokens in/out split per cycle
+astar overtime dashboard          # aggregate spend, efficiency, 7-day trend
+astar overtime guide              # best practices for writing specs
 ```
 
 ## How it works internally
@@ -147,12 +153,27 @@ E-Agent cycle:
   7. Done file stops both agents
 ```
 
+## Agent identity
+
+Each overtime session gives both agents a session-scoped identity:
+
+- **U-Agent**: `u-agent:<slug>` (e.g. `u-agent:auth-hardening`)
+- **E-Agent**: `e-agent:<slug>` (e.g. `e-agent:auth-hardening`)
+
+These are not registered agents — they're ephemeral string identifiers for one session.
+
+**Tasks**: parent task and subtasks are `assigned_to: u-agent:<slug>` so task ownership reflects the agent, not the human.
+
+**Audit trail**: When agents call `comment_task` or `update_task` via MCP, they pass `agent_id` in the call. The mcp-server stores this as `actor_agent_id` in the audit event. The `astar overtime recap` display shows the agent ID (e.g. `u-agent:auth-hardening`) instead of the human email when `actor_agent_id` is set.
+
+The human's MS token is still used for authentication — access control is unchanged. The agent ID is purely an audit annotation.
+
 ## State management
 
 No local state files beyond PIDs. astar.sh is the source of truth.
 
 - **Tasks**: parent task `[overtime] Title` with subtask per requirement
-- **PIDs**: `.astar/overtime/pids.json` tracks running processes
+- **PIDs**: `.astar/overtime/pids.json` tracks running processes (includes `uAgentId`, `eAgentId`)
 - **Done signal**: `.astar/overtime/.done-<slug>` stops both loops
 - **Logs**: `.astar/overtime/logs/<slug>.log`
 - **Code**: `.astar/worktrees/overtime-<slug>` (git worktree)
@@ -180,6 +201,7 @@ Each overnight run writes a persistent record to `overtime_runs` on astar.sh. Th
 | `spec_title` | text | Title from the spec file |
 | `type` | text | `dev` / `ops` / `docs` / `test` |
 | `parent_task_number` | integer | astar.sh task number |
+| `project_id` | uuid | FK → `projects.id` (nullable) — set when spec includes `project: <slug>` |
 | `started_at` | timestamptz | Session start time |
 | `completed_at` | timestamptz | Session end time (null while running) |
 | `status` | text | `running` / `done` / `failed` / `stopped` |
@@ -214,6 +236,28 @@ Each individual agent invocation writes one row here. Together with `overtime_ru
 | `tool_calls_count` | integer | Number of tool calls made |
 | `turns_used` | integer | Turns consumed out of max |
 | `max_turns` | integer | Max turns configured for this cycle |
+
+### Run finalization
+
+When a run ends — either via `astar overtime stop` or organically when E-Agent creates the done file — the CLI finalizes the run record with:
+
+- `status`: `done` (done file existed) or `stopped` (manually killed)
+- `completed_at`: timestamp of finalization
+- `total_cycles_u` / `total_cycles_e`: counted from `overtime_cycles` records
+- `total_cost_usd`: summed from cycle `cost_usd` values
+- `total_rejections`: counted from `audit_events` via `GET /overtime/runs/:id/rejections`
+- `git_commits`: all commit hashes on the branch since `main`
+
+### Rejection counting
+
+`total_rejections` measures how many times E-Agent sent a subtask back to open. The pattern: E-Agent calls PATCH /tasks/:number with `{ status: "open" }` on a subtask that was previously "completed". This generates an `audit_events` row with `action="updated"`, `state_before.status="completed"`, `state_after.status="open"`.
+
+The `GET /overtime/runs/:id/rejections` endpoint reconstructs this count at finalization time by:
+1. Looking up the run's `parent_task_number`
+2. Finding all subtasks of that parent task
+3. Querying `audit_events` for the completed→open pattern across all those subtask numbers
+
+Both the TypeScript `stop` command and the bash E-Agent done-path use this endpoint, so `total_rejections` is accurate regardless of which path ends the run.
 
 ## Limitations (v1)
 

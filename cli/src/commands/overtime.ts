@@ -5,27 +5,40 @@ import { homedir } from "os";
 import { unlinkSync, existsSync } from "fs";
 import { getToken } from "../lib/auth";
 import { getConfig } from "../lib/config";
-import { AstarAPI, type Task, type TaskActivity, type OvertimeRun } from "../lib/api";
+import { AstarAPI, type Task, type TaskActivity, type OvertimeRun, type OvertimeRunComparison } from "../lib/api";
 import { c, table } from "../lib/ui";
 
 // ── Types ───────────────────────────────────────────────────────────
 
-interface OvertimeSpec {
+export interface VerificationCheck {
+  name: string;
+  run: string;
+  expect?: string;
+  expect_absent?: string;
+}
+
+export interface OvertimeSpec {
   slug: string;
   title: string;
   type: string;
+  project?: string;
+  feedbackIds: string[];
   context: string;
   requirements: string[];
   notes: string;
+  verifications: VerificationCheck[];
 }
 
 interface OvertimeSession {
   uPid: number;
   ePid: number;
+  uAgentId: string;
+  eAgentId: string;
   taskNumber: number;
   worktree: string;
   startedAt: string;
   runId?: string;
+  feedbackIds?: string[];
 }
 
 type PidFile = Record<string, OvertimeSession>;
@@ -80,17 +93,21 @@ function ensureClaudeInstalled(): void {
 
 // ── Spec parser ─────────────────────────────────────────────────────
 
-function parseSpec(content: string, filename: string): OvertimeSpec {
+export function parseSpec(content: string, filename: string): OvertimeSpec {
   const slug = basename(filename, ".md").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const lines = content.split("\n");
 
   let title = slug;
   let type = "dev";
+  let project: string | undefined;
+  let feedbackIds: string[] = [];
   const contextLines: string[] = [];
   const requirements: string[] = [];
   const notesLines: string[] = [];
+  const verifications: VerificationCheck[] = [];
+  let currentVerification: Partial<VerificationCheck> | null = null;
 
-  let section: "preamble" | "context" | "requirements" | "notes" = "preamble";
+  let section: "preamble" | "context" | "requirements" | "notes" | "verification" = "preamble";
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -107,18 +124,52 @@ function parseSpec(content: string, filename: string): OvertimeSpec {
       continue;
     }
 
+    if (/^project:\s*/i.test(trimmed)) {
+      project = trimmed.replace(/^project:\s*/i, "").trim() || undefined;
+      if (section === "preamble") section = "context";
+      continue;
+    }
+
+    if (/^feedback:\s*/i.test(trimmed)) {
+      const raw = trimmed.replace(/^feedback:\s*/i, "").trim();
+      feedbackIds = raw.split(/[\s,]+/).filter(Boolean);
+      if (section === "preamble") section = "context";
+      continue;
+    }
+
     if (/^##\s+requirements/i.test(trimmed)) {
+      if (currentVerification?.name && currentVerification?.run) {
+        verifications.push(currentVerification as VerificationCheck);
+        currentVerification = null;
+      }
       section = "requirements";
       continue;
     }
 
     if (/^##\s+notes/i.test(trimmed)) {
+      if (currentVerification?.name && currentVerification?.run) {
+        verifications.push(currentVerification as VerificationCheck);
+        currentVerification = null;
+      }
       section = "notes";
+      continue;
+    }
+
+    if (/^##\s+verification/i.test(trimmed)) {
+      if (currentVerification?.name && currentVerification?.run) {
+        verifications.push(currentVerification as VerificationCheck);
+        currentVerification = null;
+      }
+      section = "verification";
       continue;
     }
 
     if (/^##\s+/.test(trimmed) && section !== "preamble") {
       // Unknown H2 — treat as notes
+      if (currentVerification?.name && currentVerification?.run) {
+        verifications.push(currentVerification as VerificationCheck);
+        currentVerification = null;
+      }
       section = "notes";
       notesLines.push(line);
       continue;
@@ -136,16 +187,52 @@ function parseSpec(content: string, filename: string): OvertimeSpec {
       case "notes":
         notesLines.push(line);
         break;
+      case "verification": {
+        // Start a new check block
+        const nameMatch = trimmed.match(/^-\s+name:\s+(.+)$/);
+        if (nameMatch) {
+          if (currentVerification?.name && currentVerification?.run) {
+            verifications.push(currentVerification as VerificationCheck);
+          }
+          currentVerification = { name: nameMatch[1].trim() };
+          break;
+        }
+        if (!currentVerification) break;
+        const runMatch = trimmed.match(/^run:\s+(.+)$/);
+        if (runMatch) {
+          currentVerification.run = runMatch[1].trim();
+          break;
+        }
+        const expectMatch = trimmed.match(/^expect:\s+"?([^"]*)"?$/);
+        if (expectMatch) {
+          currentVerification.expect = expectMatch[1].trim();
+          break;
+        }
+        const expectAbsentMatch = trimmed.match(/^expect_absent:\s+"?([^"]*)"?$/);
+        if (expectAbsentMatch) {
+          currentVerification.expect_absent = expectAbsentMatch[1].trim();
+          break;
+        }
+        break;
+      }
     }
+  }
+
+  // Flush any in-progress verification check at EOF
+  if (currentVerification?.name && currentVerification?.run) {
+    verifications.push(currentVerification as VerificationCheck);
   }
 
   return {
     slug,
     title,
     type,
+    project,
+    feedbackIds,
     context: contextLines.join("\n").trim(),
     requirements,
     notes: notesLines.join("\n").trim(),
+    verifications,
   };
 }
 
@@ -170,11 +257,15 @@ async function createOvertimeTasks(
     spec.notes ? `\n---\n**Notes:** ${spec.notes}` : "",
   ].filter(Boolean).join("\n");
 
+  const uAgentId = `u-agent:${spec.slug}`;
+
   const parent = await api.createTask({
     title: `[overtime] ${spec.title}`,
     description,
     priority: "medium",
     tags: ["overtime", spec.type],
+    project: spec.project,
+    assigned_to: uAgentId,
   });
 
   for (const req of spec.requirements) {
@@ -183,6 +274,8 @@ async function createOvertimeTasks(
       parent_task_number: parent.task_number,
       tags: ["overtime"],
       priority: "medium",
+      project: spec.project,
+      assigned_to: uAgentId,
     });
   }
 
@@ -235,11 +328,13 @@ async function loadContextFile(slug: string): Promise<string | null> {
 
 // ── Agent prompts ───────────────────────────────────────────────────
 
-function uAgentPrompt(taskNumber: number, spec: OvertimeSpec, envContext?: string | null): string {
+function uAgentPrompt(taskNumber: number, spec: OvertimeSpec, agentId: string, envContext?: string | null): string {
   const envBlock = envContext
     ? `\nENVIRONMENT CONTEXT:\n${envContext}\n`
     : "";
   return `You are U-Agent, an implementation engineer working overnight on behalf of a human developer.
+
+AGENT IDENTITY: ${agentId}
 ${envBlock}
 TASK: #${taskNumber} — ${spec.title}
 CONTEXT: ${spec.context}
@@ -248,7 +343,7 @@ ${spec.notes ? `NOTES: ${spec.notes}` : ""}
 CYCLE:
 1. Call get_task for #${taskNumber} to see the parent task and its subtasks.
 2. Find the first subtask with status "open". If none remain, you are done — exit.
-3. Call update_task to set that subtask to "in_progress".
+3. Call update_task to set that subtask to "in_progress", passing agent_id="${agentId}".
 4. Read the subtask title carefully — it is your requirement.
 5. Implement the requirement. Edit files, write code, add tests if appropriate.
 6. Run the full test suite for the project (not just the file you changed):
@@ -257,8 +352,8 @@ CYCLE:
    - If no test runner is found, note it in your task comment and continue.
    - Include the full suite results in the task comment (step 8).
 7. Git add and commit your changes with a clear message referencing the subtask.
-8. Call comment_task on the subtask describing what you did, which files you changed, and the commit hash.
-9. Call update_task to set the subtask to "completed".
+8. Call comment_task on the subtask describing what you did, which files you changed, and the commit hash. Always pass agent_id="${agentId}" so your identity appears in the audit trail.
+9. Call update_task to set the subtask to "completed", passing agent_id="${agentId}".
 
 RULES:
 - One subtask per cycle. Do it well, then exit.
@@ -271,11 +366,35 @@ RULES:
 - If the subtask title or description contains words like "cheap", "lightweight", "no fresh measurements", or "negligible cost": before calling any existing function to satisfy that constraint, trace its call graph (grep the source, follow imports, read the bodies of functions it calls). Then comment on the subtask with what you found — e.g. "getVelocity() calls the API → not cheap". Do this before writing code that depends on the assumption being true.`;
 }
 
-function eAgentPrompt(taskNumber: number, spec: OvertimeSpec, doneFile: string, envContext?: string | null): string {
+export function eAgentPrompt(taskNumber: number, spec: OvertimeSpec, doneFile: string, agentId: string, envContext?: string | null): string {
   const envBlock = envContext
     ? `\nENVIRONMENT CONTEXT:\n${envContext}\n`
     : "";
+
+  const verificationContract = spec.verifications.length > 0
+    ? `\nVERIFICATION CONTRACT — run ALL checks before final sign-off:\n${spec.verifications.map((v, i) => {
+        const lines = [`  ${i + 1}. ${v.name}`, `     run: ${v.run}`];
+        if (v.expect) lines.push(`     expect output to contain: "${v.expect}"`);
+        if (v.expect_absent) lines.push(`     expect output NOT to contain: "${v.expect_absent}"`);
+        return lines.join("\n");
+      }).join("\n")}\n`
+    : "";
+
+  const verificationSignOffStep = spec.verifications.length > 0
+    ? `   h. Run every check in the VERIFICATION CONTRACT (below). A check fails if the command exits non-zero, the expected substring is absent, or a forbidden substring is present. Any failure blocks sign-off — do NOT create the done file.\n`
+    : "";
+
+  const verificationRule = spec.verifications.length > 0
+    ? `- All VERIFICATION CONTRACT checks must pass before sign-off. Run each command, verify the output, and reject if any check fails.\n`
+    : "";
+
+  const boundaryNotesCheck = spec.notes
+    ? `\n      Also check: the spec NOTES say "${spec.notes}". If the notes mention specific files, directories, or paths to avoid, grep the diff stat output for those paths — reject sign-off if any are present.`
+    : "";
+
   return `You are E-Agent, a code reviewer working overnight. You review the work of U-Agent.
+
+AGENT IDENTITY: ${agentId}
 ${envBlock}
 TASK: #${taskNumber} — ${spec.title}
 CONTEXT: ${spec.context}
@@ -290,41 +409,45 @@ CYCLE:
    b. Use git log and git diff to review the actual code changes.
    c. Run any existing tests.
    d. Verify the requirement is actually met — not just that code was written, but that it solves the stated problem.
-   e. If the implementation is GOOD: call comment_task with "LGTM — [brief reason]"
-   f. If the implementation has ISSUES: call update_task to set the subtask back to "open", then call comment_task with specific feedback on what to fix.
+   e. If the implementation is GOOD: call comment_task with "LGTM — [brief reason]", passing agent_id="${agentId}".
+   f. If the implementation has ISSUES: call update_task to set the subtask back to "open" (passing agent_id="${agentId}"), then call comment_task with specific feedback on what to fix (passing agent_id="${agentId}").
 
 5. FINAL SIGN-OFF — only when ALL subtasks have LGTM comments, perform a comprehensive final review before closing:
 
    a. Run "git diff main...HEAD" to see the ENTIRE branch diff — review every changed file holistically.
-   b. Run the full test suite. If any test fails, do NOT sign off. Reopen the relevant subtask.
+   b. Run the FULL project test suite — not just tests for touched files. Auto-detect the test runner:
+      - Check ENVIRONMENT CONTEXT for a "test command" entry — use that if present.
+      - Otherwise try in order: bun test, npm test, pytest, cargo test, go test ./...
+      Even if all touched-file tests pass, a failing test elsewhere blocks sign-off. Reopen the relevant subtask with the failure output.
    c. Walk through each original requirement one by one. For each, verify the code change actually satisfies it:
 ${spec.requirements.map((r, i) => `      - Requirement ${i + 1}: "${r}"`).join("\n")}
-   d. Check for unintended side effects: were any files modified that shouldn't have been?
+   d. Boundary check — run "git diff main..HEAD --stat" and verify no files outside the spec's scope were modified. If any unexpected files appear in the stat output, reject and reopen the relevant subtask with the list of unexpected files.${boundaryNotesCheck}
    e. Check for regressions: does the existing functionality still work?
    f. Check for security issues: any hardcoded secrets, injection vectors, or unsafe operations?
    g. Check that commits are clean and atomic — no debug code, no commented-out blocks, no leftover TODOs.
-
+${verificationSignOffStep}
    If EVERYTHING passes:
-   - Call comment_task on parent #${taskNumber} with a detailed sign-off report:
+   - Call comment_task on parent #${taskNumber} with a detailed sign-off report, passing agent_id="${agentId}":
      "SIGN-OFF: All requirements verified."
      Then list each requirement and how it was verified.
      Include: files changed, tests run, branch diff summary.
-   - Call update_task on #${taskNumber} to set status to "completed".
+   - Call update_task on #${taskNumber} to set status to "completed", passing agent_id="${agentId}".
    - Run: touch ${doneFile}
 
    If ANY check fails during final review:
    - Do NOT sign off. Reopen the failing subtask with specific feedback.
    - Do NOT create the done file.
-
+${verificationContract}
 RULES:
 - Be thorough. The human is asleep — you are the last line of defense before they see this work.
 - Focus on correctness: does the code actually satisfy the requirement?
+- Run the FULL project test suite before sign-off — not just tests for touched files. A failure anywhere in the suite blocks sign-off, even if the touched files all pass.
 - Run tests. If they fail, reject.
 - Be specific in rejection feedback — say exactly what to fix.
 - Do not nitpick style. Focus on logic, correctness, edge cases.
 - You cannot edit code. You can only review and comment.
 - The done file (touch command) is critical — it signals the overnight session to stop.
-- Explicitly reject any of the following — reopen the subtask with the message "This routes around the problem instead of fixing it":
+${verificationRule}- Explicitly reject any of the following — reopen the subtask with the message "This routes around the problem instead of fixing it":
   - Placeholder or stub returns (e.g. \`return null\`, \`return []\`, \`return "TODO"\`, \`pass\`, \`throw new Error("not implemented")\`)
   - Workaround code that avoids the actual failure path instead of fixing it
   - Import hacks (re-exporting the wrong type, casting \`as any\`, \`@ts-ignore\`, \`// eslint-disable\`)
@@ -374,6 +497,9 @@ if command -v jq &>/dev/null && command -v curl &>/dev/null; then
   TOTAL_U=$(echo "$CYCLES_RESP" | jq '[.cycles[] | select(.agent=="u")] | length' 2>/dev/null || echo "0")
   TOTAL_E=$(echo "$CYCLES_RESP" | jq '[.cycles[] | select(.agent=="e")] | length' 2>/dev/null || echo "0")
   TOTAL_COST=$(echo "$CYCLES_RESP" | jq '[.cycles[].cost_usd // 0] | add // null' 2>/dev/null || echo "null")
+  REJ_RESP=$(curl -sf "${apiUrl}/overtime/runs/${runId}/rejections" \\
+    -H "Authorization: Bearer $AUTH_TOKEN" 2>/dev/null)
+  TOTAL_REJ=$(echo "$REJ_RESP" | jq '.total_rejections // 0' 2>/dev/null || echo "0")
   FINALIZE_JSON=$(jq -nc \\
     --arg status "done" \\
     --arg completed_at "$FINAL_TS" \\
@@ -381,13 +507,14 @@ if command -v jq &>/dev/null && command -v curl &>/dev/null; then
     --argjson total_cycles_u "\${TOTAL_U:-0}" \\
     --argjson total_cycles_e "\${TOTAL_E:-0}" \\
     --argjson total_cost_usd "\${TOTAL_COST:-null}" \\
-    '{status: $status, completed_at: $completed_at, git_commits: $git_commits, total_cycles_u: $total_cycles_u, total_cycles_e: $total_cycles_e, total_cost_usd: $total_cost_usd}' 2>/dev/null)
+    --argjson total_rejections "\${TOTAL_REJ:-0}" \\
+    '{status: $status, completed_at: $completed_at, git_commits: $git_commits, total_cycles_u: $total_cycles_u, total_cycles_e: $total_cycles_e, total_cost_usd: $total_cost_usd, total_rejections: $total_rejections}' 2>/dev/null)
   if [ -n "$FINALIZE_JSON" ]; then
     curl -sf -X PATCH "${apiUrl}/overtime/runs/${runId}" \\
       -H "Authorization: Bearer $AUTH_TOKEN" \\
       -H "Content-Type: application/json" \\
       -d "$FINALIZE_JSON" >/dev/null 2>&1 || true
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] Run finalized (done, U=$TOTAL_U E=$TOTAL_E cycles)."
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] Run finalized (done, U=$TOTAL_U E=$TOTAL_E cycles, $TOTAL_REJ rejections)."
   fi
 fi` : "";
 
@@ -571,6 +698,15 @@ async function startOvertime(fileFilter?: string) {
     const { parentTaskNumber, subtaskCount, existed } = await createOvertimeTasks(api, spec);
     const taskLabel = existed ? "existing" : "created";
 
+    // Link feedback items to parent task
+    for (const fid of spec.feedbackIds) {
+      try {
+        await api.linkTask(parentTaskNumber, "feedback", fid);
+      } catch (e: any) {
+        console.log(`    ${c.dim}(feedback link ${fid} failed: ${e.message})${c.reset}`);
+      }
+    }
+
     // Setup worktree
     const worktree = setupWorktree(spec.slug);
 
@@ -591,14 +727,17 @@ async function startOvertime(fileFilter?: string) {
         parent_task_number: parentTaskNumber,
         worktree_path: worktree,
         branch_name: branchName,
+        project: spec.project ?? null,
       });
       runId = runResult.id;
     } catch (e: any) {
       console.log(`    ${c.dim}(telemetry run record unavailable: ${e.message})${c.reset}`);
     }
 
-    const uScript = makeAgentScript("U-Agent", uAgentPrompt(parentTaskNumber, spec, envContext), U_TOOLS, 100, worktree, 180, doneFile, "u", runId, config.apiUrl, token);
-    const eScript = makeAgentScript("E-Agent", eAgentPrompt(parentTaskNumber, spec, doneFile, envContext), E_TOOLS, 100, worktree, 180, doneFile, "e", runId, config.apiUrl, token);
+    const uAgentId = `u-agent:${spec.slug}`;
+    const eAgentId = `e-agent:${spec.slug}`;
+    const uScript = makeAgentScript("U-Agent", uAgentPrompt(parentTaskNumber, spec, uAgentId, envContext), U_TOOLS, 100, worktree, 180, doneFile, "u", runId, config.apiUrl, token);
+    const eScript = makeAgentScript("E-Agent", eAgentPrompt(parentTaskNumber, spec, doneFile, eAgentId, envContext), E_TOOLS, 100, worktree, 180, doneFile, "e", runId, config.apiUrl, token);
 
     // E-Agent starts with a 5-minute delay baked in
     const eScriptWithDelay = `echo "$(date '+%Y-%m-%d %H:%M:%S') [E-Agent] Waiting 5m for U-Agent to start..."\nsleep 300\n${eScript}`;
@@ -610,10 +749,13 @@ async function startOvertime(fileFilter?: string) {
     pids[spec.slug] = {
       uPid: uProc.pid!,
       ePid: eProc.pid!,
+      uAgentId,
+      eAgentId,
       taskNumber: parentTaskNumber,
       worktree,
       startedAt: new Date().toISOString(),
       runId: runId || undefined,
+      feedbackIds: spec.feedbackIds.length ? spec.feedbackIds : undefined,
     };
 
     console.log(`  ${c.green}✓${c.reset} ${c.white}${spec.title}${c.reset}`);
@@ -834,7 +976,7 @@ async function showRecap() {
       for (const a of comments as any[]) {
         const ts = a.timestamp || a.created_at;
         const time = ts ? new Date(ts).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "??:??";
-        const who = ((a.actor_email || a.actor || "") as string).split("@")[0] || "agent";
+        const who = (a.actor_agent_id as string | null) || ((a.actor_email || a.actor || "") as string).split("@")[0] || "agent";
         const msg = (a.state_after?.comment || a.details?.comment || a.context?.comment || "commented") as string;
         console.log(`    ${c.dim}${time}${c.reset}  ${who}  ${c.dim}${msg.split("\n")[0].slice(0, 80)}${c.reset}`);
       }
@@ -856,19 +998,107 @@ async function showRecap() {
   console.log("");
 }
 
-async function stopOvertime(opts: { clean?: boolean }) {
-  const pids = await readPidFile();
-  const slugs = Object.keys(pids);
+// Core stop logic shared by the CLI command and the monitor [s] keybinding.
+// Kills PIDs, finalizes telemetry, removes the slug from `pids`, and writes the
+// pid file.  Produces no console output — callers add their own UI.
+async function stopSingleSessionCore(
+  slug: string,
+  pids: PidFile,
+  api?: AstarAPI
+): Promise<void> {
+  const s = pids[slug];
+  if (!s) return;
 
-  if (!slugs.length) {
+  let killed = false;
+  for (const pid of [s.uPid, s.ePid]) {
+    if (isAlive(pid)) {
+      try {
+        process.kill(pid, "SIGTERM");
+        killed = true;
+      } catch {}
+    }
+  }
+
+  if (killed) {
+    await new Promise((r) => setTimeout(r, 2000));
+    for (const pid of [s.uPid, s.ePid]) {
+      if (isAlive(pid)) {
+        try { process.kill(pid, "SIGKILL"); } catch {}
+      }
+    }
+  }
+
+  // Finalize the run record in telemetry (best-effort)
+  if (s.runId && api) {
+    try {
+      const isDone = existsSync(join(OVERTIME_DIR, `.done-${slug}`));
+      const finalStatus = isDone ? "done" : "stopped";
+
+      let gitCommits: string[] = [];
+      try {
+        const worktreeDir = s.worktree || process.cwd();
+        const log = execSync(
+          `git -C "${worktreeDir}" log --format="%H" main..HEAD 2>/dev/null`,
+          { stdio: "pipe" }
+        ).toString().trim();
+        if (log) gitCommits = log.split("\n").filter(Boolean);
+      } catch {}
+
+      let totalCyclesU = 0;
+      let totalCyclesE = 0;
+      let totalCostUsd: number | null = null;
+      try {
+        const cycles = await api.listOvertimeCycles(s.runId);
+        totalCyclesU = cycles.filter((cyc) => cyc.agent === "u").length;
+        totalCyclesE = cycles.filter((cyc) => cyc.agent === "e").length;
+        const costs = cycles
+          .map((cyc) => cyc.cost_usd)
+          .filter((v): v is number => v !== null && v !== undefined);
+        if (costs.length) totalCostUsd = costs.reduce((a, b) => a + b, 0);
+      } catch {}
+
+      let totalRejections = 0;
+      try {
+        const { total_rejections } = await api.getOvertimeRejections(s.runId);
+        totalRejections = total_rejections;
+      } catch {}
+
+      await api.updateOvertimeRun(s.runId, {
+        status: finalStatus,
+        completed_at: new Date().toISOString(),
+        total_cycles_u: totalCyclesU,
+        total_cycles_e: totalCyclesE,
+        total_cost_usd: totalCostUsd,
+        total_rejections: totalRejections,
+        git_commits: gitCommits,
+      });
+    } catch {}
+  }
+
+  delete pids[slug];
+  await writePidFile(pids);
+}
+
+async function stopOvertime(targetSlug: string | undefined, opts: { clean?: boolean }) {
+  const pids = await readPidFile();
+  const allSlugs = Object.keys(pids);
+
+  if (!allSlugs.length) {
     console.log(`\n  ${c.dim}No overtime sessions to stop.${c.reset}\n`);
     return;
   }
 
-  let token: string | undefined;
+  if (targetSlug !== undefined && !pids[targetSlug]) {
+    console.log(`\n  ${c.red}✗${c.reset} No session found for slug ${c.white}${targetSlug}${c.reset}\n`);
+    console.log(`  ${c.dim}Running sessions: ${allSlugs.join(", ") || "none"}${c.reset}\n`);
+    return;
+  }
+
+  const slugs = targetSlug !== undefined ? [targetSlug] : allSlugs;
+
   let api: AstarAPI | undefined;
   try {
-    token = await getToken();
+    const token = await getToken();
     api = new AstarAPI(token);
   } catch {}
 
@@ -876,85 +1106,36 @@ async function stopOvertime(opts: { clean?: boolean }) {
 
   for (const slug of slugs) {
     const s = pids[slug];
-    let killed = false;
+    const worktree = s.worktree;
+    const taskNumber = s.taskNumber;
 
-    for (const pid of [s.uPid, s.ePid]) {
-      if (isAlive(pid)) {
-        try {
-          process.kill(pid, "SIGTERM");
-          killed = true;
-        } catch {}
-      }
-    }
+    await stopSingleSessionCore(slug, pids, api);
 
-    // Wait a moment then force kill if needed
-    if (killed) {
-      await new Promise((r) => setTimeout(r, 2000));
-      for (const pid of [s.uPid, s.ePid]) {
-        if (isAlive(pid)) {
-          try { process.kill(pid, "SIGKILL"); } catch {}
+    console.log(`  ${c.green}✓${c.reset} Stopped ${c.white}${slug}${c.reset} (task #${taskNumber})`);
+
+    // Auto-close linked feedback when run completed successfully (done file present)
+    if (s.feedbackIds?.length && api) {
+      const isDone = existsSync(join(OVERTIME_DIR, `.done-${slug}`));
+      if (isDone) {
+        for (const fid of s.feedbackIds) {
+          try {
+            await api.updateFeedback(fid, "done");
+            console.log(`    ${c.dim}Closed feedback ${fid}${c.reset}`);
+          } catch (e: any) {
+            console.log(`    ${c.dim}(feedback close ${fid} failed: ${e.message})${c.reset}`);
+          }
         }
       }
     }
 
-    console.log(`  ${c.green}✓${c.reset} Stopped ${c.white}${slug}${c.reset} (task #${s.taskNumber})`);
-
-    // Finalize the run record in telemetry
-    if (s.runId && api) {
+    if (opts.clean && worktree) {
       try {
-        const isDone = existsSync(join(OVERTIME_DIR, `.done-${slug}`));
-        const finalStatus = isDone ? "done" : "stopped";
-
-        // Collect commits on the branch since main
-        let gitCommits: string[] = [];
-        try {
-          const worktreeDir = s.worktree || process.cwd();
-          const log = execSync(
-            `git -C "${worktreeDir}" log --format="%H" main..HEAD 2>/dev/null`,
-            { stdio: "pipe" }
-          ).toString().trim();
-          if (log) gitCommits = log.split("\n").filter(Boolean);
-        } catch {}
-
-        // Aggregate cycle stats from stored cycle records
-        let totalCyclesU = 0;
-        let totalCyclesE = 0;
-        let totalCostUsd: number | null = null;
-        try {
-          const cycles = await api.listOvertimeCycles(s.runId);
-          totalCyclesU = cycles.filter((cyc) => cyc.agent === "u").length;
-          totalCyclesE = cycles.filter((cyc) => cyc.agent === "e").length;
-          const costs = cycles
-            .map((cyc) => cyc.cost_usd)
-            .filter((v): v is number => v !== null && v !== undefined);
-          if (costs.length) totalCostUsd = costs.reduce((a, b) => a + b, 0);
-        } catch {}
-
-        await api.updateOvertimeRun(s.runId, {
-          status: finalStatus,
-          completed_at: new Date().toISOString(),
-          total_cycles_u: totalCyclesU,
-          total_cycles_e: totalCyclesE,
-          total_cost_usd: totalCostUsd,
-          git_commits: gitCommits,
-        });
-        console.log(`    ${c.dim}Run record finalized (${finalStatus}, ${totalCyclesU + totalCyclesE} cycles)${c.reset}`);
-      } catch (e: any) {
-        console.log(`    ${c.dim}(telemetry update skipped: ${e.message})${c.reset}`);
-      }
-    }
-
-    if (opts.clean && s.worktree) {
-      try {
-        execSync(`git worktree remove "${s.worktree}" --force`, { stdio: "pipe" });
+        execSync(`git worktree remove "${worktree}" --force`, { stdio: "pipe" });
         console.log(`    ${c.dim}Removed worktree${c.reset}`);
       } catch {}
     }
-
-    delete pids[slug];
   }
 
-  await writePidFile(pids);
   console.log("");
 }
 
@@ -981,15 +1162,20 @@ function statusColor(status: string): string {
   return c.dim + status + c.reset;
 }
 
-async function showStats(runId?: string) {
+async function showStats(runId?: string, opts: { cycles?: boolean; project?: string } = {}) {
   const token = await requireAuth();
   const api = new AstarAPI(token);
 
   if (!runId) {
-    // List recent runs
-    let runs;
+    // Per-slug comparison table
+    let runs: OvertimeRunComparison[];
     try {
-      runs = await api.listOvertimeRuns();
+      if (opts.project) {
+        const basic = await api.listOvertimeRuns({ project: opts.project });
+        runs = basic.map((r) => ({ ...r, subtask_count: 0, cost_per_subtask: null }));
+      } else {
+        runs = await api.getOvertimeComparison();
+      }
     } catch (e: any) {
       console.error(`${c.red}✗${c.reset} ${e.message}`);
       process.exit(1);
@@ -1005,7 +1191,7 @@ async function showStats(runId?: string) {
     console.log("");
 
     table(
-      ["Slug", "Status", "U", "E", "Reject", "Cost", "Duration"],
+      ["Slug", "Subtasks", "Cost", "Cost/Subtask", "Rejections", "Cycles", "Duration"],
       runs.map((r) => {
         const dur =
           r.completed_at
@@ -1013,19 +1199,20 @@ async function showStats(runId?: string) {
             : r.status === "running"
               ? fmtDuration(Date.now() - new Date(r.started_at).getTime()) + "…"
               : "—";
+        const totalCycles = (r.total_cycles_u ?? 0) + (r.total_cycles_e ?? 0);
         return [
           `${c.white}${r.slug}${c.reset}`,
-          statusColor(r.status),
-          String(r.total_cycles_u),
-          String(r.total_cycles_e),
-          String(r.total_rejections),
+          r.subtask_count > 0 ? String(r.subtask_count) : `${c.dim}—${c.reset}`,
           fmtCost(r.total_cost_usd),
+          r.cost_per_subtask != null ? `${c.bold}${fmtCost(r.cost_per_subtask)}${c.reset}` : `${c.dim}—${c.reset}`,
+          r.total_rejections > 0 ? `${c.yellow}${r.total_rejections}${c.reset}` : `${c.dim}0${c.reset}`,
+          totalCycles > 0 ? `${c.dim}${r.total_cycles_u}U ${r.total_cycles_e}E${c.reset}` : `${c.dim}—${c.reset}`,
           `${c.dim}${dur}${c.reset}`,
         ];
       })
     );
     console.log("");
-    console.log(`  ${c.dim}Pass a run ID to see per-cycle breakdown: astar overtime stats <id>${c.reset}`);
+    console.log(`  ${c.dim}Pass a run ID for per-cycle breakdown: astar overtime stats <id>${c.reset}`);
     console.log("");
     return;
   }
@@ -1094,30 +1281,54 @@ async function showStats(runId?: string) {
     console.log("");
     console.log(`  ${c.bold}${c.white}Cycles${c.reset}`);
     console.log("");
-    table(
-      ["#", "Agent", "Subtask", "Action", "Turns", "Tokens", "Cost", "Duration"],
-      cycles.map((cy) => {
-        const cyDur =
-          cy.completed_at
-            ? fmtDuration(new Date(cy.completed_at).getTime() - new Date(cy.started_at).getTime())
-            : "—";
-        const tokens =
-          cy.tokens_in != null || cy.tokens_out != null
-            ? `${(cy.tokens_in ?? 0) + (cy.tokens_out ?? 0)}`
-            : "—";
-        const agentColor = cy.agent === "u" ? c.cyan : c.magenta;
-        return [
-          `${c.dim}${cy.cycle_number}${c.reset}`,
-          `${agentColor}${cy.agent}${c.reset}`,
-          cy.subtask_number != null ? `#${cy.subtask_number}` : `${c.dim}—${c.reset}`,
-          cy.action_taken ? `${c.dim}${cy.action_taken}${c.reset}` : `${c.dim}—${c.reset}`,
-          cy.turns_used != null ? `${cy.turns_used}/${cy.max_turns ?? "?"}` : `${c.dim}—${c.reset}`,
-          `${c.dim}${tokens}${c.reset}`,
-          cy.cost_usd != null ? `$${cy.cost_usd.toFixed(4)}` : `${c.dim}—${c.reset}`,
-          `${c.dim}${cyDur}${c.reset}`,
-        ];
-      })
-    );
+    if (opts.cycles) {
+      // Full per-cycle breakdown: tokens in/out split
+      table(
+        ["#", "Agent", "Turns", "Tokens In", "Tokens Out", "Cost", "Action", "Duration"],
+        cycles.map((cy) => {
+          const cyDur =
+            cy.completed_at
+              ? fmtDuration(new Date(cy.completed_at).getTime() - new Date(cy.started_at).getTime())
+              : "—";
+          const agentColor = cy.agent === "u" ? c.cyan : c.magenta;
+          return [
+            `${c.dim}${cy.cycle_number}${c.reset}`,
+            `${agentColor}${cy.agent}${c.reset}`,
+            cy.turns_used != null ? `${cy.turns_used}/${cy.max_turns ?? "?"}` : `${c.dim}—${c.reset}`,
+            cy.tokens_in != null ? `${c.dim}${cy.tokens_in.toLocaleString()}${c.reset}` : `${c.dim}—${c.reset}`,
+            cy.tokens_out != null ? `${c.dim}${cy.tokens_out.toLocaleString()}${c.reset}` : `${c.dim}—${c.reset}`,
+            cy.cost_usd != null ? `${c.bold}$${cy.cost_usd.toFixed(4)}${c.reset}` : `${c.dim}—${c.reset}`,
+            cy.action_taken ? `${c.dim}${cy.action_taken}${c.reset}` : `${c.dim}—${c.reset}`,
+            `${c.dim}${cyDur}${c.reset}`,
+          ];
+        })
+      );
+    } else {
+      table(
+        ["#", "Agent", "Subtask", "Action", "Turns", "Tokens", "Cost", "Duration"],
+        cycles.map((cy) => {
+          const cyDur =
+            cy.completed_at
+              ? fmtDuration(new Date(cy.completed_at).getTime() - new Date(cy.started_at).getTime())
+              : "—";
+          const tokens =
+            cy.tokens_in != null || cy.tokens_out != null
+              ? `${(cy.tokens_in ?? 0) + (cy.tokens_out ?? 0)}`
+              : "—";
+          const agentColor = cy.agent === "u" ? c.cyan : c.magenta;
+          return [
+            `${c.dim}${cy.cycle_number}${c.reset}`,
+            `${agentColor}${cy.agent}${c.reset}`,
+            cy.subtask_number != null ? `#${cy.subtask_number}` : `${c.dim}—${c.reset}`,
+            cy.action_taken ? `${c.dim}${cy.action_taken}${c.reset}` : `${c.dim}—${c.reset}`,
+            cy.turns_used != null ? `${cy.turns_used}/${cy.max_turns ?? "?"}` : `${c.dim}—${c.reset}`,
+            `${c.dim}${tokens}${c.reset}`,
+            cy.cost_usd != null ? `$${cy.cost_usd.toFixed(4)}` : `${c.dim}—${c.reset}`,
+            `${c.dim}${cyDur}${c.reset}`,
+          ];
+        })
+      );
+    }
   }
 
   if (run.git_commits?.length) {
@@ -1131,7 +1342,338 @@ async function showStats(runId?: string) {
     }
   }
 
+  if (!opts.cycles && cycles.length) {
+    console.log(`  ${c.dim}Use --cycles for tokens in/out split: astar overtime stats ${runId} --cycles${c.reset}`);
+  }
   console.log("");
+}
+
+// ── Dashboard ───────────────────────────────────────────────────────
+
+function sparkline(values: number[]): string {
+  const bars = "▁▂▃▄▅▆▇█";
+  const max = Math.max(...values, 0);
+  if (max === 0) return Array(values.length).fill("▁").join("");
+  return values.map((v) => bars[Math.min(7, Math.floor((v / max) * 7.99))]).join("");
+}
+
+async function showDashboard() {
+  const token = await requireAuth();
+  const api = new AstarAPI(token);
+
+  let data;
+  try {
+    data = await api.getOvertimeDashboard();
+  } catch (e: any) {
+    console.error(`${c.red}✗${c.reset} ${e.message}`);
+    process.exit(1);
+  }
+
+  const { summary, daily } = data;
+
+  console.log("");
+  console.log(`  ${c.bold}${c.white}OVERTIME DASHBOARD${c.reset}`);
+  console.log("");
+
+  // Cost per subtask is the most important metric — put it first and prominent
+  const costPerSubtask = summary.avg_cost_per_subtask;
+  if (costPerSubtask > 0) {
+    console.log(`  ${c.bold}${c.white}$${costPerSubtask.toFixed(4)}${c.reset}  avg cost per subtask`);
+  } else {
+    console.log(`  ${c.dim}avg cost per subtask:${c.reset} —`);
+  }
+  console.log("");
+
+  console.log(`  ${c.dim}Total spend:${c.reset}        ${summary.total_cost_usd > 0 ? `$${summary.total_cost_usd.toFixed(4)}` : "—"}`);
+  console.log(`  ${c.dim}Runs completed:${c.reset}     ${summary.total_runs}`);
+  console.log(`  ${c.dim}Subtasks delivered:${c.reset} ${summary.total_subtasks_delivered}`);
+  console.log(`  ${c.dim}Avg cost/run:${c.reset}       ${summary.avg_cost_per_run > 0 ? `$${summary.avg_cost_per_run.toFixed(4)}` : "—"}`);
+  console.log(`  ${c.dim}Avg cycles/run:${c.reset}     ${summary.avg_cycles_per_run > 0 ? summary.avg_cycles_per_run.toFixed(1) : "—"}`);
+  console.log(`  ${c.dim}Total cycles:${c.reset}       ${summary.total_cycles}`);
+  console.log(`  ${c.dim}Rejection rate:${c.reset}     ${summary.total_rejections > 0 ? `${(summary.avg_rejection_rate * 100).toFixed(1)}% (${summary.total_rejections} total)` : "0%"}`);
+  console.log(`  ${c.dim}Tokens in:${c.reset}          ${summary.total_tokens_in > 0 ? summary.total_tokens_in.toLocaleString() : "—"}`);
+  console.log(`  ${c.dim}Tokens out:${c.reset}         ${summary.total_tokens_out > 0 ? summary.total_tokens_out.toLocaleString() : "—"}`);
+
+  // 7-day cost trend sparkline
+  if (daily.length > 0) {
+    const sorted = [...daily].sort((a, b) => a.date.localeCompare(b.date)).slice(-7);
+    const costs = sorted.map((d) => d.cost_usd);
+    const spark = sparkline(costs);
+    const firstDate = sorted[0]?.date?.slice(5) ?? "";
+    const lastDate = sorted[sorted.length - 1]?.date?.slice(5) ?? "";
+    console.log("");
+    console.log(`  ${c.dim}7-day cost trend (${firstDate} → ${lastDate}):${c.reset}`);
+    console.log(`  ${c.cyan}${spark}${c.reset}`);
+    console.log(`  ${c.dim}${sorted.map((d) => `$${d.cost_usd.toFixed(2)}`).join("  ")}${c.reset}`);
+  }
+
+  console.log("");
+}
+
+// ── Monitor ─────────────────────────────────────────────────────────
+
+async function extractCostFromLog(slug: string): Promise<number | null> {
+  const logPath = join(LOGS_DIR, `${slug}.log`);
+  try {
+    const file = Bun.file(logPath);
+    if (!(await file.exists())) return null;
+    const text = await file.text();
+    const lines = text.split("\n").filter(Boolean).reverse();
+    for (const line of lines) {
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed.total_cost_usd != null) return parsed.total_cost_usd;
+      } catch {}
+    }
+  } catch {}
+  return null;
+}
+
+async function extractLogTail(slug: string): Promise<string | null> {
+  const logPath = join(LOGS_DIR, `${slug}.log`);
+  try {
+    const file = Bun.file(logPath);
+    if (!(await file.exists())) return null;
+    const text = await file.text();
+    const lines = text.split("\n").filter(Boolean).reverse();
+    for (const line of lines) {
+      // Skip JSON lines (agent telemetry)
+      try {
+        JSON.parse(line);
+        continue;
+      } catch {}
+      const trimmed = line.trim();
+      if (trimmed.length > 0) return trimmed;
+    }
+  } catch {}
+  return null;
+}
+
+interface MonitorPromptState {
+  mode: "none" | "stop";
+  buffer: string;
+  message: string; // last status message shown after an action
+}
+
+async function renderOvertimeMonitor(
+  api: AstarAPI,
+  promptState: MonitorPromptState
+): Promise<void> {
+  const pids = await readPidFile();
+  const slugs = Object.keys(pids);
+  const cols = process.stdout.columns || 80;
+  const now = new Date().toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
+  process.stdout.write("\x1b[2J\x1b[H");
+
+  const titleRightPad = " ".repeat(Math.max(1, cols - 30));
+  process.stdout.write(`\n  ${c.bold}${c.white}OVERTIME MONITOR${c.reset}${titleRightPad}${c.dim}${now}${c.reset}\n\n`);
+
+  if (!slugs.length) {
+    process.stdout.write(`  ${c.dim}No overtime sessions.${c.reset}\n\n`);
+    process.stdout.write(`  ${c.dim}[q] quit${c.reset}\n`);
+    return;
+  }
+
+  // Aggregate stats accumulated while rendering each session
+  let aggCost: number | null = null;
+  let aggCycles = 0;
+  let aggRejections = 0;
+
+  for (const slug of slugs) {
+    const s = pids[slug];
+    const uAlive = isAlive(s.uPid);
+    const eAlive = isAlive(s.ePid);
+    const doneFileExists = existsSync(join(OVERTIME_DIR, `.done-${slug}`));
+
+    const stateLabel = doneFileExists
+      ? `${c.green}done${c.reset}`
+      : uAlive || eAlive
+        ? `${c.yellow}running${c.reset}`
+        : `${c.red}stopped${c.reset}`;
+
+    const started = new Date(s.startedAt);
+    const elapsed = Math.floor((Date.now() - started.getTime()) / 60000);
+    const uptime =
+      elapsed < 60 ? `${elapsed}m` : `${Math.floor(elapsed / 60)}h ${elapsed % 60}m`;
+
+    const [cost, logTail] = await Promise.all([
+      extractCostFromLog(slug),
+      extractLogTail(slug),
+    ]);
+    const costStr = cost != null ? fmtCost(cost) : `${c.dim}—${c.reset}`;
+    if (cost != null) aggCost = (aggCost ?? 0) + cost;
+
+    // Header line: slug, task, state, uptime, cost
+    process.stdout.write(
+      `  ${c.bold}${c.white}${slug}${c.reset}  #${c.cyan}${s.taskNumber}${c.reset}  ${stateLabel}  ${c.dim}${uptime}${c.reset}  ${costStr}\n`
+    );
+
+    // Subtask progress bar + rejection count from activity
+    try {
+      const { subtasks, activity } = await api.getTask(s.taskNumber);
+      const icons = subtasks.map((t) => {
+        if (t.status === "completed") return `${c.green}✓${c.reset}`;
+        if (t.status === "in_progress") return `${c.yellow}▸${c.reset}`;
+        return `${c.dim}○${c.reset}`;
+      });
+      const done = subtasks.filter((t) => t.status === "completed").length;
+      const bar = icons.join(" ");
+      process.stdout.write(`  ${bar}  ${c.dim}${done}/${subtasks.length}${c.reset}\n`);
+
+      // Count status-changed-to-open events as E-Agent rejections
+      const rejections = activity.filter(
+        (a) => a.action === "status_changed" && a.details?.to === "open"
+      ).length;
+      aggRejections += rejections;
+    } catch {
+      process.stdout.write(`  ${c.dim}subtasks unavailable${c.reset}\n`);
+    }
+
+    // Cycles from telemetry
+    if (s.runId) {
+      try {
+        const cycles = await api.listOvertimeCycles(s.runId);
+        aggCycles += cycles.length;
+      } catch {}
+    }
+
+    // Log tail
+    if (logTail) {
+      const maxLen = (process.stdout.columns || 80) - 4;
+      const truncated = logTail.length > maxLen ? logTail.slice(0, maxLen - 1) + "…" : logTail;
+      process.stdout.write(`  ${c.dim}${truncated}${c.reset}\n`);
+    }
+
+    process.stdout.write("\n");
+  }
+
+  // Aggregate stats footer
+  const aggCostStr = aggCost != null ? fmtCost(aggCost) : `${c.dim}—${c.reset}`;
+  process.stdout.write(
+    `  ${c.dim}${slugs.length} session${slugs.length !== 1 ? "s" : ""}  ·  ${aggCostStr} total  ·  ${aggCycles} cycles  ·  ${aggRejections} rejection${aggRejections !== 1 ? "s" : ""}${c.reset}\n`
+  );
+  process.stdout.write("\n");
+
+  if (promptState.message) {
+    process.stdout.write(`  ${c.dim}${promptState.message}${c.reset}\n`);
+  }
+
+  if (promptState.mode === "stop") {
+    process.stdout.write(
+      `  ${c.white}stop session:${c.reset} ${promptState.buffer}${c.cyan}█${c.reset}  ${c.dim}[enter] confirm · [esc] cancel${c.reset}\n`
+    );
+  } else {
+    process.stdout.write(`  ${c.dim}[q] quit · [s] stop session · refreshing every 5s${c.reset}\n`);
+  }
+}
+
+async function monitorOvertime(): Promise<void> {
+  let api: AstarAPI;
+  try {
+    const token = await getToken();
+    api = new AstarAPI(token);
+  } catch {
+    console.error(
+      `${c.red}✗${c.reset} Not authenticated. Run ${c.cyan}astar login${c.reset} first.`
+    );
+    process.exit(1);
+  }
+
+  process.stdout.write("\x1b[?25l"); // hide cursor
+
+  let interval: ReturnType<typeof setInterval>;
+  const promptState: MonitorPromptState = { mode: "none", buffer: "", message: "" };
+
+  const cleanup = () => {
+    clearInterval(interval);
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(false);
+    }
+    process.stdout.write("\x1b[?25h"); // show cursor
+    process.stdout.write("\n");
+    process.exit(0);
+  };
+
+  const tick = async () => {
+    try {
+      // Refresh token each cycle
+      const token = await getToken();
+      api = new AstarAPI(token);
+    } catch {}
+    try {
+      await renderOvertimeMonitor(api, promptState);
+    } catch {}
+  };
+
+  await tick();
+  interval = setInterval(tick, 5000);
+
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on("data", async (key: Buffer) => {
+      const code = key[0];
+
+      if (promptState.mode === "stop") {
+        if (code === 0x0d || code === 0x0a) {
+          // Enter — attempt to stop the entered slug
+          const slug = promptState.buffer.trim();
+          promptState.mode = "none";
+          promptState.buffer = "";
+          if (slug) {
+            const pids = await readPidFile();
+            if (!pids[slug]) {
+              promptState.message = `✗ No session "${slug}"`;
+            } else {
+              let stopApi: AstarAPI | undefined;
+              try {
+                const t = await getToken();
+                stopApi = new AstarAPI(t);
+              } catch {}
+              await stopSingleSessionCore(slug, pids, stopApi);
+              promptState.message = `✓ Stopped ${slug}`;
+            }
+          }
+          await tick();
+        } else if (code === 0x1b) {
+          // Escape — cancel prompt
+          promptState.mode = "none";
+          promptState.buffer = "";
+          promptState.message = "";
+          await tick();
+        } else if (code === 0x7f) {
+          // Backspace
+          promptState.buffer = promptState.buffer.slice(0, -1);
+          await tick();
+        } else if (code >= 0x20 && code < 0x7f) {
+          // Printable ASCII
+          promptState.buffer += String.fromCharCode(code);
+          await tick();
+        }
+        return;
+      }
+
+      // Normal mode key handling
+      if (code === 0x03 || code === 0x71) { // ctrl+c or q
+        cleanup();
+      } else if (code === 0x73) { // s
+        promptState.mode = "stop";
+        promptState.buffer = "";
+        promptState.message = "";
+        await tick();
+      }
+    });
+  } else {
+    process.on("SIGINT", cleanup);
+  }
+
+  // Keep alive
+  await new Promise(() => {});
 }
 
 // ── Guide ───────────────────────────────────────────────────────────
@@ -1245,10 +1787,14 @@ function showGuide() {
     ${cy}astar overtime status${r}              what's running + progress
     ${cy}astar overtime status --verbose${r}    + last cycle cost/turns/model
     ${cy}astar overtime recap${r}               morning summary
-    ${cy}astar overtime stop${r}                kill agents
+    ${cy}astar overtime stop${r}                kill all agents
+    ${cy}astar overtime stop <slug>${r}         kill a single agent
     ${cy}astar overtime stop --clean${r}        kill + remove worktrees
+    ${cy}astar overtime monitor${r}              live full-screen dashboard (5s refresh)
     ${cy}astar overtime stats${r}                cost, cycles, tokens across all runs
     ${cy}astar overtime stats <id>${r}           per-cycle breakdown for a specific run
+    ${cy}astar overtime stats <id> --cycles${r}  full breakdown: tokens in/out split per cycle
+    ${cy}astar overtime dashboard${r}            aggregate spend, efficiency, 7-day trend
     ${cy}astar overtime guide${r}               this guide
 
   ${c.bold}${w}EXAMPLE USE CASES${r}
@@ -1286,6 +1832,85 @@ function showGuide() {
 `);
 }
 
+// ── Code review ──────────────────────────────────────────────────────
+
+export function buildReviewPrompt(spec: OvertimeSpec, diff: string): string {
+  const requirementsList = spec.requirements.map((r, i) => `  ${i + 1}. ${r}`).join("\n");
+  return `You are an independent code reviewer. Review the following branch diff for semantic bugs.
+
+SPEC: ${spec.title}
+CONTEXT: ${spec.context}
+${spec.notes ? `NOTES: ${spec.notes}\n` : ""}Requirements this branch is meant to satisfy:
+${requirementsList}
+
+Focus ONLY on semantic bugs — not style or formatting:
+- Misread APIs: wrong method names, wrong return type assumptions, wrong argument order
+- Wrong assumptions: value assumed always defined, off-by-one errors, empty-list assumptions
+- Hot-path costs: N+1 queries, unnecessary re-computation per call, blocking I/O in a hot path
+- Logic errors: conditions always true/false, unreachable branches, broken invariants
+- Subtle concurrency bugs: race conditions, missing awaits, shared mutable state
+
+For each issue found, report:
+1. File and approximate line number
+2. What the bug is
+3. Why it is wrong
+4. What the correct behavior should be
+
+If no semantic bugs are found, say so clearly.
+
+BRANCH DIFF (git diff main..HEAD):
+\`\`\`diff
+${diff}
+\`\`\``;
+}
+
+async function reviewOvertime(slug: string) {
+  ensureClaudeInstalled();
+
+  const specPath = join(OVERTIME_DIR, `${slug}.md`);
+  const specFile = Bun.file(specPath);
+  if (!(await specFile.exists())) {
+    console.error(`${c.red}✗${c.reset} No spec file found at ${c.cyan}.astar/overtime/${slug}.md${c.reset}`);
+    process.exit(1);
+  }
+
+  const spec = parseSpec(await specFile.text(), `${slug}.md`);
+
+  // Use the overtime worktree if it exists, otherwise fall back to cwd
+  const worktreePath = join(WORKTREE_DIR, `overtime-${slug}`);
+  const cwd = existsSync(worktreePath) ? worktreePath : process.cwd();
+
+  let diff: string;
+  try {
+    diff = execSync(`git -C "${cwd}" diff main..HEAD`, { stdio: "pipe" }).toString();
+  } catch (e: any) {
+    console.error(`${c.red}✗${c.reset} Failed to get git diff: ${e.message}`);
+    process.exit(1);
+  }
+
+  if (!diff.trim()) {
+    console.log(`${c.yellow}⚠${c.reset} No changes found on branch overtime/${slug} relative to main.`);
+    return;
+  }
+
+  console.log(`${c.dim}Reviewing ${c.white}${spec.title}${c.reset}${c.dim} …${c.reset}\n`);
+
+  const prompt = buildReviewPrompt(spec, diff);
+  const proc = spawn("claude", [
+    "-p", prompt,
+    "--max-turns", "10",
+    "--dangerously-skip-permissions",
+  ], {
+    cwd,
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    proc.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`claude exited with code ${code}`))));
+    proc.on("error", reject);
+  });
+}
+
 // ── Register ────────────────────────────────────────────────────────
 
 export function registerOvertimeCommands(program: Command) {
@@ -1316,9 +1941,16 @@ export function registerOvertimeCommands(program: Command) {
   overtime
     .command("stats [run-id]")
     .description("Show telemetry for overtime runs — list all or detail for a specific run")
-    .action(async (runId?: string) => {
-      await showStats(runId);
+    .option("--cycles", "Show full per-cycle breakdown with tokens in/out split (requires run-id)")
+    .option("--project <slug>", "Filter runs by project slug")
+    .action(async (runId: string | undefined, opts: { cycles?: boolean; project?: string }) => {
+      await showStats(runId, opts);
     });
+
+  overtime
+    .command("dashboard")
+    .description("Aggregate view of all overtime runs: spend, efficiency, and 7-day trend")
+    .action(showDashboard);
 
   overtime
     .command("guide")
@@ -1326,8 +1958,20 @@ export function registerOvertimeCommands(program: Command) {
     .action(showGuide);
 
   overtime
-    .command("stop")
-    .description("Kill all running overtime agents")
+    .command("monitor")
+    .description("Live full-screen dashboard of overtime sessions (5s refresh)")
+    .action(monitorOvertime);
+
+  overtime
+    .command("review <slug>")
+    .description("Run an independent code-review subagent over the branch diff for a spec slug")
+    .action(async (slug: string) => {
+      await reviewOvertime(slug);
+    });
+
+  overtime
+    .command("stop [slug]")
+    .description("Kill overtime agent(s). Provide a slug to stop a single session, or omit to stop all.")
     .option("--clean", "Also remove git worktrees")
     .action(stopOvertime);
 }

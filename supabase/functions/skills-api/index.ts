@@ -242,11 +242,23 @@ function canAccessEvent(event: any, user: AuthUser, project?: any | null): boole
   return event.visibility === "public" || event.visibility === "team" || event.created_by === user.email;
 }
 
+// Returns true for session-scoped agent IDs (u-agent:*, e-agent:*) that are not
+// registered users. These identities are used by overtime agents for assigned_to.
+function isAgentId(id: string | null | undefined): boolean {
+  return typeof id === "string" && (id.startsWith("u-agent:") || id.startsWith("e-agent:"));
+}
+
 function canAccessTask(task: any, user: AuthUser, project?: any | null): boolean {
   if (!task) return false;
-  const isOwner = task.created_by === user.email || task.assigned_to === user.email;
-  if (task.visibility === "private") return isOwner;
-  if (isOwner) return true;
+  const callerEmail = user.email.toLowerCase();
+  const isOwner = task.created_by?.toLowerCase() === callerEmail || task.assigned_to?.toLowerCase() === callerEmail;
+  // Agent-assigned tasks (u-agent:*, e-agent:*) are not owned by a real user account.
+  // The human who started the overtime session is identified by created_by — use that
+  // as the ownership signal so the agent's tasks remain visible to the session creator.
+  const isAgentTaskOwner = isAgentId(task.assigned_to) && task.created_by?.toLowerCase() === callerEmail;
+  const hasAccess = isOwner || isAgentTaskOwner;
+  if (task.visibility === "private") return hasAccess;
+  if (hasAccess) return true;
   if (project) return canAccessProject(project, user);
   return task.visibility === "public" || task.visibility === "team";
 }
@@ -264,7 +276,11 @@ function canAccessAgent(agent: any, user: AuthUser, project?: any | null): boole
 }
 
 function canModifyTask(task: any, user: AuthUser): boolean {
-  return !!task && (task.created_by === user.email || task.assigned_to === user.email);
+  if (!task) return false;
+  const callerEmail = user.email.toLowerCase();
+  // Agent-assigned tasks can be modified by the human who created the session (created_by).
+  return task.created_by?.toLowerCase() === callerEmail || task.assigned_to?.toLowerCase() === callerEmail
+    || (isAgentId(task.assigned_to) && task.created_by?.toLowerCase() === callerEmail);
 }
 
 async function listOwnedAgentSlugs(sb: ReturnType<typeof getSupabase>, ownerEmail: string): Promise<Set<string>> {
@@ -637,6 +653,7 @@ app.get("/projects/:slug", async (c) => {
     eventsResult,
     agentsResult,
     milestonesResult,
+    overtimeRunsResult,
   ] = await Promise.all([
     sb.from("tasks")
       .select("*")
@@ -661,17 +678,60 @@ app.get("/projects/:slug", async (c) => {
       .eq("project_id", project.id)
       .order("date", { ascending: false })
       .limit(50),
+    sb.from("overtime_runs")
+      .select("*")
+      .eq("project_id", project.id)
+      .order("started_at", { ascending: false })
+      .limit(50),
   ]);
 
   if (tasksResult.error) return c.json({ error: tasksResult.error.message }, 500, corsHeaders);
   if (eventsResult.error) return c.json({ error: eventsResult.error.message }, 500, corsHeaders);
   if (agentsResult.error) return c.json({ error: agentsResult.error.message }, 500, corsHeaders);
   if (milestonesResult.error) return c.json({ error: milestonesResult.error.message }, 500, corsHeaders);
+  if (overtimeRunsResult.error) return c.json({ error: overtimeRunsResult.error.message }, 500, corsHeaders);
 
   const tasks = (tasksResult.data || []).filter((task: any) => canAccessTask(task, user, project));
   const events = (eventsResult.data || []).filter((event: any) => canAccessEvent(event, user, project));
   const agents = (agentsResult.data || []).filter((agent: any) => canAccessAgent(agent, user, project));
   const milestones = (milestonesResult.data || []).filter((milestone: any) => canAccessMilestone(milestone, user, project));
+  const overtimeRuns = overtimeRunsResult.data || [];
+
+  // Enrich overtime runs with subtask counts
+  const parentTaskNumbers = overtimeRuns
+    .map((r: any) => r.parent_task_number)
+    .filter((n: any) => n != null) as number[];
+
+  if (parentTaskNumbers.length > 0) {
+    const { data: parentTasks } = await sb.from("tasks")
+      .select("id, task_number")
+      .in("task_number", parentTaskNumbers);
+
+    if (parentTasks && parentTasks.length > 0) {
+      const parentIdByTaskNumber: Record<number, string> = {};
+      for (const pt of parentTasks) parentIdByTaskNumber[pt.task_number] = pt.id;
+
+      const parentIds = Object.values(parentIdByTaskNumber);
+      const { data: subtaskRows } = await sb.from("tasks")
+        .select("parent_task_id")
+        .in("parent_task_id", parentIds)
+        .is("archived_at", null);
+
+      const subtaskCountByParentId: Record<string, number> = {};
+      for (const row of subtaskRows || []) {
+        subtaskCountByParentId[row.parent_task_id] = (subtaskCountByParentId[row.parent_task_id] || 0) + 1;
+      }
+
+      for (const run of overtimeRuns as any[]) {
+        const pid = run.parent_task_number != null ? parentIdByTaskNumber[run.parent_task_number] : undefined;
+        run.subtask_count = pid ? (subtaskCountByParentId[pid] || 0) : 0;
+      }
+    } else {
+      for (const run of overtimeRuns as any[]) run.subtask_count = 0;
+    }
+  } else {
+    for (const run of overtimeRuns as any[]) run.subtask_count = 0;
+  }
 
   await hydrateTasksWithContext(sb, tasks as any[]);
   await hydrateRecordsWithProjects(sb, events as any[]);
@@ -687,6 +747,7 @@ app.get("/projects/:slug", async (c) => {
     events,
     agents,
     milestones,
+    overtime_runs: overtimeRuns,
   }, 200, corsHeaders);
 });
 
@@ -1672,7 +1733,13 @@ app.get("/tasks", async (c) => {
   const sb = getSupabase();
   let filterProject: any = null;
   let filterEvent: any = null;
+  const callerEmail = user.email.toLowerCase();
   let query = sb.from("tasks").select("*").is("archived_at", null).order("created_at", { ascending: false }).limit(fetchLimit);
+
+  // Server-side visibility enforcement: private tasks are only returned if the
+  // caller is the creator or assignee. This runs at the DB level so private
+  // tasks never enter the application layer for non-owners.
+  query = query.or(`visibility.neq.private,created_by.eq.${callerEmail},assigned_to.eq.${callerEmail}`);
 
   if (triage === "true") {
     query = query.eq("requires_triage", true);
@@ -1690,7 +1757,10 @@ app.get("/tasks", async (c) => {
   if (assignedTo && assignedTo !== "all") {
     query = query.eq("assigned_to", assignedTo);
   } else if (!assignedTo && !triage && !parent) {
-    query = query.or(`assigned_to.eq.${user.email},created_by.eq.${user.email}`);
+    // Include tasks the user owns or created. The created_by clause covers agent-assigned
+    // tasks (u-agent:*, e-agent:*) since those agents use the human's auth token and
+    // therefore always have created_by = user.email.
+    query = query.or(`assigned_to.eq.${callerEmail},created_by.eq.${callerEmail}`);
   }
 
   if (status) {
@@ -1736,7 +1806,7 @@ app.get("/tasks", async (c) => {
   const includeSubtasks = c.req.query("include_subtasks") === "true";
   if (includeSubtasks && tasks.length && !parent) {
     const parentIds = tasks.map((t: any) => t.id);
-    const { data: subs } = await sb.from("tasks").select("*").in("parent_task_id", parentIds).is("archived_at", null).order("task_number", { ascending: true });
+    const { data: subs } = await sb.from("tasks").select("*").in("parent_task_id", parentIds).is("archived_at", null).or(`visibility.neq.private,created_by.eq.${callerEmail},assigned_to.eq.${callerEmail}`).order("task_number", { ascending: true });
     if (subs?.length) {
       const subsByParent: Record<string, any[]> = {};
       for (const subtask of subs) (subsByParent[subtask.parent_task_id] ||= []).push(subtask);
@@ -1874,7 +1944,13 @@ app.get("/tasks/:number", async (c) => {
   const { data: task, error } = await sb.from("tasks").select("*").eq("task_number", num).single();
   if (error || !task) return c.json({ error: "Task not found" }, 404, corsHeaders);
   await hydrateRecordsWithProjects(sb, [task]);
-  if (!canAccessTask(task, user, task.project)) return c.json({ error: "Task not found" }, 404, corsHeaders);
+  if (!canAccessTask(task, user, task.project)) {
+    // Return 403 for private tasks so the caller knows the task exists but is forbidden.
+    // Return 404 for team/public tasks the caller genuinely has no access to (project-gated).
+    const status = task.visibility === "private" ? 403 : 404;
+    const message = task.visibility === "private" ? "Forbidden" : "Task not found";
+    return c.json({ error: message }, status, corsHeaders);
+  }
 
   const { data: activity } = await sb.from("audit_events").select("*").eq("entity_type", "task").eq("entity_id", String(task.task_number)).order("timestamp", { ascending: false }).limit(20);
   const { data: subtasks } = await sb.from("tasks").select("*").eq("parent_task_id", task.id).order("task_number", { ascending: true });
@@ -2826,6 +2902,14 @@ app.post("/overtime/runs", async (c) => {
   if (!body.spec_title) return c.json({ error: "spec_title is required" }, 400, corsHeaders);
 
   const sb = getSupabase();
+
+  let projectId: string | null = null;
+  if (body.project) {
+    const project = await resolveProjectRef(sb, body.project);
+    if (!project) return c.json({ error: `Project "${body.project}" not found` }, 404, corsHeaders);
+    projectId = project.id;
+  }
+
   const { data, error } = await sb.from("overtime_runs").insert({
     slug: body.slug,
     spec_title: body.spec_title,
@@ -2835,6 +2919,7 @@ app.post("/overtime/runs", async (c) => {
     model: body.model ?? null,
     worktree_path: body.worktree_path ?? null,
     branch_name: body.branch_name ?? null,
+    project_id: projectId,
     created_by: user.email,
   }).select("id").single();
 
@@ -2848,7 +2933,7 @@ app.post("/overtime/runs", async (c) => {
     entity_id: data?.id,
     action: "started",
     channel: "api",
-    state_after: { slug: body.slug, spec_title: body.spec_title, type: body.type || "dev" },
+    state_after: { slug: body.slug, spec_title: body.spec_title, type: body.type || "dev", project_id: projectId },
   });
 
   return c.json({ ok: true, id: data!.id }, 200, corsHeaders);
@@ -2899,11 +2984,20 @@ app.get("/overtime/runs", async (c) => {
   if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
 
   const sb = getSupabase();
-  const { data, error } = await sb.from("overtime_runs")
+  const projectSlug = c.req.query("project");
+
+  let query = sb.from("overtime_runs")
     .select("*")
     .order("started_at", { ascending: false })
     .limit(50);
 
+  if (projectSlug) {
+    const project = await resolveProjectRef(sb, projectSlug);
+    if (!project) return c.json({ error: `Project "${projectSlug}" not found` }, 404, corsHeaders);
+    query = query.eq("project_id", project.id);
+  }
+
+  const { data, error } = await query;
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
   return c.json({ runs: data || [] }, 200, corsHeaders);
 });
@@ -2955,6 +3049,182 @@ app.get("/overtime/runs/:id/cycles", async (c) => {
 
   if (error) return c.json({ error: error.message }, 500, corsHeaders);
   return c.json({ cycles: data || [] }, 200, corsHeaders);
+});
+
+// ── GET /overtime/runs/:id/rejections — count E-Agent rejections for a run ─
+app.get("/overtime/runs/:id/rejections", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const id = c.req.param("id");
+  const sb = getSupabase();
+
+  // Get the run to find the parent task number
+  const { data: run, error: runErr } = await sb
+    .from("overtime_runs")
+    .select("id, parent_task_number")
+    .eq("id", id)
+    .single();
+  if (runErr || !run) return c.json({ error: "Run not found" }, 404, corsHeaders);
+  if (!run.parent_task_number) return c.json({ total_rejections: 0 }, 200, corsHeaders);
+
+  // Get all subtasks of the parent task
+  const { data: parentTask } = await sb
+    .from("tasks")
+    .select("id")
+    .eq("task_number", run.parent_task_number)
+    .single();
+  if (!parentTask) return c.json({ total_rejections: 0 }, 200, corsHeaders);
+
+  const { data: subtasks } = await sb
+    .from("tasks")
+    .select("task_number")
+    .eq("parent_task_id", parentTask.id);
+  if (!subtasks || subtasks.length === 0) return c.json({ total_rejections: 0 }, 200, corsHeaders);
+
+  const subtaskNumbers = subtasks.map((s: any) => String(s.task_number));
+
+  // Count audit events where a subtask was reopened (completed → open)
+  const { data: events, error: eventsErr } = await sb
+    .from("audit_events")
+    .select("id")
+    .eq("entity_type", "task")
+    .eq("action", "updated")
+    .in("entity_id", subtaskNumbers)
+    .filter("state_before->>status", "eq", "completed")
+    .filter("state_after->>status", "eq", "open");
+
+  if (eventsErr) return c.json({ error: eventsErr.message }, 500, corsHeaders);
+  return c.json({ total_rejections: (events || []).length }, 200, corsHeaders);
+});
+
+// ── GET /overtime/dashboard — aggregate stats across all runs ──────────
+app.get("/overtime/dashboard", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const sb = getSupabase();
+
+  // Fetch all runs
+  const { data: runs, error: runsErr } = await sb
+    .from("overtime_runs")
+    .select("id, started_at, completed_at, status, total_cycles_u, total_cycles_e, total_rejections, total_cost_usd");
+  if (runsErr) return c.json({ error: runsErr.message }, 500, corsHeaders);
+
+  // Fetch all cycles (only fields needed for aggregation)
+  const { data: cycles, error: cyclesErr } = await sb
+    .from("overtime_cycles")
+    .select("run_id, tokens_in, tokens_out, cost_usd, subtask_number, action_taken, started_at");
+  if (cyclesErr) return c.json({ error: cyclesErr.message }, 500, corsHeaders);
+
+  const allRuns = runs || [];
+  const allCycles = cycles || [];
+
+  // ── Summary aggregates ─────────────────────────────────────────────
+  const totalRuns = allRuns.length;
+  const totalCostUsd = allRuns.reduce((s, r) => s + (Number(r.total_cost_usd) || 0), 0);
+  const totalTokensIn = allCycles.reduce((s, c) => s + (c.tokens_in || 0), 0);
+  const totalTokensOut = allCycles.reduce((s, c) => s + (c.tokens_out || 0), 0);
+  const totalCycles = allRuns.reduce((s, r) => s + (r.total_cycles_u || 0) + (r.total_cycles_e || 0), 0);
+  const totalRejections = allRuns.reduce((s, r) => s + (r.total_rejections || 0), 0);
+
+  // Subtasks delivered = cycles where action_taken = 'implemented'
+  const totalSubtasksDelivered = allCycles.filter(c => c.action_taken === "implemented").length;
+
+  const avgCostPerRun = totalRuns > 0 ? totalCostUsd / totalRuns : 0;
+  const avgCostPerSubtask = totalSubtasksDelivered > 0 ? totalCostUsd / totalSubtasksDelivered : 0;
+  const avgCyclesPerRun = totalRuns > 0 ? totalCycles / totalRuns : 0;
+  const avgRejectionRate = totalRuns > 0 ? totalRejections / totalRuns : 0;
+
+  // ── Daily trend — last 7 days ──────────────────────────────────────
+  const now = new Date();
+  const daily: Array<{ date: string; cost_usd: number; runs: number; cycles: number; subtasks_delivered: number }> = [];
+
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now);
+    d.setUTCDate(d.getUTCDate() - i);
+    const dateStr = d.toISOString().slice(0, 10); // YYYY-MM-DD
+
+    const dayRuns = allRuns.filter(r => (r.started_at || "").slice(0, 10) === dateStr);
+    const dayRunIds = new Set(dayRuns.map(r => r.id));
+    const dayCycles = allCycles.filter(c => dayRunIds.has(c.run_id));
+
+    daily.push({
+      date: dateStr,
+      cost_usd: dayRuns.reduce((s, r) => s + (Number(r.total_cost_usd) || 0), 0),
+      runs: dayRuns.length,
+      cycles: dayRuns.reduce((s, r) => s + (r.total_cycles_u || 0) + (r.total_cycles_e || 0), 0),
+      subtasks_delivered: dayCycles.filter(c => c.action_taken === "implemented").length,
+    });
+  }
+
+  return c.json({
+    summary: {
+      total_runs: totalRuns,
+      total_cost_usd: Math.round(totalCostUsd * 1e6) / 1e6,
+      total_tokens_in: totalTokensIn,
+      total_tokens_out: totalTokensOut,
+      total_cycles: totalCycles,
+      total_rejections: totalRejections,
+      total_subtasks_delivered: totalSubtasksDelivered,
+      avg_cost_per_run: Math.round(avgCostPerRun * 1e6) / 1e6,
+      avg_cost_per_subtask: Math.round(avgCostPerSubtask * 1e6) / 1e6,
+      avg_cycles_per_run: Math.round(avgCyclesPerRun * 100) / 100,
+      avg_rejection_rate: Math.round(avgRejectionRate * 100) / 100,
+    },
+    daily,
+  }, 200, corsHeaders);
+});
+
+// ── GET /overtime/comparison — per-run comparison table ───────────────
+app.get("/overtime/comparison", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const sb = getSupabase();
+
+  const { data: runs, error: runsErr } = await sb
+    .from("overtime_runs")
+    .select("*")
+    .order("started_at", { ascending: false })
+    .limit(50);
+  if (runsErr) return c.json({ error: runsErr.message }, 500, corsHeaders);
+
+  const allRuns = runs || [];
+
+  // Fetch only the fields needed for subtask counting
+  const { data: cycles, error: cyclesErr } = await sb
+    .from("overtime_cycles")
+    .select("run_id, subtask_number, action_taken");
+  if (cyclesErr) return c.json({ error: cyclesErr.message }, 500, corsHeaders);
+
+  const allCycles = cycles || [];
+
+  // Group cycles by run_id for O(1) lookup
+  const cyclesByRun = new Map<string, typeof allCycles>();
+  for (const cy of allCycles) {
+    const list = cyclesByRun.get(cy.run_id) || [];
+    list.push(cy);
+    cyclesByRun.set(cy.run_id, list);
+  }
+
+  const comparison = allRuns.map((r) => {
+    const runCycles = cyclesByRun.get(r.id) || [];
+    const subtaskCount = new Set(
+      runCycles
+        .filter((cy) => cy.action_taken === "implemented" && cy.subtask_number != null)
+        .map((cy) => cy.subtask_number)
+    ).size;
+    const totalCost = Number(r.total_cost_usd) || 0;
+    const costPerSubtask = subtaskCount > 0 && totalCost > 0 ? totalCost / subtaskCount : null;
+    return {
+      ...r,
+      subtask_count: subtaskCount,
+      cost_per_subtask: costPerSubtask != null ? Math.round(costPerSubtask * 1e6) / 1e6 : null,
+    };
+  });
+
+  return c.json({ runs: comparison }, 200, corsHeaders);
 });
 
 // ── Health ─────────────────────────────────────────────────────────────
