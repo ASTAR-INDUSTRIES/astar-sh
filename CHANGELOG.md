@@ -5,6 +5,14 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.78] - 2026-04-14
+
+### Added
+- `astar overtime dashboard` — aggregate view across all runs: avg cost per subtask, total spend, runs, subtasks delivered, cycles, rejection rate, and a 7-day ASCII sparkline of daily cost
+- `astar overtime stats` (no args) — per-run comparison table: slug, subtasks delivered, total cost, cost per subtask, rejections, cycles, duration
+- `astar overtime stats <id> --cycles` — full per-cycle breakdown with tokens in/out as separate columns
+- `astar overtime stop` and agent done-path now count E-Agent rejections (subtasks reopened) and store them on the run record
+
 ## [0.0.77] - 2026-04-14
 
 ### Changed

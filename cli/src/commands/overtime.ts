@@ -5,7 +5,7 @@ import { homedir } from "os";
 import { unlinkSync, existsSync } from "fs";
 import { getToken } from "../lib/auth";
 import { getConfig } from "../lib/config";
-import { AstarAPI, type Task, type TaskActivity, type OvertimeRun } from "../lib/api";
+import { AstarAPI, type Task, type TaskActivity, type OvertimeRun, type OvertimeRunComparison } from "../lib/api";
 import { c, table } from "../lib/ui";
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -475,6 +475,9 @@ if command -v jq &>/dev/null && command -v curl &>/dev/null; then
   TOTAL_U=$(echo "$CYCLES_RESP" | jq '[.cycles[] | select(.agent=="u")] | length' 2>/dev/null || echo "0")
   TOTAL_E=$(echo "$CYCLES_RESP" | jq '[.cycles[] | select(.agent=="e")] | length' 2>/dev/null || echo "0")
   TOTAL_COST=$(echo "$CYCLES_RESP" | jq '[.cycles[].cost_usd // 0] | add // null' 2>/dev/null || echo "null")
+  REJ_RESP=$(curl -sf "${apiUrl}/overtime/runs/${runId}/rejections" \\
+    -H "Authorization: Bearer $AUTH_TOKEN" 2>/dev/null)
+  TOTAL_REJ=$(echo "$REJ_RESP" | jq '.total_rejections // 0' 2>/dev/null || echo "0")
   FINALIZE_JSON=$(jq -nc \\
     --arg status "done" \\
     --arg completed_at "$FINAL_TS" \\
@@ -482,13 +485,14 @@ if command -v jq &>/dev/null && command -v curl &>/dev/null; then
     --argjson total_cycles_u "\${TOTAL_U:-0}" \\
     --argjson total_cycles_e "\${TOTAL_E:-0}" \\
     --argjson total_cost_usd "\${TOTAL_COST:-null}" \\
-    '{status: $status, completed_at: $completed_at, git_commits: $git_commits, total_cycles_u: $total_cycles_u, total_cycles_e: $total_cycles_e, total_cost_usd: $total_cost_usd}' 2>/dev/null)
+    --argjson total_rejections "\${TOTAL_REJ:-0}" \\
+    '{status: $status, completed_at: $completed_at, git_commits: $git_commits, total_cycles_u: $total_cycles_u, total_cycles_e: $total_cycles_e, total_cost_usd: $total_cost_usd, total_rejections: $total_rejections}' 2>/dev/null)
   if [ -n "$FINALIZE_JSON" ]; then
     curl -sf -X PATCH "${apiUrl}/overtime/runs/${runId}" \\
       -H "Authorization: Bearer $AUTH_TOKEN" \\
       -H "Content-Type: application/json" \\
       -d "$FINALIZE_JSON" >/dev/null 2>&1 || true
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] Run finalized (done, U=$TOTAL_U E=$TOTAL_E cycles)."
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] Run finalized (done, U=$TOTAL_U E=$TOTAL_E cycles, $TOTAL_REJ rejections)."
   fi
 fi` : "";
 
@@ -1020,12 +1024,19 @@ async function stopSingleSessionCore(
         if (costs.length) totalCostUsd = costs.reduce((a, b) => a + b, 0);
       } catch {}
 
+      let totalRejections = 0;
+      try {
+        const { total_rejections } = await api.getOvertimeRejections(s.runId);
+        totalRejections = total_rejections;
+      } catch {}
+
       await api.updateOvertimeRun(s.runId, {
         status: finalStatus,
         completed_at: new Date().toISOString(),
         total_cycles_u: totalCyclesU,
         total_cycles_e: totalCyclesE,
         total_cost_usd: totalCostUsd,
+        total_rejections: totalRejections,
         git_commits: gitCommits,
       });
     } catch {}
@@ -1103,15 +1114,15 @@ function statusColor(status: string): string {
   return c.dim + status + c.reset;
 }
 
-async function showStats(runId?: string) {
+async function showStats(runId?: string, opts: { cycles?: boolean } = {}) {
   const token = await requireAuth();
   const api = new AstarAPI(token);
 
   if (!runId) {
-    // List recent runs
-    let runs;
+    // Per-slug comparison table
+    let runs: OvertimeRunComparison[];
     try {
-      runs = await api.listOvertimeRuns();
+      runs = await api.getOvertimeComparison();
     } catch (e: any) {
       console.error(`${c.red}✗${c.reset} ${e.message}`);
       process.exit(1);
@@ -1127,7 +1138,7 @@ async function showStats(runId?: string) {
     console.log("");
 
     table(
-      ["Slug", "Status", "U", "E", "Reject", "Cost", "Duration"],
+      ["Slug", "Subtasks", "Cost", "Cost/Subtask", "Rejections", "Cycles", "Duration"],
       runs.map((r) => {
         const dur =
           r.completed_at
@@ -1135,19 +1146,20 @@ async function showStats(runId?: string) {
             : r.status === "running"
               ? fmtDuration(Date.now() - new Date(r.started_at).getTime()) + "…"
               : "—";
+        const totalCycles = (r.total_cycles_u ?? 0) + (r.total_cycles_e ?? 0);
         return [
           `${c.white}${r.slug}${c.reset}`,
-          statusColor(r.status),
-          String(r.total_cycles_u),
-          String(r.total_cycles_e),
-          String(r.total_rejections),
+          r.subtask_count > 0 ? String(r.subtask_count) : `${c.dim}—${c.reset}`,
           fmtCost(r.total_cost_usd),
+          r.cost_per_subtask != null ? `${c.bold}${fmtCost(r.cost_per_subtask)}${c.reset}` : `${c.dim}—${c.reset}`,
+          r.total_rejections > 0 ? `${c.yellow}${r.total_rejections}${c.reset}` : `${c.dim}0${c.reset}`,
+          totalCycles > 0 ? `${c.dim}${r.total_cycles_u}U ${r.total_cycles_e}E${c.reset}` : `${c.dim}—${c.reset}`,
           `${c.dim}${dur}${c.reset}`,
         ];
       })
     );
     console.log("");
-    console.log(`  ${c.dim}Pass a run ID to see per-cycle breakdown: astar overtime stats <id>${c.reset}`);
+    console.log(`  ${c.dim}Pass a run ID for per-cycle breakdown: astar overtime stats <id>${c.reset}`);
     console.log("");
     return;
   }
@@ -1216,30 +1228,54 @@ async function showStats(runId?: string) {
     console.log("");
     console.log(`  ${c.bold}${c.white}Cycles${c.reset}`);
     console.log("");
-    table(
-      ["#", "Agent", "Subtask", "Action", "Turns", "Tokens", "Cost", "Duration"],
-      cycles.map((cy) => {
-        const cyDur =
-          cy.completed_at
-            ? fmtDuration(new Date(cy.completed_at).getTime() - new Date(cy.started_at).getTime())
-            : "—";
-        const tokens =
-          cy.tokens_in != null || cy.tokens_out != null
-            ? `${(cy.tokens_in ?? 0) + (cy.tokens_out ?? 0)}`
-            : "—";
-        const agentColor = cy.agent === "u" ? c.cyan : c.magenta;
-        return [
-          `${c.dim}${cy.cycle_number}${c.reset}`,
-          `${agentColor}${cy.agent}${c.reset}`,
-          cy.subtask_number != null ? `#${cy.subtask_number}` : `${c.dim}—${c.reset}`,
-          cy.action_taken ? `${c.dim}${cy.action_taken}${c.reset}` : `${c.dim}—${c.reset}`,
-          cy.turns_used != null ? `${cy.turns_used}/${cy.max_turns ?? "?"}` : `${c.dim}—${c.reset}`,
-          `${c.dim}${tokens}${c.reset}`,
-          cy.cost_usd != null ? `$${cy.cost_usd.toFixed(4)}` : `${c.dim}—${c.reset}`,
-          `${c.dim}${cyDur}${c.reset}`,
-        ];
-      })
-    );
+    if (opts.cycles) {
+      // Full per-cycle breakdown: tokens in/out split
+      table(
+        ["#", "Agent", "Turns", "Tokens In", "Tokens Out", "Cost", "Action", "Duration"],
+        cycles.map((cy) => {
+          const cyDur =
+            cy.completed_at
+              ? fmtDuration(new Date(cy.completed_at).getTime() - new Date(cy.started_at).getTime())
+              : "—";
+          const agentColor = cy.agent === "u" ? c.cyan : c.magenta;
+          return [
+            `${c.dim}${cy.cycle_number}${c.reset}`,
+            `${agentColor}${cy.agent}${c.reset}`,
+            cy.turns_used != null ? `${cy.turns_used}/${cy.max_turns ?? "?"}` : `${c.dim}—${c.reset}`,
+            cy.tokens_in != null ? `${c.dim}${cy.tokens_in.toLocaleString()}${c.reset}` : `${c.dim}—${c.reset}`,
+            cy.tokens_out != null ? `${c.dim}${cy.tokens_out.toLocaleString()}${c.reset}` : `${c.dim}—${c.reset}`,
+            cy.cost_usd != null ? `${c.bold}$${cy.cost_usd.toFixed(4)}${c.reset}` : `${c.dim}—${c.reset}`,
+            cy.action_taken ? `${c.dim}${cy.action_taken}${c.reset}` : `${c.dim}—${c.reset}`,
+            `${c.dim}${cyDur}${c.reset}`,
+          ];
+        })
+      );
+    } else {
+      table(
+        ["#", "Agent", "Subtask", "Action", "Turns", "Tokens", "Cost", "Duration"],
+        cycles.map((cy) => {
+          const cyDur =
+            cy.completed_at
+              ? fmtDuration(new Date(cy.completed_at).getTime() - new Date(cy.started_at).getTime())
+              : "—";
+          const tokens =
+            cy.tokens_in != null || cy.tokens_out != null
+              ? `${(cy.tokens_in ?? 0) + (cy.tokens_out ?? 0)}`
+              : "—";
+          const agentColor = cy.agent === "u" ? c.cyan : c.magenta;
+          return [
+            `${c.dim}${cy.cycle_number}${c.reset}`,
+            `${agentColor}${cy.agent}${c.reset}`,
+            cy.subtask_number != null ? `#${cy.subtask_number}` : `${c.dim}—${c.reset}`,
+            cy.action_taken ? `${c.dim}${cy.action_taken}${c.reset}` : `${c.dim}—${c.reset}`,
+            cy.turns_used != null ? `${cy.turns_used}/${cy.max_turns ?? "?"}` : `${c.dim}—${c.reset}`,
+            `${c.dim}${tokens}${c.reset}`,
+            cy.cost_usd != null ? `$${cy.cost_usd.toFixed(4)}` : `${c.dim}—${c.reset}`,
+            `${c.dim}${cyDur}${c.reset}`,
+          ];
+        })
+      );
+    }
   }
 
   if (run.git_commits?.length) {
@@ -1251,6 +1287,71 @@ async function showStats(runId?: string) {
     if (run.git_commits.length > 10) {
       console.log(`    ${c.dim}…and ${run.git_commits.length - 10} more${c.reset}`);
     }
+  }
+
+  if (!opts.cycles && cycles.length) {
+    console.log(`  ${c.dim}Use --cycles for tokens in/out split: astar overtime stats ${runId} --cycles${c.reset}`);
+  }
+  console.log("");
+}
+
+// ── Dashboard ───────────────────────────────────────────────────────
+
+function sparkline(values: number[]): string {
+  const bars = "▁▂▃▄▅▆▇█";
+  const max = Math.max(...values, 0);
+  if (max === 0) return Array(values.length).fill("▁").join("");
+  return values.map((v) => bars[Math.min(7, Math.floor((v / max) * 7.99))]).join("");
+}
+
+async function showDashboard() {
+  const token = await requireAuth();
+  const api = new AstarAPI(token);
+
+  let data;
+  try {
+    data = await api.getOvertimeDashboard();
+  } catch (e: any) {
+    console.error(`${c.red}✗${c.reset} ${e.message}`);
+    process.exit(1);
+  }
+
+  const { summary, daily } = data;
+
+  console.log("");
+  console.log(`  ${c.bold}${c.white}OVERTIME DASHBOARD${c.reset}`);
+  console.log("");
+
+  // Cost per subtask is the most important metric — put it first and prominent
+  const costPerSubtask = summary.avg_cost_per_subtask;
+  if (costPerSubtask > 0) {
+    console.log(`  ${c.bold}${c.white}$${costPerSubtask.toFixed(4)}${c.reset}  avg cost per subtask`);
+  } else {
+    console.log(`  ${c.dim}avg cost per subtask:${c.reset} —`);
+  }
+  console.log("");
+
+  console.log(`  ${c.dim}Total spend:${c.reset}        ${summary.total_cost_usd > 0 ? `$${summary.total_cost_usd.toFixed(4)}` : "—"}`);
+  console.log(`  ${c.dim}Runs completed:${c.reset}     ${summary.total_runs}`);
+  console.log(`  ${c.dim}Subtasks delivered:${c.reset} ${summary.total_subtasks_delivered}`);
+  console.log(`  ${c.dim}Avg cost/run:${c.reset}       ${summary.avg_cost_per_run > 0 ? `$${summary.avg_cost_per_run.toFixed(4)}` : "—"}`);
+  console.log(`  ${c.dim}Avg cycles/run:${c.reset}     ${summary.avg_cycles_per_run > 0 ? summary.avg_cycles_per_run.toFixed(1) : "—"}`);
+  console.log(`  ${c.dim}Total cycles:${c.reset}       ${summary.total_cycles}`);
+  console.log(`  ${c.dim}Rejection rate:${c.reset}     ${summary.total_rejections > 0 ? `${(summary.avg_rejection_rate * 100).toFixed(1)}% (${summary.total_rejections} total)` : "0%"}`);
+  console.log(`  ${c.dim}Tokens in:${c.reset}          ${summary.total_tokens_in > 0 ? summary.total_tokens_in.toLocaleString() : "—"}`);
+  console.log(`  ${c.dim}Tokens out:${c.reset}         ${summary.total_tokens_out > 0 ? summary.total_tokens_out.toLocaleString() : "—"}`);
+
+  // 7-day cost trend sparkline
+  if (daily.length > 0) {
+    const sorted = [...daily].sort((a, b) => a.date.localeCompare(b.date)).slice(-7);
+    const costs = sorted.map((d) => d.cost_usd);
+    const spark = sparkline(costs);
+    const firstDate = sorted[0]?.date?.slice(5) ?? "";
+    const lastDate = sorted[sorted.length - 1]?.date?.slice(5) ?? "";
+    console.log("");
+    console.log(`  ${c.dim}7-day cost trend (${firstDate} → ${lastDate}):${c.reset}`);
+    console.log(`  ${c.cyan}${spark}${c.reset}`);
+    console.log(`  ${c.dim}${sorted.map((d) => `$${d.cost_usd.toFixed(2)}`).join("  ")}${c.reset}`);
   }
 
   console.log("");
@@ -1639,6 +1740,8 @@ function showGuide() {
     ${cy}astar overtime monitor${r}              live full-screen dashboard (5s refresh)
     ${cy}astar overtime stats${r}                cost, cycles, tokens across all runs
     ${cy}astar overtime stats <id>${r}           per-cycle breakdown for a specific run
+    ${cy}astar overtime stats <id> --cycles${r}  full breakdown: tokens in/out split per cycle
+    ${cy}astar overtime dashboard${r}            aggregate spend, efficiency, 7-day trend
     ${cy}astar overtime guide${r}               this guide
 
   ${c.bold}${w}EXAMPLE USE CASES${r}
@@ -1785,9 +1888,15 @@ export function registerOvertimeCommands(program: Command) {
   overtime
     .command("stats [run-id]")
     .description("Show telemetry for overtime runs — list all or detail for a specific run")
-    .action(async (runId?: string) => {
-      await showStats(runId);
+    .option("--cycles", "Show full per-cycle breakdown with tokens in/out split (requires run-id)")
+    .action(async (runId: string | undefined, opts: { cycles?: boolean }) => {
+      await showStats(runId, opts);
     });
+
+  overtime
+    .command("dashboard")
+    .description("Aggregate view of all overtime runs: spend, efficiency, and 7-day trend")
+    .action(showDashboard);
 
   overtime
     .command("guide")

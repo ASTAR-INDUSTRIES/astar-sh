@@ -2988,6 +2988,182 @@ app.get("/overtime/runs/:id/cycles", async (c) => {
   return c.json({ cycles: data || [] }, 200, corsHeaders);
 });
 
+// ── GET /overtime/runs/:id/rejections — count E-Agent rejections for a run ─
+app.get("/overtime/runs/:id/rejections", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const id = c.req.param("id");
+  const sb = getSupabase();
+
+  // Get the run to find the parent task number
+  const { data: run, error: runErr } = await sb
+    .from("overtime_runs")
+    .select("id, parent_task_number")
+    .eq("id", id)
+    .single();
+  if (runErr || !run) return c.json({ error: "Run not found" }, 404, corsHeaders);
+  if (!run.parent_task_number) return c.json({ total_rejections: 0 }, 200, corsHeaders);
+
+  // Get all subtasks of the parent task
+  const { data: parentTask } = await sb
+    .from("tasks")
+    .select("id")
+    .eq("task_number", run.parent_task_number)
+    .single();
+  if (!parentTask) return c.json({ total_rejections: 0 }, 200, corsHeaders);
+
+  const { data: subtasks } = await sb
+    .from("tasks")
+    .select("task_number")
+    .eq("parent_task_id", parentTask.id);
+  if (!subtasks || subtasks.length === 0) return c.json({ total_rejections: 0 }, 200, corsHeaders);
+
+  const subtaskNumbers = subtasks.map((s: any) => String(s.task_number));
+
+  // Count audit events where a subtask was reopened (completed → open)
+  const { data: events, error: eventsErr } = await sb
+    .from("audit_events")
+    .select("id")
+    .eq("entity_type", "task")
+    .eq("action", "updated")
+    .in("entity_id", subtaskNumbers)
+    .filter("state_before->>status", "eq", "completed")
+    .filter("state_after->>status", "eq", "open");
+
+  if (eventsErr) return c.json({ error: eventsErr.message }, 500, corsHeaders);
+  return c.json({ total_rejections: (events || []).length }, 200, corsHeaders);
+});
+
+// ── GET /overtime/dashboard — aggregate stats across all runs ──────────
+app.get("/overtime/dashboard", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const sb = getSupabase();
+
+  // Fetch all runs
+  const { data: runs, error: runsErr } = await sb
+    .from("overtime_runs")
+    .select("id, started_at, completed_at, status, total_cycles_u, total_cycles_e, total_rejections, total_cost_usd");
+  if (runsErr) return c.json({ error: runsErr.message }, 500, corsHeaders);
+
+  // Fetch all cycles (only fields needed for aggregation)
+  const { data: cycles, error: cyclesErr } = await sb
+    .from("overtime_cycles")
+    .select("run_id, tokens_in, tokens_out, cost_usd, subtask_number, action_taken, started_at");
+  if (cyclesErr) return c.json({ error: cyclesErr.message }, 500, corsHeaders);
+
+  const allRuns = runs || [];
+  const allCycles = cycles || [];
+
+  // ── Summary aggregates ─────────────────────────────────────────────
+  const totalRuns = allRuns.length;
+  const totalCostUsd = allRuns.reduce((s, r) => s + (Number(r.total_cost_usd) || 0), 0);
+  const totalTokensIn = allCycles.reduce((s, c) => s + (c.tokens_in || 0), 0);
+  const totalTokensOut = allCycles.reduce((s, c) => s + (c.tokens_out || 0), 0);
+  const totalCycles = allRuns.reduce((s, r) => s + (r.total_cycles_u || 0) + (r.total_cycles_e || 0), 0);
+  const totalRejections = allRuns.reduce((s, r) => s + (r.total_rejections || 0), 0);
+
+  // Subtasks delivered = cycles where action_taken = 'implemented'
+  const totalSubtasksDelivered = allCycles.filter(c => c.action_taken === "implemented").length;
+
+  const avgCostPerRun = totalRuns > 0 ? totalCostUsd / totalRuns : 0;
+  const avgCostPerSubtask = totalSubtasksDelivered > 0 ? totalCostUsd / totalSubtasksDelivered : 0;
+  const avgCyclesPerRun = totalRuns > 0 ? totalCycles / totalRuns : 0;
+  const avgRejectionRate = totalRuns > 0 ? totalRejections / totalRuns : 0;
+
+  // ── Daily trend — last 7 days ──────────────────────────────────────
+  const now = new Date();
+  const daily: Array<{ date: string; cost_usd: number; runs: number; cycles: number; subtasks_delivered: number }> = [];
+
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now);
+    d.setUTCDate(d.getUTCDate() - i);
+    const dateStr = d.toISOString().slice(0, 10); // YYYY-MM-DD
+
+    const dayRuns = allRuns.filter(r => (r.started_at || "").slice(0, 10) === dateStr);
+    const dayRunIds = new Set(dayRuns.map(r => r.id));
+    const dayCycles = allCycles.filter(c => dayRunIds.has(c.run_id));
+
+    daily.push({
+      date: dateStr,
+      cost_usd: dayRuns.reduce((s, r) => s + (Number(r.total_cost_usd) || 0), 0),
+      runs: dayRuns.length,
+      cycles: dayRuns.reduce((s, r) => s + (r.total_cycles_u || 0) + (r.total_cycles_e || 0), 0),
+      subtasks_delivered: dayCycles.filter(c => c.action_taken === "implemented").length,
+    });
+  }
+
+  return c.json({
+    summary: {
+      total_runs: totalRuns,
+      total_cost_usd: Math.round(totalCostUsd * 1e6) / 1e6,
+      total_tokens_in: totalTokensIn,
+      total_tokens_out: totalTokensOut,
+      total_cycles: totalCycles,
+      total_rejections: totalRejections,
+      total_subtasks_delivered: totalSubtasksDelivered,
+      avg_cost_per_run: Math.round(avgCostPerRun * 1e6) / 1e6,
+      avg_cost_per_subtask: Math.round(avgCostPerSubtask * 1e6) / 1e6,
+      avg_cycles_per_run: Math.round(avgCyclesPerRun * 100) / 100,
+      avg_rejection_rate: Math.round(avgRejectionRate * 100) / 100,
+    },
+    daily,
+  }, 200, corsHeaders);
+});
+
+// ── GET /overtime/comparison — per-run comparison table ───────────────
+app.get("/overtime/comparison", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const sb = getSupabase();
+
+  const { data: runs, error: runsErr } = await sb
+    .from("overtime_runs")
+    .select("*")
+    .order("started_at", { ascending: false })
+    .limit(50);
+  if (runsErr) return c.json({ error: runsErr.message }, 500, corsHeaders);
+
+  const allRuns = runs || [];
+
+  // Fetch only the fields needed for subtask counting
+  const { data: cycles, error: cyclesErr } = await sb
+    .from("overtime_cycles")
+    .select("run_id, subtask_number, action_taken");
+  if (cyclesErr) return c.json({ error: cyclesErr.message }, 500, corsHeaders);
+
+  const allCycles = cycles || [];
+
+  // Group cycles by run_id for O(1) lookup
+  const cyclesByRun = new Map<string, typeof allCycles>();
+  for (const cy of allCycles) {
+    const list = cyclesByRun.get(cy.run_id) || [];
+    list.push(cy);
+    cyclesByRun.set(cy.run_id, list);
+  }
+
+  const comparison = allRuns.map((r) => {
+    const runCycles = cyclesByRun.get(r.id) || [];
+    const subtaskCount = new Set(
+      runCycles
+        .filter((cy) => cy.action_taken === "implemented" && cy.subtask_number != null)
+        .map((cy) => cy.subtask_number)
+    ).size;
+    const totalCost = Number(r.total_cost_usd) || 0;
+    const costPerSubtask = subtaskCount > 0 && totalCost > 0 ? totalCost / subtaskCount : null;
+    return {
+      ...r,
+      subtask_count: subtaskCount,
+      cost_per_subtask: costPerSubtask != null ? Math.round(costPerSubtask * 1e6) / 1e6 : null,
+    };
+  });
+
+  return c.json({ runs: comparison }, 200, corsHeaders);
+});
+
 // ── Health ─────────────────────────────────────────────────────────────
 app.get("/", (c) => c.json({ status: "ok", service: "skills-api" }, 200, corsHeaders));
 
