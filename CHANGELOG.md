@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.76] - 2026-04-14
+
 ### Fixed
 - `astar todo team` no longer shows private tasks — the team board is filtered to `team` and `public` visibility only
 - Private tasks are no longer visible to other users via `GET /tasks` — visibility is now enforced at the database query level
@@ -13,6 +15,9 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 - `astar` dashboard "Tasks: X open" count now includes open subtasks
 
 ### Added
+- `astar overtime monitor` — live full-screen dashboard showing all active sessions with slug, task number, subtask progress bar, state, uptime, cost, and log tail; refreshes every 5 seconds
+- `astar overtime monitor` — `[s]` keybinding stops a session by slug; `[q]` quits; footer shows aggregate stats (sessions, total cost, cycles, rejections)
+- `astar overtime stop <slug>` — stop a single session by slug instead of all running sessions
 - `astar todo "title" --private` creates the task with `visibility=private`; `--public` creates with `visibility=public`; default is `team`
 - `astar overtime status --verbose` — shows last cycle's cost, turns used, and model for each running session alongside existing progress/state/uptime
 - `overtime` E-Agent now explicitly rejects placeholder/stub returns, workaround code, import hacks, and mock-heavy test patches that mask real failures — reopens the subtask with "This routes around the problem instead of fixing it"
