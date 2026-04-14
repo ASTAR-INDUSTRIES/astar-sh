@@ -101,6 +101,130 @@ function printSection(title: string, headers: string[], rows: string[][], empty:
   table(headers, rows);
 }
 
+function showGuide() {
+  const d = c.dim;
+  const w = c.white;
+  const cy = c.cyan;
+  const y = c.yellow;
+  const r = c.reset;
+  const b = c.bold;
+  const m = c.magenta;
+
+  console.log(`
+  ${b}${w}ASTAR PROJECTS — GUIDE${r}
+
+  Projects are first-class workstream primitives. Tasks, events, agents,
+  and milestones attach to a project via project_id. All listing commands
+  support ${cy}--project <slug>${r} to scope results to a single workstream.
+
+  ${b}${w}DATA MODEL${r}
+
+    ${b}projects${r} table
+      ${cy}id${r}            uuid          Primary key
+      ${cy}slug${r}          text          Unique, URL-safe identifier (e.g. ${d}my-project${r})
+      ${cy}name${r}          text          Display name (required)
+      ${cy}description${r}   text          Optional
+      ${cy}visibility${r}    text          private | team | public
+      ${cy}owner${r}         text          Email of creator (can be reassigned)
+      ${cy}members${r}       jsonb         Array of staff emails (normalized lowercase)
+      ${cy}created_at${r}    timestamptz
+      ${cy}updated_at${r}    timestamptz
+
+  ${b}${w}VISIBILITY & ACCESS CONTROL${r}
+
+    ${cy}public${r}   Any authenticated ${d}@astarconsulting.no${r} staff member
+    ${cy}team${r}     Owner + emails listed in the members array
+    ${cy}private${r}  Owner only
+
+    Project access gates cascade to attached entities:
+    A task in a private project is only visible to the project owner,
+    unless the user is the task's creator or assignee — task-level
+    ownership overrides the project gate.
+
+    When in doubt: if you can't see a task, check whether it lives in
+    a private project you're not a member of.
+
+  ${b}${w}CREATING A PROJECT${r}
+
+    ${cy}astar projects "My Project"${r}                  creates with team visibility
+    ${cy}astar projects "My Project" --visibility private${r}
+    ${cy}astar projects "My Project" --slug my-proj --member bob@astarconsulting.no${r}
+
+    Slug is auto-derived from name if not provided (lowercase, hyphens).
+    Duplicate slugs are rejected — pick a unique slug.
+
+  ${b}${w}OPERATIONS${r}
+
+    ${cy}astar projects${r}                list all accessible projects
+    ${cy}astar projects list${r}           same as above
+    ${cy}astar projects info <slug>${r}    project details + tasks, events, agents, milestones
+    ${cy}astar projects update <slug>${r}  patch name, slug, description, visibility, members, owner
+    ${cy}astar projects delete <slug>${r}  delete project — unlinks all attached work (irreversible)
+
+    ${y}Note:${r} delete only unlinks — it does NOT delete the attached tasks/events/agents.
+    Those entities remain but lose their project association.
+
+  ${b}${w}ATTACHING WORK TO A PROJECT${r}
+
+    Tasks:     ${cy}astar todo "Title" --project <slug>${r}
+               ${cy}update_task${r} with ${cy}project${r} field (MCP)
+    Events:    set ${cy}project${r} field on event create/update
+    Agents:    set ${cy}project_id${r} when registering an agent
+    Milestones: milestones include a ${cy}project_id${r} foreign key
+
+    To detach a task from its project: ${cy}update_task${r} with ${cy}project=""${r}
+
+  ${b}${w}FILTERING BY PROJECT${r}
+
+    ${cy}--project <slug>${r} works on:
+      ${cy}astar todo --project <slug>${r}         tasks in this project
+      ${cy}astar events --project <slug>${r}       events in this project
+      ${cy}astar shipped list --project <slug>${r} milestones in this project
+      ${cy}astar agent list --project <slug>${r}   agents assigned to this project
+
+  ${b}${w}MCP TOOLS (for agents)${r}
+
+    ${m}create_project${r}   Create a new project (name, slug, visibility, members, owner)
+    ${m}list_projects${r}    List all accessible projects
+    ${m}get_project${r}      Full project detail with attached tasks, events, agents, milestones
+    ${m}update_project${r}   Patch project fields (owner-only for visibility/members changes)
+
+    No delete tool via MCP — use CLI for destructive operations.
+
+  ${b}${w}RELATIONSHIPS TO OTHER SUBSYSTEMS${r}
+
+    ${cy}projects → tasks${r}       tasks.project_id — scopes tasks to a workstream
+    ${cy}projects → events${r}      events.project_id — groups meetings/milestones by project
+    ${cy}projects → agents${r}      agents.project_id — associates an agent with a project
+    ${cy}projects → milestones${r}  milestones.project_id — tracks shipped work per project
+    ${cy}projects → audit${r}       project CRUD is logged; project_id surfaces in task audit events
+
+  ${b}${w}GOTCHAS${r}
+
+    ${y}Slug is the stable identifier.${r} Use slug (not UUID) for all CLI and MCP calls.
+    If you update the slug, all existing ${cy}--project${r} filter references break.
+
+    ${y}Members are not deduplicated automatically.${r} Passing ${cy}--member${r} on update
+    replaces the entire members array. To add one member, re-pass all existing ones.
+
+    ${y}Private projects are invisible to non-members.${r} If ${cy}list_projects${r} returns
+    an empty list, you may not have access — ask the owner to add you as a member.
+
+    ${y}Delete is unlink, not cascade-delete.${r} Deleting a project does not delete its
+    tasks or events — they persist, detached. Archive them separately if needed.
+
+    ${y}Overtime and projects:${r} Overtime runs can be scoped to a project by setting the
+    project slug in the spec's context. This links the generated tasks automatically.
+
+  ${b}${w}SEE ALSO${r}
+
+    ${cy}astar guide${r}           full system ontology
+    ${cy}astar todo guide${r}      task system — subtasks, triage, MCP tools
+    ${cy}astar events guide${r}    event system — types, lifecycle, task linkage
+    ${cy}astar audit guide${r}     audit trail — querying mutations
+  `);
+}
+
 export function registerProjectCommands(program: Command) {
   const projects = program
     .command("projects [name]")
@@ -243,4 +367,9 @@ export function registerProjectCommands(program: Command) {
         process.exit(1);
       }
     });
+
+  projects
+    .command("guide")
+    .description("Project system documentation — data model, visibility, relationships, MCP tools")
+    .action(showGuide);
 }

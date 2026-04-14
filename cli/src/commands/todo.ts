@@ -214,6 +214,166 @@ async function renderMonitor(api: AstarAPI, opts: { mineOnly?: boolean; myEmail?
   console.log(`  ${c.dim}${sorted.length} open · ${doneToday.length} done today${c.reset}${" ".repeat(Math.max(1, cols - 60))}${c.dim}ctrl+o ${monitorExpanded ? "collapse" : "expand"} · ctrl+c quit${c.reset}`);
 }
 
+function showGuide() {
+  const d = c.dim;
+  const w = c.white;
+  const cy = c.cyan;
+  const y = c.yellow;
+  const g = c.green;
+  const r = c.reset;
+  const b = c.bold;
+  const m = c.magenta;
+
+  console.log(`
+  ${b}${w}ASTAR TASK SYSTEM — GUIDE${r}
+
+  Tasks are the core unit of work in astar.sh. Every piece of work —
+  human or agent — is tracked as a task. Subtasks, event linkage,
+  project grouping, and polymorphic links make the system composable.
+
+  ${b}${w}DATA MODEL${r}
+
+    ${b}tasks${r} table
+      ${cy}task_number${r}    int           User-facing ID (#1, #2, #3)
+      ${cy}title${r}          text          Required
+      ${cy}description${r}    text          Optional detail
+      ${cy}status${r}         text          open | in_progress | completed | blocked | cancelled
+      ${cy}priority${r}       text          low | medium | high | critical
+      ${cy}source${r}         text          human | agent | feedback | system
+      ${cy}assigned_to${r}    text          Email of assignee
+      ${cy}created_by${r}     text          Email of creator
+      ${cy}due_date${r}       date          Optional
+      ${cy}tags${r}           text[]        Array of strings
+      ${cy}event_id${r}       uuid          FK → events (optional)
+      ${cy}project_id${r}     uuid          FK → projects (optional)
+      ${cy}parent_task_id${r} uuid          FK → tasks (subtask hierarchy)
+      ${cy}confidence${r}     numeric       AI confidence score 0–1
+      ${cy}requires_triage${r} boolean      true for agent-created tasks
+      ${cy}recurring${r}      jsonb         e.g. ${d}{"interval": "weekly"}${r}
+      ${cy}estimated_hours${r} numeric      Optional
+      ${cy}archived_at${r}    timestamptz   Set on soft-delete
+
+    ${b}task_links${r} table (polymorphic relationships)
+      ${cy}task_id${r}        uuid          FK → tasks
+      ${cy}link_type${r}      text          skill | news | feedback | url | milestone | task
+      ${cy}link_ref${r}       text          Slug, URL, or UUID of linked resource
+
+  ${b}${w}STATUS LIFECYCLE${r}
+
+    ${g}open${r} → ${y}in_progress${r} → ${g}completed${r}
+                          ↘ ${c.red}blocked${r}
+                          ↘ ${d}cancelled${r}
+
+    Completing a parent task with open subtasks is blocked unless force=true.
+    Completing a task with a ${m}feedback${r} link auto-closes that feedback (status=done).
+    Completing a task with a ${m}milestone${r} link auto-creates the milestone.
+
+  ${b}${w}SUBTASKS${r}
+
+    Subtasks are tasks with ${cy}parent_task_id${r} set.
+    Parent shows progress: ${d}[done/total]${r}
+    Fetch hierarchy in one call: ${cy}get_task${r} with ${cy}include_subtasks=true${r}
+    Agents work subtasks sequentially (top to bottom by task_number).
+    Never complete a parent while subtasks are open — the API will reject it.
+
+  ${b}${w}VISIBILITY RULES${r}
+
+    Tasks inherit visibility from their project (if linked).
+    ${cy}private${r}   Only the task creator and assignee see it
+    ${cy}team${r}      Owner + project members
+    ${cy}public${r}    All authenticated staff
+
+    Tasks without a project default to private visibility.
+
+  ${b}${w}TRIAGE WORKFLOW${r}
+
+    Agent-created tasks start as ${cy}requires_triage=true${r}, ${cy}source="agent"${r}.
+    They do NOT appear in the main task list until triaged.
+    Human reviews with ${cy}astar todo triage${r}:
+      ${g}accept${r}    → requires_triage=false, enters main list
+      ${d}dismiss${r}   → status=cancelled, archived_at set
+
+  ${b}${w}RECURRING TASKS${r}
+
+    Set ${cy}recurring={"interval": "weekly"}${r} (weekly | monthly | quarterly).
+    On completion, a new task is auto-created:
+    - Same title, assignee, tags, and recurring config
+    - Due date shifted forward by the interval
+    - Linked to the original via parent_task_id
+
+  ${b}${w}EVENT & PROJECT LINKAGE${r}
+
+    ${cy}event_id${r}   — Attach a task to a specific event (conference, meeting, etc.)
+    ${cy}project${r}    — Set via ${cy}update_task${r} with project slug/UUID
+
+    Filter tasks by event:   ${cy}astar todo --event <slug>${r}
+    Create inside event:     ${cy}astar todo "Title" --event <slug>${r}
+
+  ${b}${w}MCP TOOLS (for agents)${r}
+
+    ${m}list_tasks${r}        List tasks — filter by status, assigned_to, event, project
+    ${m}get_task${r}          Full task detail + activity log + subtasks
+    ${m}create_task${r}       Create a task (sets source="agent", requires_triage=true)
+    ${m}update_task${r}       Change status, priority, assignee, due_date, project
+    ${m}complete_task${r}     Mark done — runs link side effects (feedback close, milestone)
+    ${m}comment_task${r}      Append a comment to the activity log
+    ${m}link_task${r}         Add a polymorphic link (skill, news, feedback, url, milestone)
+    ${m}triage_tasks${r}      List tasks requiring triage
+    ${m}accept_task${r}       Accept a triaged task (requires_triage=false)
+    ${m}dismiss_task${r}      Dismiss a triaged task (status=cancelled)
+    ${m}get_velocity${r}      Tasks completed per week over the last N weeks
+    ${m}suggest_next_task${r} AI-ranked suggestion of what to work on next
+
+  ${b}${w}CLI COMMANDS${r}
+
+    ${cy}astar todo${r}                   List open tasks (interactive monitor)
+    ${cy}astar todo "Title"${r}           Create a task
+    ${cy}astar todo done <number>${r}     Mark a task completed
+    ${cy}astar todo info <number>${r}     Full detail + activity log
+    ${cy}astar todo assign <n> <email>${r} Reassign a task
+    ${cy}astar todo mine${r}              Tasks assigned to you
+    ${cy}astar todo team${r}              All team tasks
+    ${cy}astar todo triage${r}            Review agent-created tasks
+    ${cy}astar todo next${r}              AI-suggested next task
+    ${cy}astar todo velocity${r}          Completion velocity graph
+    ${cy}astar todo guide${r}             This guide
+
+  ${b}${w}RELATIONSHIPS TO OTHER SUBSYSTEMS${r}
+
+    ${cy}tasks → events${r}       event_id links a task into an event's scope
+    ${cy}tasks → projects${r}     project field groups tasks into workstreams
+    ${cy}tasks → feedback${r}     task_links type=feedback; completing closes the feedback item
+    ${cy}tasks → skills${r}       task_links type=skill; documents what skill was used/built
+    ${cy}tasks → milestones${r}   task_links type=milestone; auto-creates milestone on complete
+    ${cy}tasks → audit${r}        every mutation logged as an audit event
+    ${cy}tasks → overtime${r}     overtime runs create a parent task + subtasks per requirement
+
+  ${b}${w}GOTCHAS${r}
+
+    ${y}Triage gate:${r} Agent tasks are invisible until a human accepts them.
+    Don't assume your created task is in the active list — triage first.
+
+    ${y}Subtask blocking:${r} The API blocks completing a parent with open children.
+    Complete subtasks bottom-up, or pass force=true.
+
+    ${y}task_number vs id:${r} Use task_number (integer) for all CLI and most MCP calls.
+    The UUID id is only needed for foreign key operations.
+
+    ${y}recurring linkage:${r} Auto-created recurring tasks use parent_task_id to chain.
+    Don't mistake the chain for a subtask hierarchy — they are recurring instances.
+
+    ${y}feedback side effect:${r} Linking a task to feedback and then completing the task
+    will close the feedback item automatically. This is intentional but easy to miss.
+
+  ${b}${w}SEE ALSO${r}
+
+    ${cy}astar guide${r}           full system ontology
+    ${cy}astar events guide${r}    event system — types, lifecycle, task linkage
+    ${cy}astar projects guide${r}  project workstreams and membership
+    ${cy}astar audit guide${r}     audit trail — querying task mutations
+  `);
+}
+
 export function registerTodoCommands(program: Command) {
   const todo = program
     .command("todo [title]")
@@ -636,4 +796,9 @@ export function registerTodoCommands(program: Command) {
         process.exit(1);
       }
     });
+
+  todo
+    .command("guide")
+    .description("Task system documentation — data model, statuses, subtasks, MCP tools")
+    .action(showGuide);
 }

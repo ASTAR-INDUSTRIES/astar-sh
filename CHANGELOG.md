@@ -5,6 +5,12 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.80] - 2026-04-14
+
+### Added
+- `astar guide` — top-level system overview: all subsystems, entity relationship map, agent usage patterns
+- `astar todo guide`, `astar projects guide`, `astar events guide`, `astar agent guide`, `astar audit guide` — per-subsystem documentation for agents and humans
+
 ## [0.0.79] - 2026-04-14
 
 ### Added
