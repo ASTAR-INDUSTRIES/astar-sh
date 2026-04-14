@@ -10,13 +10,21 @@ import { c, table } from "../lib/ui";
 
 // ── Types ───────────────────────────────────────────────────────────
 
-interface OvertimeSpec {
+export interface VerificationCheck {
+  name: string;
+  run: string;
+  expect?: string;
+  expect_absent?: string;
+}
+
+export interface OvertimeSpec {
   slug: string;
   title: string;
   type: string;
   context: string;
   requirements: string[];
   notes: string;
+  verifications: VerificationCheck[];
 }
 
 interface OvertimeSession {
@@ -80,7 +88,7 @@ function ensureClaudeInstalled(): void {
 
 // ── Spec parser ─────────────────────────────────────────────────────
 
-function parseSpec(content: string, filename: string): OvertimeSpec {
+export function parseSpec(content: string, filename: string): OvertimeSpec {
   const slug = basename(filename, ".md").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const lines = content.split("\n");
 
@@ -89,8 +97,10 @@ function parseSpec(content: string, filename: string): OvertimeSpec {
   const contextLines: string[] = [];
   const requirements: string[] = [];
   const notesLines: string[] = [];
+  const verifications: VerificationCheck[] = [];
+  let currentVerification: Partial<VerificationCheck> | null = null;
 
-  let section: "preamble" | "context" | "requirements" | "notes" = "preamble";
+  let section: "preamble" | "context" | "requirements" | "notes" | "verification" = "preamble";
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -108,17 +118,38 @@ function parseSpec(content: string, filename: string): OvertimeSpec {
     }
 
     if (/^##\s+requirements/i.test(trimmed)) {
+      if (currentVerification?.name && currentVerification?.run) {
+        verifications.push(currentVerification as VerificationCheck);
+        currentVerification = null;
+      }
       section = "requirements";
       continue;
     }
 
     if (/^##\s+notes/i.test(trimmed)) {
+      if (currentVerification?.name && currentVerification?.run) {
+        verifications.push(currentVerification as VerificationCheck);
+        currentVerification = null;
+      }
       section = "notes";
+      continue;
+    }
+
+    if (/^##\s+verification/i.test(trimmed)) {
+      if (currentVerification?.name && currentVerification?.run) {
+        verifications.push(currentVerification as VerificationCheck);
+        currentVerification = null;
+      }
+      section = "verification";
       continue;
     }
 
     if (/^##\s+/.test(trimmed) && section !== "preamble") {
       // Unknown H2 — treat as notes
+      if (currentVerification?.name && currentVerification?.run) {
+        verifications.push(currentVerification as VerificationCheck);
+        currentVerification = null;
+      }
       section = "notes";
       notesLines.push(line);
       continue;
@@ -136,7 +167,40 @@ function parseSpec(content: string, filename: string): OvertimeSpec {
       case "notes":
         notesLines.push(line);
         break;
+      case "verification": {
+        // Start a new check block
+        const nameMatch = trimmed.match(/^-\s+name:\s+(.+)$/);
+        if (nameMatch) {
+          if (currentVerification?.name && currentVerification?.run) {
+            verifications.push(currentVerification as VerificationCheck);
+          }
+          currentVerification = { name: nameMatch[1].trim() };
+          break;
+        }
+        if (!currentVerification) break;
+        const runMatch = trimmed.match(/^run:\s+(.+)$/);
+        if (runMatch) {
+          currentVerification.run = runMatch[1].trim();
+          break;
+        }
+        const expectMatch = trimmed.match(/^expect:\s+"?([^"]*)"?$/);
+        if (expectMatch) {
+          currentVerification.expect = expectMatch[1].trim();
+          break;
+        }
+        const expectAbsentMatch = trimmed.match(/^expect_absent:\s+"?([^"]*)"?$/);
+        if (expectAbsentMatch) {
+          currentVerification.expect_absent = expectAbsentMatch[1].trim();
+          break;
+        }
+        break;
+      }
     }
+  }
+
+  // Flush any in-progress verification check at EOF
+  if (currentVerification?.name && currentVerification?.run) {
+    verifications.push(currentVerification as VerificationCheck);
   }
 
   return {
@@ -146,6 +210,7 @@ function parseSpec(content: string, filename: string): OvertimeSpec {
     context: contextLines.join("\n").trim(),
     requirements,
     notes: notesLines.join("\n").trim(),
+    verifications,
   };
 }
 
@@ -271,10 +336,32 @@ RULES:
 - If the subtask title or description contains words like "cheap", "lightweight", "no fresh measurements", or "negligible cost": before calling any existing function to satisfy that constraint, trace its call graph (grep the source, follow imports, read the bodies of functions it calls). Then comment on the subtask with what you found — e.g. "getVelocity() calls the API → not cheap". Do this before writing code that depends on the assumption being true.`;
 }
 
-function eAgentPrompt(taskNumber: number, spec: OvertimeSpec, doneFile: string, envContext?: string | null): string {
+export function eAgentPrompt(taskNumber: number, spec: OvertimeSpec, doneFile: string, envContext?: string | null): string {
   const envBlock = envContext
     ? `\nENVIRONMENT CONTEXT:\n${envContext}\n`
     : "";
+
+  const verificationContract = spec.verifications.length > 0
+    ? `\nVERIFICATION CONTRACT — run ALL checks before final sign-off:\n${spec.verifications.map((v, i) => {
+        const lines = [`  ${i + 1}. ${v.name}`, `     run: ${v.run}`];
+        if (v.expect) lines.push(`     expect output to contain: "${v.expect}"`);
+        if (v.expect_absent) lines.push(`     expect output NOT to contain: "${v.expect_absent}"`);
+        return lines.join("\n");
+      }).join("\n")}\n`
+    : "";
+
+  const verificationSignOffStep = spec.verifications.length > 0
+    ? `   h. Run every check in the VERIFICATION CONTRACT (below). A check fails if the command exits non-zero, the expected substring is absent, or a forbidden substring is present. Any failure blocks sign-off — do NOT create the done file.\n`
+    : "";
+
+  const verificationRule = spec.verifications.length > 0
+    ? `- All VERIFICATION CONTRACT checks must pass before sign-off. Run each command, verify the output, and reject if any check fails.\n`
+    : "";
+
+  const boundaryNotesCheck = spec.notes
+    ? `\n      Also check: the spec NOTES say "${spec.notes}". If the notes mention specific files, directories, or paths to avoid, grep the diff stat output for those paths — reject sign-off if any are present.`
+    : "";
+
   return `You are E-Agent, a code reviewer working overnight. You review the work of U-Agent.
 ${envBlock}
 TASK: #${taskNumber} — ${spec.title}
@@ -296,14 +383,17 @@ CYCLE:
 5. FINAL SIGN-OFF — only when ALL subtasks have LGTM comments, perform a comprehensive final review before closing:
 
    a. Run "git diff main...HEAD" to see the ENTIRE branch diff — review every changed file holistically.
-   b. Run the full test suite. If any test fails, do NOT sign off. Reopen the relevant subtask.
+   b. Run the FULL project test suite — not just tests for touched files. Auto-detect the test runner:
+      - Check ENVIRONMENT CONTEXT for a "test command" entry — use that if present.
+      - Otherwise try in order: bun test, npm test, pytest, cargo test, go test ./...
+      Even if all touched-file tests pass, a failing test elsewhere blocks sign-off. Reopen the relevant subtask with the failure output.
    c. Walk through each original requirement one by one. For each, verify the code change actually satisfies it:
 ${spec.requirements.map((r, i) => `      - Requirement ${i + 1}: "${r}"`).join("\n")}
-   d. Check for unintended side effects: were any files modified that shouldn't have been?
+   d. Boundary check — run "git diff main..HEAD --stat" and verify no files outside the spec's scope were modified. If any unexpected files appear in the stat output, reject and reopen the relevant subtask with the list of unexpected files.${boundaryNotesCheck}
    e. Check for regressions: does the existing functionality still work?
    f. Check for security issues: any hardcoded secrets, injection vectors, or unsafe operations?
    g. Check that commits are clean and atomic — no debug code, no commented-out blocks, no leftover TODOs.
-
+${verificationSignOffStep}
    If EVERYTHING passes:
    - Call comment_task on parent #${taskNumber} with a detailed sign-off report:
      "SIGN-OFF: All requirements verified."
@@ -315,16 +405,17 @@ ${spec.requirements.map((r, i) => `      - Requirement ${i + 1}: "${r}"`).join("
    If ANY check fails during final review:
    - Do NOT sign off. Reopen the failing subtask with specific feedback.
    - Do NOT create the done file.
-
+${verificationContract}
 RULES:
 - Be thorough. The human is asleep — you are the last line of defense before they see this work.
 - Focus on correctness: does the code actually satisfy the requirement?
+- Run the FULL project test suite before sign-off — not just tests for touched files. A failure anywhere in the suite blocks sign-off, even if the touched files all pass.
 - Run tests. If they fail, reject.
 - Be specific in rejection feedback — say exactly what to fix.
 - Do not nitpick style. Focus on logic, correctness, edge cases.
 - You cannot edit code. You can only review and comment.
 - The done file (touch command) is critical — it signals the overnight session to stop.
-- Explicitly reject any of the following — reopen the subtask with the message "This routes around the problem instead of fixing it":
+${verificationRule}- Explicitly reject any of the following — reopen the subtask with the message "This routes around the problem instead of fixing it":
   - Placeholder or stub returns (e.g. \`return null\`, \`return []\`, \`return "TODO"\`, \`pass\`, \`throw new Error("not implemented")\`)
   - Workaround code that avoids the actual failure path instead of fixing it
   - Import hacks (re-exporting the wrong type, casting \`as any\`, \`@ts-ignore\`, \`// eslint-disable\`)
@@ -1286,6 +1377,85 @@ function showGuide() {
 `);
 }
 
+// ── Code review ──────────────────────────────────────────────────────
+
+export function buildReviewPrompt(spec: OvertimeSpec, diff: string): string {
+  const requirementsList = spec.requirements.map((r, i) => `  ${i + 1}. ${r}`).join("\n");
+  return `You are an independent code reviewer. Review the following branch diff for semantic bugs.
+
+SPEC: ${spec.title}
+CONTEXT: ${spec.context}
+${spec.notes ? `NOTES: ${spec.notes}\n` : ""}Requirements this branch is meant to satisfy:
+${requirementsList}
+
+Focus ONLY on semantic bugs — not style or formatting:
+- Misread APIs: wrong method names, wrong return type assumptions, wrong argument order
+- Wrong assumptions: value assumed always defined, off-by-one errors, empty-list assumptions
+- Hot-path costs: N+1 queries, unnecessary re-computation per call, blocking I/O in a hot path
+- Logic errors: conditions always true/false, unreachable branches, broken invariants
+- Subtle concurrency bugs: race conditions, missing awaits, shared mutable state
+
+For each issue found, report:
+1. File and approximate line number
+2. What the bug is
+3. Why it is wrong
+4. What the correct behavior should be
+
+If no semantic bugs are found, say so clearly.
+
+BRANCH DIFF (git diff main..HEAD):
+\`\`\`diff
+${diff}
+\`\`\``;
+}
+
+async function reviewOvertime(slug: string) {
+  ensureClaudeInstalled();
+
+  const specPath = join(OVERTIME_DIR, `${slug}.md`);
+  const specFile = Bun.file(specPath);
+  if (!(await specFile.exists())) {
+    console.error(`${c.red}✗${c.reset} No spec file found at ${c.cyan}.astar/overtime/${slug}.md${c.reset}`);
+    process.exit(1);
+  }
+
+  const spec = parseSpec(await specFile.text(), `${slug}.md`);
+
+  // Use the overtime worktree if it exists, otherwise fall back to cwd
+  const worktreePath = join(WORKTREE_DIR, `overtime-${slug}`);
+  const cwd = existsSync(worktreePath) ? worktreePath : process.cwd();
+
+  let diff: string;
+  try {
+    diff = execSync(`git -C "${cwd}" diff main..HEAD`, { stdio: "pipe" }).toString();
+  } catch (e: any) {
+    console.error(`${c.red}✗${c.reset} Failed to get git diff: ${e.message}`);
+    process.exit(1);
+  }
+
+  if (!diff.trim()) {
+    console.log(`${c.yellow}⚠${c.reset} No changes found on branch overtime/${slug} relative to main.`);
+    return;
+  }
+
+  console.log(`${c.dim}Reviewing ${c.white}${spec.title}${c.reset}${c.dim} …${c.reset}\n`);
+
+  const prompt = buildReviewPrompt(spec, diff);
+  const proc = spawn("claude", [
+    "-p", prompt,
+    "--max-turns", "10",
+    "--dangerously-skip-permissions",
+  ], {
+    cwd,
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    proc.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`claude exited with code ${code}`))));
+    proc.on("error", reject);
+  });
+}
+
 // ── Register ────────────────────────────────────────────────────────
 
 export function registerOvertimeCommands(program: Command) {
@@ -1324,6 +1494,13 @@ export function registerOvertimeCommands(program: Command) {
     .command("guide")
     .description("Best practices for writing overnight specs")
     .action(showGuide);
+
+  overtime
+    .command("review <slug>")
+    .description("Run an independent code-review subagent over the branch diff for a spec slug")
+    .action(async (slug: string) => {
+      await reviewOvertime(slug);
+    });
 
   overtime
     .command("stop")
