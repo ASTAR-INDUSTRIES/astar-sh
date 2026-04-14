@@ -6,8 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 ## [Unreleased]
 
 ### Fixed
-- `astar todo team` no longer shows private tasks — the team board is filtered to `team` and `public` visibility only, excluding private tasks of all users (including the caller's own)
-- Private tasks are no longer visible to other users via `GET /tasks` — visibility is now enforced at the database query level and email ownership checks are case-insensitive
+- `astar todo team` no longer shows private tasks — the team board is filtered to `team` and `public` visibility only
+- Private tasks are no longer visible to other users via `GET /tasks` — visibility is now enforced at the database query level
+- `astar todo --monitor` now counts completed subtasks in the "done today" tally
+- `astar todo mine` and `astar todo list` show completed subtasks indented under their open parent tasks
+- `astar` dashboard "Tasks: X open" count now includes open subtasks
 
 ### Added
 - `astar todo "title" --private` creates the task with `visibility=private`; `--public` creates with `visibility=public`; default is `team`

@@ -468,7 +468,7 @@ while true; do
   fi
   CYCLE_NUM=$((CYCLE_NUM + 1))
   CYCLE_STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  TMPOUT=$(mktemp /tmp/claude-cycle-XXXXXX.json)
+  TMPOUT="/tmp/claude-cycle-${name}-$$-$CYCLE_NUM.json"
   echo "$(date '+%Y-%m-%d %H:%M:%S') [${name}] Starting cycle $CYCLE_NUM..."
   claude -p '${escaped}' \\
     --allowedTools "${tools}" \\
