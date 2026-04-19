@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.81] - 2026-04-19
+
 ### Added
 - macOS desktop app under `app/` — Tauri v2 + React window with translucent warm-glass aesthetic, wired directly to `skills-api` (no PTY/CLI dependency). Polls every 10s, supports inline task expansion, comment composer, and close-with-comment for `done` / `won't do`. Done-today section appears below the open list. Search filters titles + IDs live (`/`). Keybinds: `j`/`k`/`g`/`G` move, `o`/`⏎` expand, `x` close as done, `w` close as won't, `c` comment, `r` refresh, `⎋` collapse.
 - In-app sign-in via Microsoft device-code flow — no CLI required for first-time users. App opens the browser at the verification URL, shows the user code, polls for the token, and writes `~/.astar/auth.json` (so the CLI also benefits). Restricts to `@astarconsulting.no`.
