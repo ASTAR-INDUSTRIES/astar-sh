@@ -1,0 +1,81 @@
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  width: 100vw;
+  background: transparent;
+  overflow: hidden;
+  font-family: var(--ui);
+  color: var(--ink);
+}
+
+.quick {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px;
+  background: rgba(250, 246, 233, 0.58);
+  backdrop-filter: blur(22px) saturate(1.2);
+  -webkit-backdrop-filter: blur(22px) saturate(1.2);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 26px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.quick .prompt {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1;
+  text-align: center;
+}
+
+.quick input {
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  color: var(--ink);
+  width: 100%;
+  padding: 2px 0;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.quick input::placeholder {
+  color: var(--ink-faint);
+}
+
+.quick input:disabled {
+  opacity: 0.7;
+}
+
+.quick .hint {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--ink-faint);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.quick .hint.success {
+  color: #3a8c5a;
+}
+
+.quick .hint.error {
+  color: var(--accent);
+}
+
+.quick .hint.submitting {
+  color: var(--ink-faint);
+}

@@ -5,6 +5,16 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+### Added
+- macOS desktop app under `app/` — Tauri v2 + React window with translucent warm-glass aesthetic, wired directly to `skills-api` (no PTY/CLI dependency). Polls every 10s, supports inline task expansion, comment composer, and close-with-comment for `done` / `won't do`. Done-today section appears below the open list. Search filters titles + IDs live (`/`). Keybinds: `j`/`k`/`g`/`G` move, `o`/`⏎` expand, `x` close as done, `w` close as won't, `c` comment, `r` refresh, `⎋` collapse.
+- In-app sign-in via Microsoft device-code flow — no CLI required for first-time users. App opens the browser at the verification URL, shows the user code, polls for the token, and writes `~/.astar/auth.json` (so the CLI also benefits). Restricts to `@astarconsulting.no`.
+- Quick-capture overlay (`Ctrl+Opt+Space` from anywhere) — slim floating pill at the bottom of the active display; type a title, `⏎` creates the task, `⎋` cancels. Uses the global-shortcut plugin and a second always-on-top Tauri window with see-through edges.
+- `POST /tasks/:number/comments` endpoint on skills-api — adds a `commented` audit event for human users (mirrors the MCP `comment_task` shape). `channel` defaults to `"app"`.
+- `addComment(num, comment)` method on the CLI's `AstarAPI` for parity with the new endpoint.
+
+### Changed
+- skills-api CORS: response includes `Access-Control-Allow-Methods` so browser/webview clients can use PATCH/DELETE without preflight failure.
+
 ## [0.0.80] - 2026-04-14
 
 ### Added

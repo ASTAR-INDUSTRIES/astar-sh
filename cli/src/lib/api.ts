@@ -720,6 +720,17 @@ export class AstarAPI {
     return res.json();
   }
 
+  async addComment(num: number, comment: string, channel?: string): Promise<{ ok: boolean }> {
+    const config = await getConfig();
+    const res = await fetch(`${config.apiUrl}/tasks/${num}/comments`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ comment, channel }),
+    });
+    if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+    return res.json();
+  }
+
   async triageTasks(): Promise<Task[]> {
     const data = await this.fetch<{ tasks: Task[] }>("/tasks?triage=true&assigned_to=all");
     return data.tasks;

@@ -20,6 +20,7 @@ System documentation for the astar.sh platform. Each section covers one subsyste
 | [Skills](skills/) | Skill packaging, install/push, versioning, diff | `cli/src/commands/skill.ts` |
 | [MCP](mcp/) | All MCP tools, request flow, agent scope enforcement | `supabase/functions/mcp-server/index.ts` |
 | [CLI](cli/) | Command structure, API client, auth flow | `cli/src/index.ts`, `cli/src/lib/api.ts` |
+| [Desktop](desktop/) | macOS Tauri app — minimal PTY wrapper around `astar todo --monitor` | `app/src-tauri/src/`, `app/src/main.ts` |
 | [ETF](etf/) | Simulated portfolios, Yahoo Finance prices, NAV, benchmark | `cli/src/commands/etf.ts`, `supabase/functions/skills-api/index.ts` |
 | [Overtime](overtime/) | Overnight U-Agent/E-Agent system, spec format, done detection | `cli/src/commands/overtime.ts` |
 

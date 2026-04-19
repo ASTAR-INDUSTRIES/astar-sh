@@ -10,6 +10,7 @@ const SANITY_API = `https://${SANITY_PROJECT_ID}.api.sanity.io/v2024-01-01`;
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
 };
 
 app.options("*", (c) => new Response(null, { headers: corsHeaders }));
@@ -2141,6 +2142,33 @@ app.post("/tasks/:number/links", async (c) => {
   });
 
   return c.json({ ok: true }, 200, corsHeaders);
+});
+
+// ── POST /tasks/:number/comments — add a human comment to a task ────
+app.post("/tasks/:number/comments", async (c) => {
+  const user = await validateMsToken(c.req.raw);
+  if (!user) return c.json({ error: "Unauthorized" }, 401, corsHeaders);
+
+  const num = parseInt(c.req.param("number"));
+  const body = await c.req.json().catch(() => ({}));
+  const comment = (body?.comment ?? "").toString().trim();
+  if (!comment) return c.json({ error: "comment required" }, 400, corsHeaders);
+  if (comment.length > 4000) return c.json({ error: "comment too long" }, 400, corsHeaders);
+
+  const sb = getSupabase();
+  const { data: task } = await sb.from("tasks").select("*").eq("task_number", num).single();
+  if (!task) return c.json({ error: "Task not found" }, 404, corsHeaders);
+  await hydrateRecordsWithProjects(sb, [task]);
+  if (!canAccessTask(task, user, task.project)) return c.json({ error: "Task not found" }, 404, corsHeaders);
+  if (!canModifyTask(task, user)) return c.json({ error: "Only the creator or assignee can comment on this task" }, 403, corsHeaders);
+
+  await logTaskAudit(task.id, num, user.email, user.name, "human", "commented", {
+    state_after: { comment },
+    channel: body?.channel || "app",
+    project_id: task.project_id || null,
+  });
+
+  return c.json({ ok: true }, 201, corsHeaders);
 });
 
 // ── PATCH /tasks/:number/triage — accept or dismiss ─────────────────

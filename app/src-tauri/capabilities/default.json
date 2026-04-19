@@ -1,0 +1,22 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capability for both windows",
+  "windows": ["main", "quick"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-hide",
+    "core:webview:allow-webview-hide",
+    "core:event:default",
+    "global-shortcut:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://owerciqeeelwrqseajqq.supabase.co/*" },
+        { "url": "https://login.microsoftonline.com/*" }
+      ]
+    }
+  ]
+}
