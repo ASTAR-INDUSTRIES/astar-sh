@@ -1,9 +1,4 @@
-import { fetch } from "@tauri-apps/plugin-http";
 import { invoke } from "@tauri-apps/api/core";
-
-const TENANT = "d6af3688-b659-4f90-b701-35246b209b9d";
-const CLIENT = "384f7660-f5e6-4f72-aa24-3be21cad67ed";
-const SCOPES = "openid profile email";
 
 export type DeviceFlow = {
   user_code: string;
@@ -21,21 +16,7 @@ export type Tokens = {
 };
 
 export async function startDeviceFlow(): Promise<DeviceFlow> {
-  const res = await fetch(
-    `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/devicecode`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: CLIENT,
-        scope: SCOPES,
-      }).toString(),
-    },
-  );
-  if (!res.ok) {
-    throw new Error(`devicecode failed: ${res.status} ${await res.text()}`);
-  }
-  return res.json();
+  return invoke<DeviceFlow>("ms_device_code");
 }
 
 export async function pollForTokens(
@@ -53,22 +34,15 @@ export async function pollForTokens(
       throw new Error("device code expired — try again");
     }
 
-    const res = await fetch(
-      `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/token`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-          client_id: CLIENT,
-          device_code: flow.device_code,
-        }).toString(),
-      },
-    );
+    const data = await invoke<{
+      id_token?: string;
+      access_token?: string;
+      expires_in?: number;
+      error?: string;
+      error_description?: string;
+    }>("ms_poll_token", { deviceCode: flow.device_code });
 
-    const data = await res.json();
-
-    if (res.ok && data.id_token) {
+    if (data.id_token) {
       return data as Tokens;
     }
 

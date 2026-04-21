@@ -198,7 +198,7 @@ export const useStore = create<State>((set, get) => ({
       });
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
-        set({ authError: "Session expired — run `astar login` and relaunch." });
+        set({ authError: "Session expired — sign in again." });
         return;
       }
       set({ fetchError: String(e) });
@@ -213,7 +213,7 @@ export const useStore = create<State>((set, get) => ({
       set((s) => ({ detail: { ...s.detail, [num]: detail } }));
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
-        set({ authError: "Session expired — run `astar login` and relaunch." });
+        set({ authError: "Session expired — sign in again." });
       }
     }
   },

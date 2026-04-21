@@ -81,3 +81,68 @@ pub fn open_url(url: String) -> Result<(), String> {
         .map_err(|e| format!("open: {e}"))?;
     Ok(())
 }
+
+// ── Microsoft device-code flow (server-to-server, no Origin header) ──
+//
+// Doing the OAuth call from JS via tauri-plugin-http leaks an
+// `Origin: tauri://localhost` header, which makes Azure AD reject the
+// token redemption with AADSTS9002326. Routing through reqwest from Rust
+// sends a clean server-to-server request without an Origin header.
+
+const MS_TENANT: &str = "d6af3688-b659-4f90-b701-35246b209b9d";
+const MS_CLIENT: &str = "384f7660-f5e6-4f72-aa24-3be21cad67ed";
+const MS_SCOPES: &str = "openid profile email";
+
+#[tauri::command]
+pub async fn ms_device_code() -> Result<serde_json::Value, String> {
+    let url = format!(
+        "https://login.microsoftonline.com/{MS_TENANT}/oauth2/v2.0/devicecode"
+    );
+    let res = reqwest::Client::new()
+        .post(&url)
+        .form(&[("client_id", MS_CLIENT), ("scope", MS_SCOPES)])
+        .send()
+        .await
+        .map_err(|e| format!("devicecode request: {e}"))?;
+    let status = res.status();
+    let body = res
+        .text()
+        .await
+        .map_err(|e| format!("devicecode body: {e}"))?;
+    if !status.is_success() {
+        return Err(format!("devicecode {status}: {body}"));
+    }
+    serde_json::from_str(&body).map_err(|e| format!("devicecode parse: {e}"))
+}
+
+#[tauri::command]
+pub async fn ms_poll_token(device_code: String) -> Result<serde_json::Value, String> {
+    let url = format!(
+        "https://login.microsoftonline.com/{MS_TENANT}/oauth2/v2.0/token"
+    );
+    let res = reqwest::Client::new()
+        .post(&url)
+        .form(&[
+            (
+                "grant_type",
+                "urn:ietf:params:oauth:grant-type:device_code",
+            ),
+            ("client_id", MS_CLIENT),
+            ("device_code", device_code.as_str()),
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("token request: {e}"))?;
+    let status = res.status();
+    let body = res.text().await.map_err(|e| format!("token body: {e}"))?;
+    let v: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("token parse: {e}: {body}"))?;
+    // 200 means we got tokens; non-200 may be `authorization_pending`,
+    // `slow_down`, etc. — return the JSON either way and let the caller
+    // distinguish.
+    if status.is_success() {
+        Ok(v)
+    } else {
+        Ok(v) // includes `error` field — frontend handles it
+    }
+}

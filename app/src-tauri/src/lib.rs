@@ -102,6 +102,8 @@ pub fn run() {
             commands::read_auth,
             commands::save_auth,
             commands::open_url,
+            commands::ms_device_code,
+            commands::ms_poll_token,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
