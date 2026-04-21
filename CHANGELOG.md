@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com)
 
 ## [Unreleased]
 
+## [0.0.82] - 2026-04-21
+
 ### Fixed
 - Desktop app sign-in: route Microsoft device-code OAuth calls through Rust/reqwest instead of the webview's fetch. Avoids the auto-injected `Origin: tauri://localhost` header that triggered Azure AD `AADSTS9002326: Cross-origin token redemption is permitted only for the 'Single-Page Application' client-type`.
 - Desktop app: stale "run `astar login` and relaunch" copy in 401 handlers replaced with "sign in again" — matches the in-app sign-in flow.
